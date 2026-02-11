@@ -3,3 +3,4 @@ tree-sitter-python
 pytest
 smolagents
 pydantic-ai[openai, evals, outlines-vllm-offline, cli, fastmcp, a2a]
+aiogram
