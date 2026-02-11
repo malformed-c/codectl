@@ -1,4 +1,3 @@
-from collections.abc import Generator
 from pprint import pp
 from textwrap import dedent, indent, wrap
 from typing import Any
@@ -7,14 +6,6 @@ from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 import tree_sitter_python as tspython
 
 PY_LANGUAGE = Language(tspython.language())
-
-
-def walk_tree(node: Node) -> Generator[Node, None, None]:
-    yield node
-
-    for child in node.children:
-        yield from walk_tree(child)
-
 
 parser = Parser(PY_LANGUAGE)
 
