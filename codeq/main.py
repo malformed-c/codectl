@@ -474,5 +474,5 @@ if __name__ == "__main__":
     codeq = Codeq.from_source(source)
 
     print(codeq.retrieve(CodeKind.FUNC, "baz", CodePart.NODE))
-    codeq.replace(CodeKind.FUNC, "baz", CodePart.LOGIC, "")
+    codeq.replace(CodeKind.FUNC, "baz", CodePart.LOGIC, "print()")
     print(codeq.retrieve(CodeKind.FUNC, "baz", CodePart.NODE))
