@@ -1,6 +1,0 @@
-tree-sitter
-tree-sitter-python
-pytest
-smolagents[toolkits, vllm, test, dev, vision, litellm]
-pydantic-ai[openai, evals, outlines-vllm-offline, cli, fastmcp, a2a]
-aiogram
