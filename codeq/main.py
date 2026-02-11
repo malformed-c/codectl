@@ -14,8 +14,10 @@ if sys.version_info >= (3, 11):
 
 else:
     from enum import Enum
+
     class StrEnum(str, Enum):
         pass
+
 
 PY_LANGUAGE = Language(tspython.language())
 parser = Parser(PY_LANGUAGE)
@@ -210,26 +212,25 @@ class Codeq:
 
     _file_path: str = "<FILE>"
 
-    def __init__(self, tree: Tree, source: str) -> None:
+    def __init__(self, tree: Tree, source: str, path: str = "<FILE>") -> None:
         self.tree = tree
         self.source_bytes = bytearray(source.encode())
+        self._file_path = path
 
         self._funcs_query = Query(PY_LANGUAGE, self._funcs_query_string)
         self._classes_query = Query(PY_LANGUAGE, self._classes_query_string)
 
     @classmethod
-    def from_source(cls, source: str) -> "Codeq":
+    def from_source(cls, source: str, path: str = "<FILE>") -> "Codeq":
         tree = parser.parse(source.encode())
 
-        return cls(tree, source)
+        return cls(tree, source, path)
 
     @classmethod
     def from_file(cls, file_path: str | Path) -> "Codeq":
         source = Path(file_path).read_text("utf-8")
 
-        cls._file_path = str(Path(file_path).relative_to(Path.cwd()))
-
-        return cls.from_source(source)
+        return cls.from_source(source, str(Path(file_path).relative_to(Path.cwd())))
 
     def file_map(self) -> list[str]:
         functions = self._map_functions()
@@ -519,6 +520,7 @@ class Codeq:
                 if doc_nodes:
                     start = doc_nodes[0].end_byte
 
+                # TODO: Infer indent dynamically
                 return start, end, body_node.start_point[1] + 4
 
             case _:
@@ -549,10 +551,10 @@ class Codeq:
         current = node.parent
         while current is not None:
             if current.type == "class_definition":
-                for child in current.children:
+                name_node = current.child_by_field_name("name")
 
-                    if child.type == "identifier":
-                        return child.text.decode()
+                if name_node:
+                    return name_node.text.decode()
 
                 return None
 
@@ -616,4 +618,4 @@ if __name__ == "__main__":
 
     codeq = Codeq.from_source(source)
 
-    print('\n'.join(codeq.file_map()))
+    print("\n".join(codeq.file_map()))
