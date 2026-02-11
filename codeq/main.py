@@ -1,11 +1,14 @@
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from pprint import pp
+import re
 from textwrap import dedent, indent, wrap
 from typing import TypeAlias
 
 from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 import tree_sitter_python as tspython
+
 
 PY_LANGUAGE = Language(tspython.language())
 parser = Parser(PY_LANGUAGE)
@@ -23,6 +26,10 @@ class TargetNotFoundError(CodeqError):
 
 class MissingCaptureError(CodeqError):
     """Raised when a target exists, but the requested capture is unavailable."""
+
+
+class AmbiguousTargetError(CodeqError):
+    """Raised when a target name resolves to multiple code objects."""
 
 
 class CodeKind(StrEnum):
@@ -98,11 +105,13 @@ class CodeqObject:
 @dataclass(frozen=True)
 class FunctionMapEntry:
     start: int
+    end: int
     name: str
     params: str
     return_type: str
     docstring: str
     decorators: list[str]
+    enclosing_class: str | None
 
     def signature(self) -> str:
         deco_prefix = " ".join(self.decorators) + " " if self.decorators else ""
@@ -130,6 +139,7 @@ class FunctionMapEntry:
 @dataclass(frozen=True)
 class ClassMapEntry:
     start: int
+    end: int
     name: str
     superclasses: str
     docstring: str
@@ -215,16 +225,70 @@ class Codeq:
         return cls.from_source(source)
 
     def file_map(self) -> list[str]:
-        mapped_items: list[tuple[int, str]] = [
-            (entry.start, entry.signature()) for entry in self._map_functions()
-        ]
-        mapped_items.extend(
-            (entry.start, entry.signature()) for entry in self._map_classes()
-        )
+        functions = self._map_functions()
+        classes = self._map_classes()
+        methods_by_class: dict[str, list[FunctionMapEntry]] = {
+            class_entry.name: [] for class_entry in classes
+        }
 
-        return [
-            *(item for _, item in sorted(mapped_items, key=lambda pair: pair[0])),
+        top_level_items: list[tuple[int, str]] = []
+        for entry in functions:
+            if entry.enclosing_class is None:
+                top_level_items.append((entry.start, entry.signature()))
+                continue
+
+            if entry.enclosing_class in methods_by_class:
+                methods_by_class[entry.enclosing_class].append(entry)
+
+        for class_entry in classes:
+            class_lines = [class_entry.signature()]
+            class_methods = sorted(
+                methods_by_class[class_entry.name], key=lambda item: item.start
+            )
+            class_lines.extend(f"    {method.signature()}" for method in class_methods)
+            top_level_items.append((class_entry.start, "\n".join(class_lines)))
+
+        sorted_sections = [
+            item for _, item in sorted(top_level_items, key=lambda pair: pair[0])
         ]
+
+        if not sorted_sections:
+            return []
+
+        mapped: list[str] = []
+        for idx, section in enumerate(sorted_sections):
+            if idx:
+                mapped.append("---")
+
+            mapped.append(section)
+
+        return mapped
+
+    def add_import(self, import_stmt: str) -> bool:
+        statement = import_stmt.strip()
+
+        if not statement:
+            raise ValueError("Import statement cannot be empty")
+
+        if not re.match(r"^(import\s+|from\s+\S+\s+import\s+)", statement):
+            raise ValueError(f"Unsupported import statement: {statement!r}")
+
+        source = self.source_bytes.decode()
+        lines = source.splitlines()
+
+        if statement in {line.strip() for line in lines}:
+            return False
+
+        insert_at = self._import_insert_line(lines)
+        lines.insert(insert_at, statement)
+        new_source = "\n".join(lines)
+        if source.endswith("\n"):
+            new_source += "\n"
+
+        self.source_bytes = bytearray(new_source.encode())
+        self.tree = parser.parse(self.source_bytes)
+
+        return True
 
     def objects(self) -> list[CodeqObject]:
         resources: list[CodeqObject] = [
@@ -266,6 +330,7 @@ class Codeq:
 
             entries_by_id[func_node.id] = FunctionMapEntry(
                 start=func_node.start_byte,
+                end=func_node.end_byte,
                 name=captures["func.name"][0].text.decode(),
                 params=captures["func.params"][0].text.decode(),
                 return_type=(
@@ -274,11 +339,17 @@ class Codeq:
                     else ""
                 ),
                 docstring=(
-                    wrap(captures["func.docstring"][0].text.decode().strip("\"' "), max_lines=1)
+                    " ".join(
+                        wrap(
+                            captures["func.docstring"][0].text.decode().strip("\"' "),
+                            max_lines=1,
+                        )
+                    )
                     if "func.docstring" in captures
                     else ""
                 ),
                 decorators=decorators,
+                enclosing_class=self._enclosing_class_name(func_node),
             )
 
         return list(entries_by_id.values())
@@ -292,6 +363,7 @@ class Codeq:
             entries.append(
                 ClassMapEntry(
                     start=class_node.start_byte,
+                    end=class_node.end_byte,
                     name=captures["class.name"][0].text.decode(),
                     superclasses=(
                         captures["class.superclasses"][0].text.decode()
@@ -317,55 +389,43 @@ class Codeq:
         code_kind = CodeKind.parse(kind)
         code_part = CodePart.parse(what)
 
-        for _, captures in self._matches(code_kind):
-            name_node = captures[f"{code_kind.value}.name"][0]
+        captures = self._resolve_target_captures(code_kind, target)
+        if captures is None:
+            return None
 
-            if name_node.text.decode() != target:
+        match code_part:
+            case CodePart.NODE:
+                node = captures.get(
+                    f"{code_kind.value}.decorated_node",
+                    captures.get(f"{code_kind.value}.node"),
+                )
+                if not node:
+                    return None
 
-                continue
+                return self._decode_node(node[0])
 
-            match code_part:
-                case CodePart.NODE:
-                    node = captures.get(
-                        f"{code_kind.value}.decorated_node",
-                        captures.get(f"{code_kind.value}.node"),
-                    )
-                    if not node:
+            case CodePart.LOGIC:
+                body_nodes = captures.get(f"{code_kind.value}.body")
+                if not body_nodes:
+                    return None
 
-                        return None
+                body_node = body_nodes[0]
+                start = body_node.start_byte
+                doc_nodes = captures.get(f"{code_kind.value}.doc_node")
+                if doc_nodes:
+                    start = doc_nodes[0].end_byte
 
-                    target_node = node[0]
+                return self.source_bytes[start : body_node.end_byte].decode().strip()
 
-                    return self._decode_node(target_node)
+            case _:
+                captured = captures.get(
+                    f"{code_kind.value}.{code_part.value}",
+                    captures.get(f"{code_kind.value}.node"),
+                )
+                if not captured:
+                    return None
 
-                case CodePart.LOGIC:
-                    body_nodes = captures.get(f"{code_kind.value}.body")
-                    if not body_nodes:
-
-                        return None
-
-                    body_node = body_nodes[0]
-                    start = body_node.start_byte
-                    doc_nodes = captures.get(f"{code_kind.value}.doc_node")
-                    if doc_nodes:
-                        start = doc_nodes[0].end_byte
-
-                    return (
-                        self.source_bytes[start : body_node.end_byte].decode().strip()
-                    )
-
-                case _:
-                    captured = captures.get(
-                        f"{code_kind.value}.{code_part.value}",
-                        captures.get(f"{code_kind.value}.node"),
-                    )
-                    if not captured:
-
-                        return None
-
-                    return self._decode_node(captured[0])
-
-        return None
+                return self._decode_node(captured[0])
 
     def replace(
         self,
@@ -377,27 +437,57 @@ class Codeq:
         code_kind = CodeKind.parse(kind)
         code_part = CodePart.parse(what)
 
+        captures = self._resolve_target_captures(code_kind, target)
+        if captures is None:
+            raise TargetNotFoundError(f"{code_kind.value} '{target}' not found")
+
+        start, end, indent_level = self._replacement_bounds(
+            code_kind, code_part, captures
+        )
+        prepared_text = indent(dedent(new_text).strip(), " " * indent_level).lstrip()
+
+        self.source_bytes[start:end] = prepared_text.encode()
+        self.tree = parser.parse(self.source_bytes)
+
+    def _resolve_target_captures(
+        self,
+        code_kind: CodeKind,
+        target: str,
+    ) -> CaptureMap | None:
+        candidates: list[tuple[CaptureMap, str]] = []
+
         for _, captures in self._matches(code_kind):
             name_node = captures[f"{code_kind.value}.name"][0]
+            obj_name = name_node.text.decode()
 
-            if name_node.text.decode() != target:
+            if code_kind is CodeKind.FUNC:
+                func_node = captures["func.node"][0]
+                class_name = self._enclosing_class_name(func_node)
+                fqn = f"{class_name}.{obj_name}" if class_name else obj_name
+
+                if target == fqn or ("." not in target and target == obj_name):
+                    candidates.append((captures, fqn))
 
                 continue
 
-            start, end, indent_level = self._replacement_bounds(
-                code_kind, code_part, captures
-            )
-            prepared_text = indent(
-                dedent(new_text).strip(), " " * indent_level
-            ).lstrip()
+            if target == obj_name:
+                candidates.append((captures, obj_name))
 
-            self.source_bytes[start:end] = prepared_text.encode()
+        if not candidates:
+            return None
 
-            self.tree = parser.parse(self.source_bytes)
+        if len(candidates) == 1:
+            return candidates[0][0]
 
-            return
+        matches = sorted({name for _, name in candidates})
+        if len(matches) == 1:
+            return candidates[0][0]
 
-        raise TargetNotFoundError(f"{code_kind.value} '{target}' not found")
+        raise AmbiguousTargetError(
+            f"Ambiguous {code_kind.value} target '{target}'. "
+            # Add support to FQN for file level funcs
+            f"Matches: {matches}. Use a fully-qualified name for methods, e.g. 'ClassName.method'."
+        )
 
     def _replacement_bounds(
         self,
@@ -448,6 +538,52 @@ class Codeq:
     def _decode_node(self, node: Node) -> str:
         return self.source_bytes[node.start_byte : node.end_byte].decode()
 
+    def _enclosing_class_name(self, node: Node) -> str | None:
+        current = node.parent
+        while current is not None:
+            if current.type == "class_definition":
+                for child in current.children:
+
+                    if child.type == "identifier":
+                        return child.text.decode()
+
+                return None
+
+            current = current.parent
+
+        return None
+
+    def _import_insert_line(self, lines: list[str]) -> int:
+        start = 0
+        if lines and lines[0].startswith("#!"):
+            start = 1
+
+        if len(lines) > start and re.match(r"^#\s*-\*-\s*coding:", lines[start]):
+            start += 1
+
+        source = "\n".join(lines)
+        tree = parser.parse(source.encode())
+        root = tree.root_node
+        children = [
+            child for child in root.children if child.type not in {"comment", "\n"}
+        ]
+        if children and children[0].type == "expression_statement":
+            expr = children[0]
+            first_child = expr.children[0] if expr.children else None
+            if first_child and first_child.type == "string":
+                start = max(start, expr.end_point[0] + 1)
+
+        import_end = start
+        for child in root.children:
+
+            if child.start_point[0] < start:
+                continue
+
+            if child.type in {"import_statement", "import_from_statement"}:
+                import_end = max(import_end, child.end_point[0] + 1)
+
+        return import_end if import_end > start else start
+
 
 if __name__ == "__main__":
     source = dedent(
@@ -473,6 +609,4 @@ if __name__ == "__main__":
 
     codeq = Codeq.from_source(source)
 
-    print(codeq.retrieve(CodeKind.FUNC, "baz", CodePart.NODE))
-    codeq.replace(CodeKind.FUNC, "baz", CodePart.LOGIC, "print()")
-    print(codeq.retrieve(CodeKind.FUNC, "baz", CodePart.NODE))
+    print(' '.join(codeq.file_map()))
