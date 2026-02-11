@@ -1,14 +1,21 @@
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from pprint import pp
 import re
+import sys
 from textwrap import dedent, indent, wrap
 from typing import TypeAlias
 
 from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 import tree_sitter_python as tspython
 
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+
+else:
+    from enum import Enum
+    class StrEnum(str, Enum):
+        pass
 
 PY_LANGUAGE = Language(tspython.language())
 parser = Parser(PY_LANGUAGE)
@@ -609,4 +616,4 @@ if __name__ == "__main__":
 
     codeq = Codeq.from_source(source)
 
-    print(' '.join(codeq.file_map()))
+    print('\n'.join(codeq.file_map()))
