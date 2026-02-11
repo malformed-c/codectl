@@ -1,13 +1,32 @@
+[build-system]
+    requires      = ["setuptools>=69", "wheel"]
+    build-backend = "setuptools.build_meta"
+
 [project]
-name = "codectl"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.14"
-dependencies = [
-    "aiogram>=3.25.0",
-    "pytest>=9.0.2",
-    "smolagents[litellm]>=1.24.0",
-    "tree-sitter>=0.25.2",
-    "tree-sitter-python>=0.25.0",
-]
+    name = "codectl"
+    version = "0.1.0"
+    description = "Add your description here"
+    readme = "README.md"
+    requires-python = ">=3.14"
+    dependencies = [
+        "aiogram>=3.25.0",
+        "pytest>=9.0.2",
+        "smolagents[litellm]>=1.24.0",
+        "tree-sitter>=0.25.2",
+        "tree-sitter-python>=0.25.0",
+        "typer>=0.16.1",
+    ]
+
+    [project.scripts]
+        codectl   = "main:app"
+        run-tests = "pytest:main"
+
+[tool.setuptools]
+    packages   = ["codeq", "agent"]
+    py-modules = ["main"]
+
+[tool.pytest.ini_options]
+    pythonpath = ["."]
+
+[tool.uv]
+    package = true

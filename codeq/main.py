@@ -228,9 +228,35 @@ class Codeq:
 
     @classmethod
     def from_file(cls, file_path: str | Path) -> "Codeq":
-        source = Path(file_path).read_text("utf-8")
+        source_path = Path(file_path)
+        source = source_path.read_text("utf-8")
 
-        return cls.from_source(source, str(Path(file_path).relative_to(Path.cwd())))
+        try:
+            display_path = str(source_path.relative_to(Path.cwd()))
+        except ValueError:
+            display_path = str(source_path)
+
+        return cls.from_source(source, display_path)
+
+    def write_file(self, file_path: str | Path | None = None) -> Path:
+        destination = self._resolve_destination(file_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        if destination.exists():
+            raise FileExistsError(
+                f"Refusing to overwrite existing file: {destination}"
+            )
+
+        destination.write_text(self.source_bytes.decode(), "utf-8")
+
+        return destination
+
+    def overwrite_file(self, file_path: str | Path | None = None) -> Path:
+        destination = self._resolve_destination(file_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(self.source_bytes.decode(), "utf-8")
+
+        return destination
 
     def file_map(self) -> list[str]:
         functions = self._map_functions()
@@ -592,6 +618,18 @@ class Codeq:
                 import_end = max(import_end, child.end_point[0] + 1)
 
         return import_end if import_end > start else start
+
+    def _resolve_destination(self, file_path: str | Path | None) -> Path:
+        if file_path is not None:
+            return Path(file_path)
+
+        if self._file_path == "<FILE>":
+            raise ValueError(
+                "No destination file is known for this Codeq instance. "
+                "Pass file_path explicitly."
+            )
+
+        return Path(self._file_path)
 
 
 if __name__ == "__main__":
