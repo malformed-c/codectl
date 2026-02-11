@@ -1,57 +1,156 @@
-from pprint import pp
+from dataclasses import dataclass
+from enum import StrEnum
+from pathlib import Path
 from textwrap import dedent, indent, wrap
-from typing import Any
+from typing import TypeAlias
 
 from tree_sitter import Language, Node, Parser, Query, QueryCursor, Tree
 import tree_sitter_python as tspython
 
 PY_LANGUAGE = Language(tspython.language())
-
 parser = Parser(PY_LANGUAGE)
 
-source = dedent(
-    '''
-                def foo(bar: bool):
-                    """It's so cool function that I want to write a very long
-                    Docstring about it, It's cool, efficient and work just like magic
-                    """
-                    if bar:
-                        baz()
+CaptureMap: TypeAlias = dict[str, list[Node]]
 
-                def baz() -> bool:
-                    """
-                    Very
-                    Cool
-                    Function
-                    """
-                    pass
 
-                def get_user(id: int) -> dict:
-                    """Gets user"""
-                    if id == 0:
-                        pp(id)
+class CodeqError(Exception):
+    """Base exception for Codeq errors."""
 
-                    return {"id": id}
 
-                @protected
-                @imaginary
-                def set_user(data: dict[str, Any]):
-                    pass
-                    """Should create user"""
+class TargetNotFoundError(CodeqError):
+    """Raised when a requested function/class target does not exist."""
 
-                @app.route("/login")
-                @limiter.limit("5/minute")
-                def login():
-                    """Auth user"""
-            '''
-)
 
-tree = parser.parse(
-    bytes(
-        source,
-        "utf8",
-    )
-)
+class MissingCaptureError(CodeqError):
+    """Raised when a target exists, but the requested capture is unavailable."""
+
+
+class CodeKind(StrEnum):
+    FUNC = "func"
+    CLASS = "class"
+
+    @classmethod
+    def parse(cls, value: "str | CodeKind") -> "CodeKind":
+        if isinstance(value, cls):
+            return value
+
+        try:
+            return cls(value)
+
+        except ValueError as exc:
+            raise ValueError(f"Unsupported kind: {value!r}") from exc
+
+
+class CodePart(StrEnum):
+    NODE = "node"
+    BODY = "body"
+    LOGIC = "logic"
+    DOCSTRING = "docstring"
+    PARAMS = "params"
+    RETURN_TYPE = "return_type"
+    SUPERCLASSES = "superclasses"
+
+    @classmethod
+    def parse(cls, value: "str | CodePart") -> "CodePart":
+        if isinstance(value, cls):
+            return value
+
+        try:
+            return cls(value)
+
+        except ValueError as exc:
+            raise ValueError(f"Unsupported part: {value!r}") from exc
+
+
+class ResourceKind(StrEnum):
+    FUNCTION = "Function"
+    CLASS = "Class"
+
+
+@dataclass(frozen=True)
+class ObjectMeta:
+    name: str
+    offset: int
+
+
+@dataclass(frozen=True)
+class FunctionSpec:
+    params: str
+    return_type: str
+    docstring: str
+    decorators: list[str]
+
+
+@dataclass(frozen=True)
+class ClassSpec:
+    superclasses: str
+    docstring: str
+
+
+@dataclass(frozen=True)
+class CodeqObject:
+    api_version: str
+    kind: ResourceKind
+    metadata: ObjectMeta
+    spec: FunctionSpec | ClassSpec
+
+
+@dataclass(frozen=True)
+class FunctionMapEntry:
+    start: int
+    name: str
+    params: str
+    return_type: str
+    docstring: str
+    decorators: list[str]
+
+    def signature(self) -> str:
+        deco_prefix = " ".join(self.decorators) + " " if self.decorators else ""
+        ret_suffix = f" -> {self.return_type}" if self.return_type else ""
+        doc_suffix = (
+            f"  # {' '.join(self.docstring.split())[:50]}" if self.docstring else ""
+        )
+
+        return f"{deco_prefix}def {self.name}{self.params}{ret_suffix}{doc_suffix}"
+
+    def to_resource(self) -> CodeqObject:
+        return CodeqObject(
+            api_version="codeq/v1",
+            kind=ResourceKind.FUNCTION,
+            metadata=ObjectMeta(name=self.name, offset=self.start),
+            spec=FunctionSpec(
+                params=self.params,
+                return_type=self.return_type,
+                docstring=self.docstring,
+                decorators=self.decorators,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ClassMapEntry:
+    start: int
+    name: str
+    superclasses: str
+    docstring: str
+
+    def signature(self) -> str:
+        sig = f"class {self.name}{self.superclasses}:"
+        if self.docstring:
+            sig += f"  # {' '.join(self.docstring.split())[:50]}"
+
+        return sig
+
+    def to_resource(self) -> CodeqObject:
+        return CodeqObject(
+            api_version="codeq/v1",
+            kind=ResourceKind.CLASS,
+            metadata=ObjectMeta(name=self.name, offset=self.start),
+            spec=ClassSpec(
+                superclasses=self.superclasses,
+                docstring=self.docstring,
+            ),
+        )
 
 
 class Codeq:
@@ -79,19 +178,20 @@ class Codeq:
         ) @func.node
         """
     )
-    _funcs_query: Query
 
     _classes_query_string = dedent(
         """
         (class_definition
             name: (identifier) @class.name
+            superclasses: (argument_list)? @class.superclasses
+            body: (block
+                . (expression_statement (string) @class.docstring)? @class.doc_node
+            ) @class.body
         ) @class.node
         """
     )
-    _classes_query: Query
 
-    tree: Tree
-    source_bytes: bytearray
+    _file_path: str = "<FILE>"
 
     def __init__(self, tree: Tree, source: str) -> None:
         self.tree = tree
@@ -100,213 +200,279 @@ class Codeq:
         self._funcs_query = Query(PY_LANGUAGE, self._funcs_query_string)
         self._classes_query = Query(PY_LANGUAGE, self._classes_query_string)
 
+    @classmethod
+    def from_source(cls, source: str) -> "Codeq":
+        tree = parser.parse(source.encode())
+
+        return cls(tree, source)
+
+    @classmethod
+    def from_file(cls, file_path: str | Path) -> "Codeq":
+        source = Path(file_path).read_text("utf-8")
+
+        cls._file_path = str(Path(file_path).relative_to(Path.cwd()))
+
+        return cls.from_source(source)
+
     def file_map(self) -> list[str]:
-        # TODO: Add classes
-        result_map = ["<File WIP>"]
+        mapped_items: list[tuple[int, str]] = [
+            (entry.start, entry.signature()) for entry in self._map_functions()
+        ]
+        mapped_items.extend(
+            (entry.start, entry.signature()) for entry in self._map_classes()
+        )
 
-        qcur = QueryCursor(self._funcs_query)
+        return [
+            *(item for _, item in sorted(mapped_items, key=lambda pair: pair[0])),
+        ]
 
-        matches = qcur.matches(self.tree.root_node)
+    def objects(self) -> list[CodeqObject]:
+        resources: list[CodeqObject] = [
+            entry.to_resource() for entry in self._map_functions()
+        ]
+        resources.extend(entry.to_resource() for entry in self._map_classes())
 
-        signatures: list[str] = []
-        functions_data: dict[str, Any] = {}
+        return sorted(resources, key=lambda resource: resource.metadata.offset)
 
-        for match in matches:
-            # match: tuple(pattern_index, captures_dict)
-            # captures_dict: {'func.name': [node], 'func.params': [node], ...}
-            captures = match[1]
+    def _query_for(self, kind: CodeKind) -> Query:
+        match kind:
+            case CodeKind.FUNC:
+                return self._funcs_query
 
+            case CodeKind.CLASS:
+                return self._classes_query
+
+    def _matches(self, kind: CodeKind) -> list[tuple[int, CaptureMap]]:
+        qcur = QueryCursor(self._query_for(kind))
+
+        return list(qcur.matches(self.tree.root_node))
+
+    def _map_functions(self) -> list[FunctionMapEntry]:
+        entries_by_id: dict[int, FunctionMapEntry] = {}
+
+        for _, captures in self._matches(CodeKind.FUNC):
             func_node = captures["func.node"][0]
 
-            node_id = func_node.id
+            if func_node.id in entries_by_id:
 
-            if node_id not in functions_data:
-                decorators = []
-                if "func.decorated_node" in captures:
-                    parent = captures["func.decorated_node"][0]
-                    for child in parent.children:
-                        if child.type == "decorator":
-                            decorators.append(child.text.decode().strip())
+                continue
 
-                functions_data[node_id] = {
-                    "name": captures["func.name"][0].text.decode(),
-                    "params": captures["func.params"][0].text.decode(),
-                    "ret": (
-                        captures["func.return_type"][0].text.decode()
-                        if "func.return_type" in captures
-                        else ""
-                    ),
-                    "doc": (
-                        captures["func.docstring"][0].text.decode().strip("\"' ")
-                        if "func.docstring" in captures
-                        else ""
-                    ),
-                    "decs": decorators,
-                }
+            decorators: list[str] = []
+            decorated_node = captures.get("func.decorated_node")
+            if decorated_node:
+                for child in decorated_node[0].children:
+                    if child.type == "decorator":
+                        decorators.append(child.text.decode().strip())
 
-        for fd in functions_data.values():
-            deco_prefix = " ".join(fd["decs"]) + " " if fd["decs"] else ""
-            doc_suffix = f"  # {' '.join(fd['doc'].split())[:50]}" if fd["doc"] else ""
-            ret_suffix = f" -> {fd['ret']}" if fd["ret"] else ""
-
-            result_map.append(
-                f"{deco_prefix}def {fd['name']}{fd['params']}{ret_suffix}{doc_suffix}"
+            entries_by_id[func_node.id] = FunctionMapEntry(
+                start=func_node.start_byte,
+                name=captures["func.name"][0].text.decode(),
+                params=captures["func.params"][0].text.decode(),
+                return_type=(
+                    captures["func.return_type"][0].text.decode()
+                    if "func.return_type" in captures
+                    else ""
+                ),
+                docstring=(
+                    wrap(captures["func.docstring"][0].text.decode().strip("\"' "), max_lines=1)
+                    if "func.docstring" in captures
+                    else ""
+                ),
+                decorators=decorators,
             )
 
-        return result_map
+        return list(entries_by_id.values())
 
-    def retrieve(self, kind: str, target: str, what: str) -> str:
-        """
-        kind: "func" or "class"
-        target: identificator
-        what: "node", "body", "logic" or "docstring"
-        """
-        # TODO: Refactor DRY
-        query = self._funcs_query if kind == "func" else self._classes_query
+    def _map_classes(self) -> list[ClassMapEntry]:
+        entries: list[ClassMapEntry] = []
 
-        qcur = QueryCursor(query)
-        matches = qcur.matches(self.tree.root_node)
+        for _, captures in self._matches(CodeKind.CLASS):
+            class_node = captures["class.node"][0]
 
-        for match in matches:
-            captures = match[1]
-            name_node = captures[f"{kind}.name"][0]
+            entries.append(
+                ClassMapEntry(
+                    start=class_node.start_byte,
+                    name=captures["class.name"][0].text.decode(),
+                    superclasses=(
+                        captures["class.superclasses"][0].text.decode()
+                        if "class.superclasses" in captures
+                        else ""
+                    ),
+                    docstring=(
+                        captures["class.docstring"][0].text.decode().strip("\"' ")
+                        if "class.docstring" in captures
+                        else ""
+                    ),
+                )
+            )
 
-            if name_node.text.decode() == target:
-                if what == "node":
-                    target_node = captures.get(
-                        f"{kind}.decorated_node", captures.get(f"{kind}.node")
-                    )[0]
+        return entries
 
-                elif what == "logic":
-                    body_node = captures.get(f"{kind}.body")[0]
-                    if f"{kind}.doc_node" in captures:
-                        start = captures[f"{kind}.doc_node"][0].end_byte
+    def retrieve(
+        self,
+        kind: str | CodeKind,
+        target: str,
+        what: str | CodePart,
+    ) -> str | None:
+        code_kind = CodeKind.parse(kind)
+        code_part = CodePart.parse(what)
 
-                    else:
-                        start = body_node.start_byte
+        for _, captures in self._matches(code_kind):
+            name_node = captures[f"{code_kind.value}.name"][0]
+
+            if name_node.text.decode() != target:
+
+                continue
+
+            match code_part:
+                case CodePart.NODE:
+                    node = captures.get(
+                        f"{code_kind.value}.decorated_node",
+                        captures.get(f"{code_kind.value}.node"),
+                    )
+                    if not node:
+
+                        return None
+
+                    target_node = node[0]
+
+                    return self._decode_node(target_node)
+
+                case CodePart.LOGIC:
+                    body_nodes = captures.get(f"{code_kind.value}.body")
+                    if not body_nodes:
+
+                        return None
+
+                    body_node = body_nodes[0]
+                    start = body_node.start_byte
+                    doc_nodes = captures.get(f"{code_kind.value}.doc_node")
+                    if doc_nodes:
+                        start = doc_nodes[0].end_byte
 
                     return (
                         self.source_bytes[start : body_node.end_byte].decode().strip()
                     )
 
-                else:
-                    target_node = captures.get(
-                        f"{kind}.{what}", captures.get(f"{kind}.node")
-                    )[0]
+                case _:
+                    captured = captures.get(
+                        f"{code_kind.value}.{code_part.value}",
+                        captures.get(f"{code_kind.value}.node"),
+                    )
+                    if not captured:
 
-                return self.source_bytes[
-                    target_node.start_byte : target_node.end_byte
-                ].decode()
+                        return None
+
+                    return self._decode_node(captured[0])
 
         return None
 
-    def replace(self, kind: str, target: str, what: str, new_text: str) -> None:
-        query = self._funcs_query if kind == "func" else self._classes_query
+    def replace(
+        self,
+        kind: str | CodeKind,
+        target: str,
+        what: str | CodePart,
+        new_text: str,
+    ) -> None:
+        code_kind = CodeKind.parse(kind)
+        code_part = CodePart.parse(what)
 
-        qcur = QueryCursor(query)
-        matches = qcur.matches(self.tree.root_node)
-
-        for match in matches:
-            captures = match[1]
-            name_node = captures[f"{kind}.name"][0]
+        for _, captures in self._matches(code_kind):
+            name_node = captures[f"{code_kind.value}.name"][0]
 
             if name_node.text.decode() != target:
+
                 continue
 
-            capture_name = f"{kind}.{what}"
-
-            if capture_name not in captures:
-                if what == "logic" and f"{kind}.body" in captures:
-                    capture_name = f"{kind}.body"
-
-                else:
-                    # TODO: Support adding nodes
-                    available = [capture.split(".")[1] for capture in captures.keys()]
-                    if "body" in available:
-                        available.append("logic")
-
-                    raise Exception(
-                        f"Target found, but {what} is missing and adding it is unsupported\nAvailable captures: {available}"
-                    )
-
-            target_node = captures[capture_name][0]
-
-            indent_level = captures[capture_name][0].start_point[1]
-
+            start, end, indent_level = self._replacement_bounds(
+                code_kind, code_part, captures
+            )
             prepared_text = indent(
                 dedent(new_text).strip(), " " * indent_level
             ).lstrip()
 
-            new_bytes = prepared_text.encode()
-            start, end = target_node.start_byte, target_node.end_byte
-
-            self.source_bytes[start:end] = new_bytes
+            self.source_bytes[start:end] = prepared_text.encode()
 
             self.tree = parser.parse(self.source_bytes)
 
             return
 
+        raise TargetNotFoundError(f"{code_kind.value} '{target}' not found")
 
-codeq = Codeq(tree, source)
+    def _replacement_bounds(
+        self,
+        code_kind: CodeKind,
+        code_part: CodePart,
+        captures: CaptureMap,
+    ) -> tuple[int, int, int]:
+        match code_part:
+            case CodePart.LOGIC:
+                body_nodes = captures.get(f"{code_kind.value}.body")
+                if not body_nodes:
 
-print("File map:")
-for sig in codeq.file_map():
-    pp(sig)
+                    raise MissingCaptureError(
+                        f"Target found, but {code_part.value} is missing"
+                    )
 
-# pp("--- RETRIEVED CODE ---")
-# print(codeq.retrieve("func", "foo", "logic"))
-# print(codeq.retrieve("func", "baz", "logic"))
-# print(codeq.retrieve("func", "get_user", "logic"))
-# print(codeq.retrieve("func", "set_user", "logic"))
-# pp("--- EDITING CODE ---")
-# codeq.replace(
-#     "func",
-#     "get_user",
-#     "body",
-#     dedent(
-#         """
-#     if id == 1:
-#         pp(id)
+                body_node = body_nodes[0]
+                start = body_node.start_byte
+                end = body_node.end_byte
 
-#     return {"id": id}
-#     """
-#     ),
-# )
-# codeq.replace(
-#     "func",
-#     "set_user",
-#     "body",
-#     dedent(
-#         """
-#     if data:
-#         pp(data)
+                doc_nodes = captures.get(f"{code_kind.value}.doc_node")
+                if doc_nodes:
+                    start = doc_nodes[0].end_byte
 
-#     return
-#     """
-#     ),
-# )
-# print(codeq.retrieve("func", "get_user", "logic"))
-# print()
-# print(codeq.retrieve("func", "set_user", "logic"))
+                return start, end, body_node.start_point[1] + 4
 
-# print(codeq.source_bytes.decode())
+            case _:
+                capture_name = f"{code_kind.value}.{code_part.value}"
+                target_nodes = captures.get(capture_name)
+                if not target_nodes:
+                    available = [capture.split(".")[1] for capture in captures]
+                    if "body" in available:
+                        available.append("logic")
 
-print("Retrieving code only")
-print(codeq.retrieve("func", "set_user", "logic"))
-print("\nEditing")
-codeq.replace(
-    "func",
-    "set_user",
-    "body",
-    dedent(
-        """
-        if data:
-            pp(data)
+                    raise MissingCaptureError(
+                        f"Target found, but {code_part.value} is missing and adding it is unsupported\n"
+                        f"Available captures: {available}"
+                    )
 
-        return
-        """
-    ),
-)
-print("Retrieving node")
-print(codeq.retrieve("func", "set_user", "node"))
-print(codeq.retrieve("func", "login", "node"))
+                target_node = target_nodes[0]
+
+                return (
+                    target_node.start_byte,
+                    target_node.end_byte,
+                    target_node.start_point[1],
+                )
+
+    def _decode_node(self, node: Node) -> str:
+        return self.source_bytes[node.start_byte : node.end_byte].decode()
+
+
+if __name__ == "__main__":
+    source = dedent(
+        '''
+        class Example:
+            """Simple example class"""
+
+            @api.path(/protected)
+            def baz():
+                pass
+
+        @protected
+        @api.path(/protected)
+        @ratelimit(50)
+        def foo(bar: bool) -> bool:
+            """It's so cool function"""
+            if bar:
+                return True
+
+            return False
+        '''
+    )
+
+    codeq = Codeq.from_source(source)
+
+    print(codeq.retrieve(CodeKind.FUNC, "baz", CodePart.NODE))
+    codeq.replace(CodeKind.FUNC, "baz", CodePart.LOGIC, "")
+    print(codeq.retrieve(CodeKind.FUNC, "baz", CodePart.NODE))
