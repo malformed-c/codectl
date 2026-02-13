@@ -10,8 +10,10 @@
     "typescript": "^6.0.0-beta"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.30",
     "ai": "^6.0.86",
     "dotenv": "^17.3.1",
+    "grammy": "^1.40.0",
     "zod": "^4.3.6"
   }
 }
