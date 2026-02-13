@@ -72,15 +72,17 @@ export function stringifyContent(content: unknown): string {
   return String(content)
 }
 
-export function buildRenderedPrompt(messages: Message[], markers: PromptMarkers): string {
+// TODO support CodePlan
+export function buildRenderedPrompt(messages: Message[], markers: PromptMarkers): string[] {
   const rendered: string[] = []
 
   for (const message of messages) {
     const role = message.role ?? 'unknown'
+
     const text = stringifyContent(message.content)
 
     if (role === 'system') {
-      rendered.push(`${markers.systemOpen}${text}\n${markers.systemClose}`)
+      rendered.push(`${markers.systemOpen}${text}${markers.systemClose}`)
 
       continue
     }
@@ -96,10 +98,7 @@ export function buildRenderedPrompt(messages: Message[], markers: PromptMarkers)
 
       continue
     }
-
-    const name = message.name ? ` name=${message.name}` : ''
-    rendered.push(`[${role.toUpperCase()}${name}]\n${text}\n`)
   }
 
-  return rendered.join('')
+  return rendered
 }
