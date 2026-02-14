@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { mkdir } from 'fs/promises'
 import { History, Message } from './messages'
 
 export class HistoryManager {
@@ -7,23 +7,27 @@ export class HistoryManager {
 
   constructor(historyPath: string) {
     this.historyPath = historyPath
-    if (!existsSync(this.historyPath)) {
-      mkdirSync(this.historyPath, { recursive: true })
-    }
   }
 
-  load(id: string): History {
+  private async ensureDirectory(): Promise<void> {
+    await mkdir(this.historyPath, { recursive: true })
+  }
+
+  async load(id: string): Promise<History> {
     const filePath = join(this.historyPath, `${id}.json`)
-    if (!existsSync(filePath)) {
+    const file = Bun.file(filePath)
+
+    if (!(await file.exists())) {
       return { id, messages: [] }
     }
-    const content = readFileSync(filePath, 'utf8')
-    return JSON.parse(content) as History
+
+    return await file.json() as History
   }
 
-  save(history: History): void {
+  async save(history: History): Promise<void> {
+    await this.ensureDirectory()
     const filePath = join(this.historyPath, `${history.id}.json`)
-    writeFileSync(filePath, JSON.stringify(history, null, 2), 'utf8')
+    await Bun.write(filePath, JSON.stringify(history, null, 2))
   }
 
   addMessage(history: History, message: Message): History {
