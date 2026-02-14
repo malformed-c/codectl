@@ -1,11 +1,31 @@
 export type Message = {
-  role: string
+  role: 'system' | 'user' | 'assistant'
   content: string
-  name: string
+  reasoning?: string
+  name?: string
 }
 
 export type ProviderBody = Record<string, unknown> & {
   messages?: Message[]
+}
+
+export type ModelProfile = {
+  name: string
+  markers: PromptMarkers
+  parameters: Record<string, any>
+}
+
+export type Config = {
+  api_server: string
+  api_type: string
+  history_path: string
+  default_model: string
+  available_models: string[]
+}
+
+export type History = {
+  id: string
+  messages: Message[]
 }
 
 export type PromptMarkers = {
@@ -94,7 +114,10 @@ export function buildRenderedPrompt(messages: Message[], markers: PromptMarkers)
     }
 
     if (role === 'assistant') {
-      rendered.push(`${markers.modelOpen}${text}${markers.modelClose}`)
+      const reasoningText = message.reasoning && markers.reasoningOpen && markers.reasoningClose
+        ? `${markers.reasoningOpen}${message.reasoning}${markers.reasoningClose}`
+        : ''
+      rendered.push(`${markers.modelOpen}${reasoningText}${text}${markers.modelClose}`)
 
       continue
     }
