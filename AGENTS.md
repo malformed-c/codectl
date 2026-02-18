@@ -2,5 +2,5 @@
 
 ## Repository-wide instructions
 
-- Frontend written with Deno
+- Frontend written with Bun
 - Backend written with Python
