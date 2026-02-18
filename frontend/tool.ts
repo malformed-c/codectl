@@ -37,7 +37,7 @@ export type ToolResult = {
   error?: string
 }
 
-export type ToolFormat = "json" | "xml" | "prose"
+export type ToolFormat = "json" | "typescript" | "python" | "xml" | "prose"
 
 // --- YAML loader ---
 
@@ -46,9 +46,7 @@ export type ToolFormat = "json" | "xml" | "prose"
  * Bun has built-in YAML.
  */
 export async function loadTool(filePath: string): Promise<ToolDefinition> {
-  const file = Bun.file(filePath)
-  const text = await file.text()
-
+  const text = await Bun.file(filePath).text()
   const raw = YAML.parse(text) as ToolDefinition
 
   if (!raw.name || !raw.description || !raw.parameters) {
@@ -76,10 +74,14 @@ export async function loadToolsDir(dirPath: string): Promise<ToolDefinition[]> {
 export function renderTools(tools: ToolDefinition[], format: ToolFormat = "json"): string {
   switch (format) {
     case "json": return renderJson(tools)
+    case "typescript": return renderTypeScript(tools)
+    case "python": return renderPython(tools)
     case "xml": return renderXml(tools)
     case "prose": return renderProse(tools)
   }
 }
+
+// --- JSON -----
 
 function renderJson(tools: ToolDefinition[]): string {
   return JSON.stringify(
@@ -92,6 +94,95 @@ function renderJson(tools: ToolDefinition[]): string {
     2
   )
 }
+
+// --- Type mapping helpers ---
+
+function jsonTypeToTs(prop: JsonSchemaProperty): string {
+  if (prop.enum) return prop.enum.map((v) => JSON.stringify(v)).join(" | ")
+
+  switch (prop.type) {
+    case "string": return "string"
+    case "number":
+    case "integer": return "number"
+    case "boolean": return "boolean"
+    case "array": return prop.items ? `${jsonTypeToTs(prop.items)}[]` : "unknown[]"
+    case "object": return "Record<string, unknown>"
+
+    default: return "unknown"
+  }
+}
+
+function jsonTypeToPy(prop: JsonSchemaProperty): string {
+  if (prop.enum) return `Literal[${prop.enum.map((v) => JSON.stringify(v)).join(", ")}]`
+
+  switch (prop.type) {
+    case "string": return "str"
+    case "number": return "float"
+    case "integer": return "int"
+    case "boolean": return "bool"
+    case "array": return prop.items ? `list[${jsonTypeToPy(prop.items)}]` : "list"
+    case "object": return "dict"
+
+    default: return "Any"
+  }
+}
+
+// --- TypeScript -----
+
+function renderTypeScript(tools: ToolDefinition[]): string {
+  return tools.map((tool) => {
+    const { properties, required = [] } = tool.parameters
+    const req = new Set(required)
+
+    const params = Object.entries(properties).map(([name, prop], i, arr) => {
+      const comma = i < arr.length - 1 ? "," : ""
+      const comment = prop.description ? `  // ${prop.description}` : ""
+
+      return `  ${name}${req.has(name) ? "" : "?"}: ${jsonTypeToTs(prop)}${comma}${comment}`
+    })
+
+    return [
+      `/** ${tool.description} */`,
+      `function ${tool.name}(`,
+      ...params,
+      `): void`,
+    ].join("\n")
+  }).join("\n\n")
+}
+
+// --- Python ---
+
+function renderPython(tools: ToolDefinition[]): string {
+  const allProps = tools.flatMap((t) => Object.values(t.parameters.properties))
+  const typings = [
+    ...(allProps.some((p) => p.enum) ? ["Literal"] : []),
+    ...(allProps.some((p) => p.type === "object") ? ["Any"] : []),
+  ]
+  const header = typings.length ? [`from typing import ${typings.join(", ")}`, ""] : []
+
+  const fns = tools.map((tool) => {
+    const { properties, required = [] } = tool.parameters
+    const req = new Set(required)
+
+    const params = Object.entries(properties)
+      .sort(([a], [b]) => (req.has(a) ? 0 : 1) - (req.has(b) ? 0 : 1))
+      .map(([name, prop]) => {
+        const pyType = jsonTypeToPy(prop)
+
+        return req.has(name) ? `${name}: ${pyType}` : `${name}: ${pyType} = None`
+      })
+
+    return [
+      `def ${tool.name}(${params.join(", ")}) -> None:`,
+      `    """${tool.description}"""`,
+      `    ...`,
+    ].join("\n")
+  })
+
+  return [...header, ...fns].join("\n\n")
+}
+
+// --- Stubs ----
 
 function renderXml(_tools: ToolDefinition[]): string {
   // TODO: implement XML rendering
@@ -171,8 +262,14 @@ export const ModeTool: ToolDefinition = {
 // --- Smoke test ---
 
 if (import.meta.main) {
-  console.log("=== renderTools (json) ===")
+  console.log("=== json ===")
   console.log(renderTools([ModeTool], "json"))
+
+  console.log("\n=== typescript ===")
+  console.log(renderTools([ModeTool], "typescript"))
+
+  console.log("\n=== python ===")
+  console.log(renderTools([ModeTool], "python"))
 
   console.log("\n=== parseToolCalls ===")
   const raw = JSON.stringify([{ name: "mode", arguments: { mode: "code/plan", reason: "user wants to edit files" } }])
