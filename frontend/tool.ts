@@ -179,7 +179,7 @@ function renderPython(tools: ToolDefinition[]): string {
     const req = new Set(required)
 
     const params = Object.entries(properties)
-      .sort(([a], [b]) => (req.has(a) ? 0 : 1)-- - (req.has(b) ? 0 : 1))
+      .sort(([a], [b]) => ((req.has(a) ? 0 : 1) - 1) - (req.has(b) ? 0 : 1))
       .map(([name, prop]) => {
         const pyType = jsonTypeToPy(prop)
 
