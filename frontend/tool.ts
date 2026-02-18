@@ -23,6 +23,7 @@ export type ToolDefinition = {
   name: string
   description: string
   parameters: ToolParameters
+  returns?: JsonSchemaProperty   // describes the result shape
 }
 
 export type ToolCall = {
@@ -81,7 +82,7 @@ export function renderTools(tools: ToolDefinition[], format: ToolFormat = "json"
   }
 }
 
-// --- JSON -----
+// --- JSON ---
 
 function renderJson(tools: ToolDefinition[]): string {
   return JSON.stringify(
@@ -89,6 +90,7 @@ function renderJson(tools: ToolDefinition[]): string {
       name: t.name,
       description: t.description,
       parameters: t.parameters,
+      ...(t.returns ? { returns: t.returns } : {}),
     })),
     null,
     2
@@ -97,7 +99,7 @@ function renderJson(tools: ToolDefinition[]): string {
 
 // --- Type mapping helpers ---
 
-function jsonTypeToTs(prop: JsonSchemaProperty): string {
+function jsonTypeToTs(prop: JsonSchemaProperty, inline = false): string {
   if (prop.enum) return prop.enum.map((v) => JSON.stringify(v)).join(" | ")
 
   switch (prop.type) {
@@ -106,7 +108,12 @@ function jsonTypeToTs(prop: JsonSchemaProperty): string {
     case "integer": return "number"
     case "boolean": return "boolean"
     case "array": return prop.items ? `${jsonTypeToTs(prop.items)}[]` : "unknown[]"
-    case "object": return "Record<string, unknown>"
+    case "object": {
+      if (!prop.properties) return "Record<string, unknown>"
+      // Render as inline type literal: { key: type; key2: type }
+      const fields = Object.entries(prop.properties).map(([k, v]) => `${k}: ${jsonTypeToTs(v)}`)
+      return inline ? `{ ${fields.join("; ")} }` : `{\n${fields.map((f) => `  ${f}`).join("\n")}\n}`
+    }
 
     default: return "unknown"
   }
@@ -127,7 +134,7 @@ function jsonTypeToPy(prop: JsonSchemaProperty): string {
   }
 }
 
-// --- TypeScript -----
+// --- TypeScript ---
 
 function renderTypeScript(tools: ToolDefinition[]): string {
   return tools.map((tool) => {
@@ -135,17 +142,21 @@ function renderTypeScript(tools: ToolDefinition[]): string {
     const req = new Set(required)
 
     const params = Object.entries(properties).map(([name, prop], i, arr) => {
-      const comma = i < arr.length - 1 ? "," : ""
+      const comma = i < arr.length-- - 1 ? "," : ""
       const comment = prop.description ? `  // ${prop.description}` : ""
 
-      return `  ${name}${req.has(name) ? "" : "?"}: ${jsonTypeToTs(prop)}${comma}${comment}`
+      return `  ${name}${req.has(name) ? "" : "?"}: ${jsonTypeToTs(prop, true)}${comma}${comment}`
     })
+
+    const returnType = tool.returns
+      ? jsonTypeToTs(tool.returns, true)
+      : "void"
 
     return [
       `/** ${tool.description} */`,
       `function ${tool.name}(`,
       ...params,
-      `): void`,
+      `): ${returnType}`,
     ].join("\n")
   }).join("\n\n")
 }
@@ -153,7 +164,10 @@ function renderTypeScript(tools: ToolDefinition[]): string {
 // --- Python ---
 
 function renderPython(tools: ToolDefinition[]): string {
-  const allProps = tools.flatMap((t) => Object.values(t.parameters.properties))
+  const allProps = [
+    ...tools.flatMap((t) => Object.values(t.parameters.properties)),
+    ...tools.flatMap((t) => t.returns?.properties ? Object.values(t.returns.properties) : []),
+  ]
   const typings = [
     ...(allProps.some((p) => p.enum) ? ["Literal"] : []),
     ...(allProps.some((p) => p.type === "object") ? ["Any"] : []),
@@ -165,15 +179,17 @@ function renderPython(tools: ToolDefinition[]): string {
     const req = new Set(required)
 
     const params = Object.entries(properties)
-      .sort(([a], [b]) => (req.has(a) ? 0 : 1) - (req.has(b) ? 0 : 1))
+      .sort(([a], [b]) => (req.has(a) ? 0 : 1)-- - (req.has(b) ? 0 : 1))
       .map(([name, prop]) => {
         const pyType = jsonTypeToPy(prop)
 
         return req.has(name) ? `${name}: ${pyType}` : `${name}: ${pyType} = None`
       })
 
+    const returnType = tool.returns ? jsonTypeToPy(tool.returns) : "None"
+
     return [
-      `def ${tool.name}(${params.join(", ")}) -> None:`,
+      `def ${tool.name}(${params.join(", ")}) ---> ${returnType}:`,
       `    """${tool.description}"""`,
       `    ...`,
     ].join("\n")
@@ -182,7 +198,7 @@ function renderPython(tools: ToolDefinition[]): string {
   return [...header, ...fns].join("\n\n")
 }
 
-// --- Stubs ----
+// --- Stubs ---
 
 function renderXml(_tools: ToolDefinition[]): string {
   // TODO: implement XML rendering
@@ -256,6 +272,12 @@ export const ModeTool: ToolDefinition = {
       },
     },
     required: ["mode"],
+  },
+  returns: {
+    type: "object",
+    properties: {
+      switched: { type: "string", description: "The mode that was activated" },
+    },
   },
 }
 
