@@ -369,7 +369,12 @@ export class Codeq {
       )
       const lines = [
         classSignature(cls),
-        ...methods.map((m) => `    ${functionSignature(m)}`),
+        ...methods.map((m) =>
+          functionSignature(m)
+            .split("\n")
+            .map((line) => `    ${line}`)
+            .join("\n")
+        ),
       ]
       topLevel.push({ offset: cls.start, text: lines.join("\n") })
     }
@@ -750,7 +755,7 @@ class Example:
     """Simple example class"""
 
     @api.path("/protected")
-    def baz():
+    def foo():
         """
         Cool func
         args: none
