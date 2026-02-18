@@ -485,8 +485,7 @@ export class Codeq {
     const needsLeadingNewline = what === CodePart.Logic
     const indentPrefix = " ".repeat(indentLevel)
     const prepared =
-      (needsLeadingNewline ? `\n${indentPrefix}` : "") +
-      reindent(newText, indentLevel)
+      (needsLeadingNewline ? `\n${indentPrefix}` : "") + newText
 
     this.sourceBytes = spliceBuf(
       this.sourceBytes,
@@ -642,7 +641,7 @@ export class Codeq {
         start,
         end: body.endIndex,
         // body indent + 4 for content inside it
-        indentLevel: body.startPosition.column + 4,
+        indentLevel: body.startPosition.column,
       }
     }
 
@@ -703,7 +702,7 @@ export class Codeq {
 // ─── Pure helpers for map entries ────────────────────────────────────────────
 
 function functionSignature(e: FunctionMapEntry): string {
-  const decoPrefix = e.decorators.length ? e.decorators.join(" ") + " " : ""
+  const decoPrefix = e.decorators.length ? e.decorators.join("\n") + "\n" : ""
   const retSuffix = e.returnType ? ` -> ${e.returnType}` : ""
   const docSuffix = e.docstring
     ? `  # ${e.docstring.split(/\s+/).slice(0, 10).join(" ")}`
