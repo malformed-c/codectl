@@ -4,33 +4,16 @@ import { tmpdir } from "node:os"
 import { mkdirSync } from "node:fs"
 import { rename, readFile } from "node:fs/promises"
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 await Parser.init()
 
-const imports = {
-  env: {
-    memory: new WebAssembly.Memory({ initial: 256 }),
-    realloc: (ptr: number, oldSize: number, align: number, newSize: number) => {
+// Load WASM
+const pythonWasm = await readFile("./node_modules/tree-sitter-python/tree-sitter-python.wasm")
 
-      // A very basic realloc stub (Tree-sitter may not trigger complex reallocs for small code)
-      return ptr
-    },
-    table: new WebAssembly.Table({ initial: 0, element: "anyfunc" }),
-    malloc: () => {},
-    memcpy: () => {},
-    free: () => {},
-    calloc: () => {},
+// Load the language
+const Python = await Language.load(pythonWasm)
 
-  }
-}
-
-const pythonWasmBinary = await readFile("./node_modules/tree-sitter-python/tree-sitter-python.wasm")
-const pythonModule = await WebAssembly.instantiate(pythonWasmBinary, imports)
-const Python = new Language(pythonModule.instance)
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-// const pythonWasm = await readFile("./node_modules/tree-sitter-python/tree-sitter-python.wasm")
-// console.log(pythonWasm)
-// const Python = await Language.load(pythonWasm)
 // const TypeScript = await Language.load("./node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm")
 
 /* Capture name -> matching nodes */
@@ -134,12 +117,13 @@ interface ClassMapEntry {
 }
 
 // ─── Tree-sitter setup ───────────────────────────────────────────────────────
+
 const pyParser = new Parser()
 pyParser.setLanguage(Python)
 
 // Add more languages here as needed:
-const tsParser = new Parser()
-tsParser.setLanguage(TypeScript)
+// const tsParser = new Parser()
+// tsParser.setLanguage(TypeScript)
 
 // ─── Query strings (identical to Python version) ──────────────────────────────
 
