@@ -714,7 +714,7 @@ export class Codeq {
 // ─── Pure helpers for map entries ────────────────────────────────────────────
 
 function getCaptureKind(captures: CaptureMap, kind: string, what: string): Node | undefined {
-  return match(kind)
+  return match(what)
     .with('decorated_node', 'node', () => {
       return captures.get(`${kind}.decorated_node`)?.[0]
         ?? captures.get(`${kind}.node`)?.[0]
