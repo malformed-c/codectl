@@ -141,19 +141,35 @@ function renderTypeScript(tools: ToolDefinition[]): string {
     const { properties, required = [] } = tool.parameters
     const req = new Set(required)
 
-    const params = Object.entries(properties).map(([name, prop], i, arr) => {
-      const comma = i < arr.length-- - 1 ? "," : ""
-      const comment = prop.description ? `  // ${prop.description}` : ""
+    // JSDoc block
+    const jsdocLines = [
+      ` * ${tool.description}`,
+      ' *',
+      ...Object.entries(properties).map(([name, prop]) => {
+        const desc = prop.description ? ` - ${prop.description}` : ""
 
-      return `  ${name}${req.has(name) ? "" : "?"}: ${jsonTypeToTs(prop, true)}${comma}${comment}`
+        return ` * @param ${name}${desc}`
+      }),
+      ' *',
+      ...Object.entries(tool.returns?.properties ?? []).map(([name, prop]) => {
+        const desc = prop.description ? ` - ${prop.description}` : ""
+
+        return ` * @returns ${name}${desc}`
+      }),
+    ]
+
+    const jsdoc = ["/**", ...jsdocLines, " */"].join("\n")
+
+    // Signature
+    const params = Object.entries(properties).map(([name, prop], i, arr) => {
+      const comma = i < arr.length - 1 ? "," : ""
+      return `  ${name}${req.has(name) ? "" : "?"}: ${jsonTypeToTs(prop, true)}${comma}`
     })
 
-    const returnType = tool.returns
-      ? jsonTypeToTs(tool.returns, true)
-      : "void"
+    const returnType = tool.returns ? jsonTypeToTs(tool.returns, true) : "void"
 
     return [
-      `/** ${tool.description} */`,
+      jsdoc,
       `function ${tool.name}(`,
       ...params,
       `): ${returnType}`,
@@ -179,7 +195,7 @@ function renderPython(tools: ToolDefinition[]): string {
     const req = new Set(required)
 
     const params = Object.entries(properties)
-      .sort(([a], [b]) => ((req.has(a) ? 0 : 1) - 1) - (req.has(b) ? 0 : 1))
+      .sort(([a], [b]) => (req.has(a) ? 0 : 1) - (req.has(b) ? 0 : 1))
       .map(([name, prop]) => {
         const pyType = jsonTypeToPy(prop)
 
@@ -188,9 +204,34 @@ function renderPython(tools: ToolDefinition[]): string {
 
     const returnType = tool.returns ? jsonTypeToPy(tool.returns) : "None"
 
+    // Google-style docstring
+    const docLines = [`    """${tool.description}`]
+
+    const argLines = Object.entries(properties).map(([name, prop]) => {
+      const desc = prop.description ?? ""
+
+      return `        ${name}: ${desc}`
+    })
+
+    if (argLines.length) {
+      docLines.push("    Args:", ...argLines)
+    }
+
+    if (tool.returns) {
+      const retLines = tool.returns.properties
+        ? Object.entries(tool.returns.properties).map(([name, prop]) =>
+          `        ${name}: ${prop.description ?? ""}`
+        )
+        : [`        ${tool.returns.description ?? ""}`]
+
+      docLines.push("    Returns:", ...retLines)
+    }
+
+    docLines.push(`    """`)
+
     return [
       `def ${tool.name}(${params.join(", ")}) -> ${returnType}:`,
-      `    """${tool.description}"""`,
+      ...docLines,
       `    ...`,
     ].join("\n")
   })
