@@ -1,199 +1,291 @@
-import 'dotenv/config'
-import { buildRenderedPrompt, resolvePromptMarkers, type Message } from './template'
+import { render, renderFim, parse } from './template'
+import type { Message, TextTemplate, FimRequest, ParsedTurn } from './template'
 
-export type GenerateSettings = {
-  api_server: string
-  api_type: string
-  prompt: string
-  use_story: false
-  use_memory: false
-  use_authors_note: false
-  use_world_info: false
-  add_bos_token: true,
-  streaming?: boolean
-  num_ctx?: number
-  num_predict?: number
-  rep_pen?: number
-  rep_pen_range?: number
-  rep_pen_slope?: number
+// --- Types ---
+
+export type KoboldConfig = {
+  apiServer: string
+  template: TextTemplate
+
+  // Sampling
+  numCtx?: number
+  numPredict?: number
   temperature?: number
+  topP?: number
+  topK?: number
+  topA?: number
+  minP?: number
   tfs?: number
-  top_a?: number
-  top_k?: number
-  top_p?: number
-  min_p?: number
   typical?: number
-  sampler_order?: number[]
-  singleline?: boolean
-  use_default_badwordsids?: boolean
+  repPen?: number
+  repPenRange?: number
+  repPenSlope?: number
   mirostat?: number
-  mirostat_eta?: number
-  mirostat_tau?: number
+  mirostatEta?: number
+  mirostatTau?: number
+  samplerOrder?: number[]
+  samplerSeed?: number
+
+  // DRY
+  dryMultiplier?: number
+  dryBase?: number
+  dryAllowedLength?: number
+  dryPenaltyLastN?: number
+  drySequenceBreakers?: string[]
+
+  // Misc
   grammar?: string
-  sampler_seed?: number
-  stop_sequence?: string[]
-  dry_allowed_length: number
-  dry_multiplier: number
-  dry_base: number
-  dry_sequence_breakers: string[]
-  dry_penalty_last_n: number
+  stopSequence?: string[]
+  streaming?: boolean
 }
 
-
-function normalizeApiServer(apiServer: string): string {
-  return apiServer.includes('localhost') ? apiServer.replace('localhost', '127.0.0.1') : apiServer
+export type KoboldStatus = {
+  koboldUnitedVersion: string
+  koboldCppVersion: string
+  model: string
 }
 
-function buildPromptFromMessages(messages: Message[]): string {
-  const markers = resolvePromptMarkers()
-
-  return buildRenderedPrompt(messages, markers).join('')
+export class KoboldError extends Error {
+  constructor(
+    message: string,
+    public readonly status?: number
+  ) {
+    super(message)
+    this.name = 'KoboldError'
+  }
 }
 
-function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
+// --- Helpers ---
+
+function normalizeServer(server: string): string {
+  return server.includes('localhost')
+    ? server.replace('localhost', '127.0.0.1')
+    : server
 }
 
 async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function buildGenerateBody(payload: Record<string, any>, requestPrompt: string): GenerateSettings {
-  const baseSettings: GenerateSettings = {
-    api_server: payload.api_server,
-    api_type: payload.api_type ?? "koboldcpp",
-    prompt: requestPrompt,
-    add_bos_token: true,
-    use_story: false,
-    use_memory: false,
-    use_authors_note: false,
-    use_world_info: false,
-    num_ctx: payload.num_ctx,
-    num_predict: payload.num_predict,
-    rep_pen: payload.rep_pen ?? 1.05,
-    rep_pen_range: payload.rep_pen_range ?? 360,
-    rep_pen_slope: payload.rep_pen_slope,
-    temperature: payload.temperature ?? 0.70,
-    tfs: payload.tfs,
-    top_a: payload.top_a,
-    top_k: payload.top_k,
-    top_p: payload.top_p ?? 0.95,
-    min_p: payload.min_p ?? 0.05,
-    typical: payload.typical,
-    sampler_order: payload.sampler_order ?? [6, 0, 1, 3, 4, 2, 5],
-    singleline: payload.singleline,
-    use_default_badwordsids: payload.use_default_badwordsids,
-    mirostat: payload.mirostat,
-    mirostat_eta: payload.mirostat_eta,
-    mirostat_tau: payload.mirostat_tau,
-    grammar: payload.grammar,
-    sampler_seed: payload.sampler_seed ?? -1,
-    stop_sequence: payload.stop_sequence ?? ["\nuser:", "</s>", "[INST]", "[SYSTEM_PROMPT]"],
-    dry_allowed_length: payload.dry_allowed_length ?? 2,
-    dry_base: payload.dry_base ?? 1.75,
-    dry_multiplier: payload.dry_multiplier ?? 0.8,
-    dry_penalty_last_n: payload.dry_penalty_last_n ?? 320,
-    dry_sequence_breakers: ["\n", ":", '"', "*", "[THINK]", "[/THINK]"], // TODO Dynamically include reasoning tags from model
-    // TODO add json schema support
-    streaming: payload.streaming ?? false,
+// --- Adapter ---
+
+export class KoboldAdapter {
+  private readonly server: string
+  private readonly config: KoboldConfig
+
+  constructor(config: KoboldConfig) {
+    this.config = config
+    this.server = normalizeServer(config.apiServer)
   }
 
-  return baseSettings
-}
+  // --- Public API ---
 
-export async function generate(payload: GenerateSettings): Promise<Response> {
-  if (!payload?.api_server) return new Response(null, { status: 400 })
+  async generate(messages: Message[]): Promise<ParsedTurn> {
+    const prompt = render(messages, this.config.template)
 
-  payload.api_server = normalizeApiServer(payload.api_server)
+    const raw = await this.complete(prompt)
 
-  const args: RequestInit = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+    return parse(raw, this.config.template)
   }
 
-  const maxRetries = 3
-  const retryDelayMs = 2500
+  async generateFim(req: FimRequest): Promise<string> {
+    const prompt = renderFim(req, this.config.template)
 
-  const url = payload.streaming
-    ? `${payload.api_server}/extra/generate/stream`
-    : `${payload.api_server}/v1/generate`
+    if (!prompt) {
+      throw new KoboldError('FIM is not supported by the current template profile')
+    }
 
-  for (let i = 0; i < maxRetries; i += 1) {
-    try {
-      const upstreamResponse = await fetch(url, args)
+    const raw = await this.complete(prompt)
+    // FIM response should be raw content - no conversation parsing needed
+    return raw.trim()
+  }
 
-      if (payload.streaming) {
-        return new Response(upstreamResponse.body, {
-          status: upstreamResponse.status,
-          headers: {
-            'Content-Type': upstreamResponse.headers.get('content-type') ?? 'text/event-stream',
-          },
-        })
-      }
+  async status(): Promise<KoboldStatus> {
+    const [united, extra, model] = await Promise.all([
+      fetch(`${this.server}/v1/info/version`)
+        .then((r) => (r.ok ? r.json() : { result: '0.0.0' }))
+        .catch(() => ({ result: '0.0.0' })),
+      fetch(`${this.server}/extra/version`)
+        .then((r) => (r.ok ? r.json() : { result: '0.0' }))
+        .catch(() => ({ result: '0.0' })),
+      fetch(`${this.server}/v1/model`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ])
 
-      if (!upstreamResponse.ok) {
-        const errorText = await upstreamResponse.text()
-
-        try {
-          const errorJson = JSON.parse(errorText) as { detail?: { msg?: string } }
-          return jsonResponse({ error: { message: errorJson?.detail?.msg || errorText } }, 400)
-
-        } catch {
-          return jsonResponse({ error: { message: errorText } }, 400)
-        }
-      }
-
-      const data = await upstreamResponse.json()
-      return jsonResponse(data)
-
-    } catch (error) {
-      const status = typeof error
-        === 'object' && error && 'status'
-        in error ? Number((error as { status?: unknown }).status) : 0
-
-      if (status === 403 || status === 503) {
-        await delay(retryDelayMs)
-
-        continue
-      }
+    return {
+      koboldUnitedVersion: (united as { result?: string }).result ?? '0.0.0',
+      koboldCppVersion: (extra as { result?: string }).result ?? '0.0',
+      model:
+        !model || (model as { result?: string }).result === 'ReadOnly'
+          ? 'no_connection'
+          : (model as { result?: string }).result ?? 'unknown',
     }
   }
 
-  return jsonResponse({ error: true }, 500)
-}
+  // --- Streaming ---
 
-export async function status(payload: { api_server: string }): Promise<Response> {
-  if (!payload?.api_server) return new Response(null, { status: 400 })
+  async *stream(messages: Message[]): AsyncGenerator<string> {
+    const prompt = render(messages, this.config.template)
+    const body = this.buildPayload(prompt, true)
 
-  const apiServer = normalizeApiServer(payload.api_server)
+    const response = await fetch(`${this.server}/extra/generate/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
 
-  const [koboldUnitedResponse, koboldExtraResponse, koboldModelResponse] = await Promise.all([
-    fetch(`${apiServer}/v1/info/version`)
-      .then(async (response) => (response.ok ? response.json() : { result: '0.0.0' }))
-      .catch(() => ({ result: '0.0.0' })),
-    fetch(`${apiServer}/extra/version`)
-      .then(async (response) => (response.ok ? response.json() : { result: '0.0' }))
-      .catch(() => ({ result: '0.0' })),
-    fetch(`${apiServer}/v1/model`)
-      .then(async (response) => (response.ok ? response.json() : null))
-      .catch(() => null),
-  ])
+    if (!response.ok || !response.body) {
+      throw new KoboldError(`Stream failed: ${response.status}`, response.status)
+    }
 
-  const result = {
-    koboldUnitedVersion: (koboldUnitedResponse as { result?: string }).result ?? '0.0.0',
-    koboldCppVersion: (koboldExtraResponse as { result?: string }).result ?? '0.0',
-    model:
-      !koboldModelResponse ||
-        (koboldModelResponse as { result?: string }).result === 'ReadOnly'
-        ? 'no_connection'
-        : (koboldModelResponse as { result?: string }).result,
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+
+      // KoboldCPP SSE: lines starting with 'data: '
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+
+        try {
+          const data = JSON.parse(line.slice(6)) as { token?: string }
+
+          if (data.token) yield data.token
+
+        } catch {
+          // Malformed SSE line - skip
+        }
+      }
+
+    }
   }
 
-  return jsonResponse(result)
+  // --- Internals ---
+
+  private async complete(prompt: string, retries = 3): Promise<string> {
+    const body = this.buildPayload(prompt, false)
+    const url = `${this.server}/v1/generate`
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+
+        if (!response.ok) {
+          const text = await response.text()
+          let message = text
+
+          try {
+            const json = JSON.parse(text) as { detail?: { msg?: string } }
+            message = json?.detail?.msg ?? text
+          } catch { /* use raw text */ }
+
+          throw new KoboldError(message, response.status)
+        }
+
+        const data = await response.json() as { results?: Array<{ text: string }> }
+        return data.results?.[0]?.text ?? ''
+
+      } catch (err) {
+        if (err instanceof KoboldError) {
+          // Don't retry client errors
+          if (err.status && err.status < 500) throw err
+        }
+
+        if (i < retries - 1) {
+          await delay(2500)
+
+          continue
+        }
+
+        throw err
+      }
+    }
+
+    throw new KoboldError('Max retries exceeded')
+  }
+
+  private buildPayload(prompt: string, streaming: boolean): Record<string, unknown> {
+    const cfg = this.config
+    const eos = cfg.template.eos
+
+    // Merge template EOS into stop sequences
+    const stopSequence = [
+      ...(cfg.stopSequence ?? []),
+      ...(eos ? [eos] : []),
+    ]
+
+    // DRY sequence breakers - include think tokens if present
+    const dryBreakers = cfg.drySequenceBreakers ?? ['\n', ':', "'", '*']
+    const think = cfg.template.think
+    if (think) {
+      if (!dryBreakers.includes(think[0])) dryBreakers.push(think[0])
+      if (think[1] && !dryBreakers.includes(think[1])) dryBreakers.push(think[1])
+    }
+
+    return {
+      prompt,
+      add_bos_token: true,
+      use_story: false,
+      use_memory: false,
+      use_authors_note: false,
+      use_world_info: false,
+      streaming,
+      num_ctx: cfg.numCtx,
+      num_predict: cfg.numPredict ?? 512,
+      temperature: cfg.temperature ?? 0.7,
+      top_p: cfg.topP ?? 0.95,
+      top_k: cfg.topK,
+      top_a: cfg.topA,
+      min_p: cfg.minP ?? 0.05,
+      tfs: cfg.tfs,
+      typical: cfg.typical,
+      rep_pen: cfg.repPen ?? 1.05,
+      rep_pen_range: cfg.repPenRange ?? 360,
+      rep_pen_slope: cfg.repPenSlope,
+      mirostat: cfg.mirostat,
+      mirostat_eta: cfg.mirostatEta,
+      mirostat_tau: cfg.mirostatTau,
+      sampler_order: cfg.samplerOrder ?? [6, 0, 1, 3, 4, 2, 5],
+      sampler_seed: cfg.samplerSeed ?? -1,
+      grammar: cfg.grammar,
+      stop_sequence: stopSequence,
+      dry_multiplier: cfg.dryMultiplier ?? 0.8,
+      dry_base: cfg.dryBase ?? 1.75,
+      dry_allowed_length: cfg.dryAllowedLength ?? 2,
+      dry_penalty_last_n: cfg.dryPenaltyLastN ?? 320,
+      dry_sequence_breakers: dryBreakers,
+    }
+  }
+}
+
+// --- Smoke test ---
+
+if (import.meta.main) {
+  const { Profiles } = await import('./template')
+
+  const kobold = new KoboldAdapter({
+    apiServer: Bun.env.BASE_URL!,
+    template: Profiles.mistral,
+    temperature: 0.7,
+    numPredict: 200,
+  })
+
+  console.log('=== status ===')
+  console.log(await kobold.status())
+
+  console.log('\n=== generate ===')
+  const result = await kobold.generate([
+    { role: 'system', content: 'You are a helpful assistant.' },
+    { role: 'user', content: 'Say hello in one sentence.' },
+  ])
+  console.log(result)
 }
