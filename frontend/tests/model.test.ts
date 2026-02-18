@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import { ModelSession } from "../model";
-import { ModelProfile } from "../messages";
+import { ModelProfile } from "../template";
 
 const mockProfile: ModelProfile = {
   name: "test-model",

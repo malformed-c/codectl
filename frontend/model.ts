@@ -1,4 +1,4 @@
-import { buildRenderedPrompt, Message, ModelProfile, PromptMarkers } from './messages'
+import { buildRenderedPrompt, Message, ModelProfile, PromptMarkers } from './template'
 
 export class ModelSession {
   constructor(

@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { buildRenderedPrompt, resolvePromptMarkers, type Message } from './messages'
+import { buildRenderedPrompt, resolvePromptMarkers, type Message } from './template'
 
 export type GenerateSettings = {
   api_server: string

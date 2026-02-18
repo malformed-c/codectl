@@ -716,10 +716,12 @@ export class Codeq {
 function getCaptureKind(captures: CaptureMap, kind: string, what: string): Node | undefined {
   return match(what)
     .with('decorated_node', 'node', () => {
+      // Prefer decorated_node if present, otherwise node
       return captures.get(`${kind}.decorated_node`)?.[0]
         ?? captures.get(`${kind}.node`)?.[0]
     })
     .otherwise(() => {
+      // Fallback to the exact capture by target
       return captures.get(`${kind}.${what}`)?.[0]
     })
 

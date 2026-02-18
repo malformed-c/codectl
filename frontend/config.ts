@@ -1,6 +1,6 @@
 import { join, dirname } from 'path'
 import yaml from 'js-yaml'
-import { Config, ModelProfile } from './messages'
+import { Config, ModelProfile } from './template'
 
 export async function loadConfig(configPath: string = 'config.yaml'): Promise<Config> {
   const file = Bun.file(configPath)

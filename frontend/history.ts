@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { mkdir } from 'fs/promises'
-import { History, Message } from './messages'
+import { History, Message } from './template'
 
 export class HistoryManager {
   private historyPath: string
