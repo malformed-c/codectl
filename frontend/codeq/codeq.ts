@@ -479,7 +479,14 @@ export class Codeq {
       what,
       captures
     )
-    const prepared = reindent(newText, indentLevel)
+
+    // For logic replacements, we splice starting right after the docstring's
+    // closing quotes — so we must prepend a newline + indentation ourselves.
+    const needsLeadingNewline = what === CodePart.Logic
+    const indentPrefix = " ".repeat(indentLevel)
+    const prepared =
+      (needsLeadingNewline ? `\n${indentPrefix}` : "") +
+      reindent(newText, indentLevel)
 
     this.sourceBytes = spliceBuf(
       this.sourceBytes,
@@ -487,6 +494,7 @@ export class Codeq {
       end,
       Buffer.from(prepared, "utf8")
     )
+
     this.tree = pyParser.parse(this.sourceBytes.toString("utf8"))
   }
 
@@ -645,6 +653,7 @@ export class Codeq {
       const available = [...captures.keys()]
         .map((k) => k.split(".")[1])
         .filter(Boolean)
+
       if (available.includes("body")) available.push("logic")
 
       throw new MissingCaptureError(
