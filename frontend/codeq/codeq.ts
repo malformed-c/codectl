@@ -733,7 +733,7 @@ function classToResource(e: ClassMapEntry): CodeqObject {
   }
 }
 
-// ─── Quick smoke test (bun run codeq.ts) ─────────────────────────────────────
+// ─── Quick smoke test (bun run codeq/codeq.ts) ─────────────────────────────────────
 
 if (import.meta.main) {
   const source = `
@@ -742,6 +742,10 @@ class Example:
 
     @api.path("/protected")
     def baz():
+        """
+        Cool func
+        args: none
+        """
         pass
 
 @protected
