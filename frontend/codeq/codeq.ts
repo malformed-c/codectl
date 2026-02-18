@@ -3,6 +3,7 @@ import { join, dirname, relative } from "node:path"
 import { tmpdir } from "node:os"
 import { mkdirSync } from "node:fs"
 import { rename } from "node:fs/promises"
+import { match } from "ts-pattern"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -438,29 +439,35 @@ export class Codeq {
 
     switch (what) {
       case CodePart.Node: {
-        const node =
-          captures.get(`${kind}.decorated_node`)?.[0]
-          ?? captures.get(`${kind}.node`)?.[0]
+        // const node =
+        //   captures.get(`${kind}.decorated_node`)?.[0]
+        //   ?? captures.get(`${kind}.node`)?.[0]
+
+        const node = getCaptureKind(captures, kind, 'node')
 
         return node ? this.decodeNode(node) : null
       }
 
       case CodePart.Logic: {
-        const body = captures.get(`${kind}.body`)?.[0]
+        // const body = captures.get(`${kind}.body`)?.[0]
+        const body = getCaptureKind(captures, kind, 'body')
 
         if (!body) return null
 
         let start = body.startIndex
-        const docNode = captures.get(`${kind}.doc_node`)?.[0]
+        // const docNode = captures.get(`${kind}.doc_node`)?.[0]
+        const docNode = getCaptureKind(captures, kind, 'doc_node')
+
         if (docNode) start = docNode.endIndex
 
-        return this.sourceBytes.slice(start, body.endIndex).toString("utf8").trim()
+        return this.sourceBytes.subarray(start, body.endIndex).toString("utf8").trim()
       }
 
       default: {
-        const node =
-          captures.get(`${kind}.${what}`)?.[0]
-          ?? captures.get(`${kind}.node`)?.[0]
+        // const node =
+        //   captures.get(`${kind}.${what}`)?.[0]
+        //   ?? captures.get(`${kind}.node`)?.[0]
+        const node = getCaptureKind(captures, kind, what)
 
         return node ? this.decodeNode(node) : null
       }
@@ -675,7 +682,7 @@ export class Codeq {
   }
 
   private decodeNode(node: Node): string {
-    return this.sourceBytes.slice(node.startIndex, node.endIndex).toString("utf8")
+    return this.sourceBytes.subarray(node.startIndex, node.endIndex).toString("utf8")
   }
 
   private enclosingClassName(node: Node): string | null {
@@ -705,6 +712,18 @@ export class Codeq {
 }
 
 // ─── Pure helpers for map entries ────────────────────────────────────────────
+
+function getCaptureKind(captures: CaptureMap, kind: string, what: string): Node | undefined {
+  return match(kind)
+    .with('decorated_node', 'node', () => {
+      return captures.get(`${kind}.decorated_node`)?.[0]
+        ?? captures.get(`${kind}.node`)?.[0]
+    })
+    .otherwise(() => {
+      return captures.get(`${kind}.${what}`)?.[0]
+    })
+
+}
 
 function functionSignature(e: FunctionMapEntry): string {
   const decoPrefix = e.decorators.length ? e.decorators.join("\n") + "\n" : ""
@@ -755,7 +774,7 @@ class Example:
     """Simple example class"""
 
     @api.path("/protected")
-    def foo():
+    def baz():
         """
         Cool func
         args: none
