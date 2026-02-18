@@ -2,14 +2,15 @@ import { Parser, Node, Language, Tree, Query } from "web-tree-sitter"
 import { join, dirname, relative } from "node:path"
 import { tmpdir } from "node:os"
 import { mkdirSync } from "node:fs"
-import { rename, readFile } from "node:fs/promises"
+import { rename } from "node:fs/promises"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 await Parser.init()
 
 // Load WASM
-const pythonWasm = await readFile("./node_modules/tree-sitter-python/tree-sitter-python.wasm")
+// const pythonWasm = await readFile("./node_modules/tree-sitter-python/tree-sitter-python.wasm")
+const pythonWasm = await Bun.file("./node_modules/tree-sitter-python/tree-sitter-python.wasm").bytes()
 
 // Load the language
 const Python = await Language.load(pythonWasm)
