@@ -491,7 +491,7 @@ export class Codeq {
 
   // ─── Query internals ──────────────────────────────────────────────────────
 
-  private queryFor(kind: CodeKind): Parser.Query {
+  private queryFor(kind: CodeKind): Query {
     return kind === CodeKind.Func ? this.funcsQuery : this.classesQuery
   }
 
