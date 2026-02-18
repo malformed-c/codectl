@@ -163,7 +163,7 @@ const CLASSES_QUERY_STRING = `
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /* Convert tree-sitter Node.js captures array -> CaptureMap */
-function toCapureMap(
+function toCaptureMap(
   captures: Array<{ name: string; node: Node }>
 ): CaptureMap {
   const map: CaptureMap = new Map()
@@ -502,7 +502,7 @@ export class Codeq {
 
     return raw.map((m) => ({
       pattern: m.pattern,
-      captures: toCapureMap(m.captures),
+      captures: toCaptureMap(m.captures),
     }))
   }
 
