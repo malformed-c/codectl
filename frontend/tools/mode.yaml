@@ -1,0 +1,19 @@
+---
+name: mode
+description: >
+  Switch interaction mode. Use code/plan when the user wants to
+  modify code or you need to explore the codebase.
+
+parameters:
+  type: object
+  properties:
+    mode:
+      type: string
+      enum: [chat, code/plan]
+      description: Target mode
+
+    reason:
+      type: string
+      description: Brief reason for switching
+
+  required: [mode]
