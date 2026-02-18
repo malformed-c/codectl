@@ -189,7 +189,7 @@ function renderPython(tools: ToolDefinition[]): string {
     const returnType = tool.returns ? jsonTypeToPy(tool.returns) : "None"
 
     return [
-      `def ${tool.name}(${params.join(", ")}) ---> ${returnType}:`,
+      `def ${tool.name}(${params.join(", ")}) -> ${returnType}:`,
       `    """${tool.description}"""`,
       `    ...`,
     ].join("\n")
