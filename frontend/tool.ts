@@ -2,6 +2,8 @@ import { join } from "node:path"
 import { readdirSync } from "node:fs"
 import { YAML } from "bun"
 
+import type { ToolResultsTemplate } from './template'
+
 // --- Types ---
 
 export type JsonSchemaProperty = {
@@ -50,7 +52,7 @@ export async function loadTool(filePath: string): Promise<ToolDefinition> {
   const text = await Bun.file(filePath).text()
   const raw = YAML.parse(text) as ToolDefinition
 
-  if (!raw.name || !raw.description || !raw.parameters) {
+  if (!raw || !raw.name || !raw.description || !raw.parameters) {
     throw new Error(`Invalid tool definition in ${filePath}: missing name, description, or parameters`)
   }
 
@@ -259,47 +261,80 @@ function renderProse(_tools: ToolDefinition[]): string {
  * Parse a raw tool call string (extracted by template parser) into ToolCall[].
  * Handles both Mistral rich format and simple JSON array.
  */
-//TODO
 export function parseToolCalls(raw: string): ToolCall[] {
   const text = raw.trim()
 
-  // Rich format detection
+  // Rich format detection (Mistral-style)
+  // [CALL_ID]id123[ARGS]{"param": "val"} or just tool_name[ARGS]{...}
+  // TODO Unhardcode
   if (text.includes('[ARGS]')) {
-    const [namePart, argsPart] = text.split('[ARGS]')
-    if (namePart && argsPart) {
-      const name = namePart.trim()
-      const argsJson = argsPart.trim()
+    let callId: string | undefined
+    let name = ''
+    let argsPart = ''
 
+    if (text.includes('[CALL_ID]')) {
+      const callIdMatch = text.match(/\[CALL_ID\](.*?)\[ARGS\]/)
+      const nameMatch = text.match(/^(.*?)\[CALL_ID\]/)
+
+      if (callIdMatch) callId = callIdMatch[1]!.trim()
+      if (nameMatch) name = nameMatch[1]!.trim()
+
+      const argsIndex = text.indexOf('[ARGS]')
+      argsPart = text.slice(argsIndex + 6).trim()
+
+    } else {
+      const [namePart, ...rest] = text.split('[ARGS]')
+      name = namePart!.trim()
+      argsPart = rest.join('[ARGS]').trim()
+    }
+
+    try {
       return [{
-        name,
-        arguments: JSON.parse(argsJson),
+        callId,
+        name: name || 'unknown',
+        arguments: JSON.parse(argsPart),
       }]
+
+    } catch (err) {
+      throw new Error(`Failed to parse tool arguments as JSON: ${err}`)
     }
   }
 
   // Fallback to pure JSON
-  const parsed = JSON.parse(text)
-  const arr = Array.isArray(parsed) ? parsed : [parsed]
+  try {
+    const parsed = JSON.parse(text)
+    const arr = Array.isArray(parsed) ? parsed : [parsed]
 
-  return arr.map((item: any) => ({
-    callId: item.id,
-    name: item.name,
-    arguments: item.arguments ?? item.args ?? {},
-  }))
+    return arr.map((item: any) => ({
+      callId: item.id ?? item.callId,
+      name: item.name ?? item.tool,
+      arguments: item.arguments ?? item.args ?? item.parameters ?? {},
+    }))
+
+  } catch (err) {
+    // If not JSON and not rich format, maybe it's just a tool name? (not recommended)
+    throw new Error(`Unrecognized tool call format: ${text}`)
+  }
 }
 
 /**
- * Render a tool result back into the conversation.
- * This string goes inside the toolResult template pair.
- */
-export function renderToolResult(result: ToolResult): string {
-  return JSON.stringify(
+ *  Render a tool result back into the conversation.
+*/
+export function renderToolResult(result: ToolResult, T?: ToolResultsTemplate): string {
+  const json = JSON.stringify(
     result.error
       ? { error: result.error }
       : { result: result.result },
     null,
     2
   )
+
+  if (T) {
+    // TODO add multiple tools support
+    return `${T.wrap[0]}${T.rich?.callId}${result.callId}${T.rich?.content}${json}${T.wrap[1]}`
+  }
+
+  return json
 }
 
 // --- Built-in tools ---

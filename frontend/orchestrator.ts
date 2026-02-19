@@ -40,6 +40,7 @@ export type TurnResult = {
 
 // --- Git detection ---
 
+// TODO Doesnt work
 async function findGitRoot(dir: string): Promise<string | null> {
   const { dirname, join } = await import('node:path')
   let current = dir
@@ -140,6 +141,8 @@ export class Orchestrator {
       // Push the assistant turn with tool calls into history
       this.history.push({ role: 'tool_call', content: turn.toolCalls.join('\n') })
 
+      console.log('LOG: received tool calls:', turn.toolCalls)
+
       // Execute each tool call
       for (const rawCall of turn.toolCalls) {
         let calls: ToolCall[]
@@ -153,6 +156,8 @@ export class Orchestrator {
 
           continue
         }
+
+        console.log('LOG: parsed tool calls:', calls)
 
         for (const call of calls) {
           const result = await this.executeToolCall(call)
@@ -262,7 +267,7 @@ In code/plan mode you can:
 - Generate a CodePlan describing code modifications
 
 Tools are your hands, you must acknowledge tool results.
-Use token tool calls like this: [TOOL_CALLS]...[CALL_ID]...[ARGS]...`
+You must use token tool calls syntax, like this: [TOOL_CALLS]...[CALL_ID]...[ARGS]...`
   }
 }
 

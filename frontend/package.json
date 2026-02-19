@@ -14,6 +14,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.30",
     "ai": "^6.0.86",
+    "consola": "^3.4.2",
     "destr": "^2.0.5",
     "dotenv": "^17.3.1",
     "grammy": "^1.40.0",

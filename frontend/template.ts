@@ -10,7 +10,7 @@ export type FimTemplate = {
   suffix: string
 }
 
-type ToolCallsTemplate = {
+export type ToolCallsTemplate = {
   wrap: TemplatePair            // [TOOL_CALLS] ... (outer)
 
   // Mistral
@@ -20,7 +20,7 @@ type ToolCallsTemplate = {
   }
 }
 
-type ToolResultsTemplate = {
+export type ToolResultsTemplate = {
   wrap: TemplatePair            // [TOOL_RESULTS] ... [/TOOL_RESULTS]
 
   // Mistral
