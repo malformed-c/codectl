@@ -2,8 +2,8 @@
 1. frontend/config.ts
 2. frontend/index.ts
 3. frontend/history.ts
-4. frontend/ui/cli.ts
-5. frontend/ui/telegram.ts
+4. frontend/door/cli.ts
+5. frontend/door/telegram.ts
 6. frontend/api/kobold.ts (move)
 7. frontend/api/text_api.ts
 8. frontend/api/chat_api.ts

@@ -244,7 +244,7 @@ export function renderFim(req: FimRequest, template: TextTemplate): string | nul
   return `${prefix}${req.prefix}${suffix}${req.suffix}${middle}`
 }
 
-// --- Parser ------
+// --- Parser ---
 
 /**
  * Extract content between open/close tokens. Returns null if not found.

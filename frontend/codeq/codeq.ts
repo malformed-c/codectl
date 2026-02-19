@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs"
 import { rename } from "node:fs/promises"
 import { match } from "ts-pattern"
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types ---
 
 await Parser.init()
 
@@ -21,7 +21,7 @@ const Python = await Language.load(pythonWasm)
 /* Capture name -> matching nodes */
 type CaptureMap = Map<string, Node[]>
 
-// ─── Errors ──────────────────────────────────────────────────────────────────
+// --- Errors ---
 
 export class CodeqError extends Error { }
 
@@ -49,7 +49,7 @@ export class AmbiguousTargetError extends CodeqError {
   }
 }
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
+// --- Enums ---
 
 export enum CodeKind {
   Func = "func",
@@ -71,7 +71,7 @@ export enum ResourceKind {
   Class = "Class",
 }
 
-// ─── Schema types (filemap/repomap output) ───────────────────────────────────
+// --- Schema types (filemap/repomap output) ---
 
 export interface ObjectMeta {
   name: string
@@ -97,7 +97,7 @@ export interface CodeqObject {
   spec: FunctionSpec | ClassSpec
 }
 
-// ─── Internal map entries ─────────────────────────────────────────────────────
+// --- Internal map entries ---
 
 interface FunctionMapEntry {
   start: number
@@ -118,7 +118,7 @@ interface ClassMapEntry {
   docstring: string
 }
 
-// ─── Tree-sitter setup ───────────────────────────────────────────────────────
+// --- Tree-sitter setup ---
 
 const pyParser = new Parser()
 pyParser.setLanguage(Python)
@@ -127,7 +127,7 @@ pyParser.setLanguage(Python)
 // const tsParser = new Parser()
 // tsParser.setLanguage(TypeScript)
 
-// ─── Query strings (identical to Python version) ──────────────────────────────
+// --- Query strings (identical to Python version) ---
 
 const FUNCS_QUERY_STRING = `
 (decorated_definition
@@ -162,7 +162,7 @@ const CLASSES_QUERY_STRING = `
 ) @class.node
 `
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 /* Convert tree-sitter Node.js captures array -> CaptureMap */
 function toCaptureMap(
@@ -261,7 +261,7 @@ function importInsertLine(lines: string[]): number {
   return importEnd > start ? importEnd : start
 }
 
-// ─── Main class ───────────────────────────────────────────────────────────────
+// --- Main class ---
 
 export class Codeq {
   private tree: Tree
@@ -280,7 +280,7 @@ export class Codeq {
     this.classesQuery = new Query(Python, CLASSES_QUERY_STRING)
   }
 
-  // ─── Factory methods ──────────────────────────────────────────────────────
+  // --- Factory methods ---
 
   static fromSource(source: string, path = "<FILE>"): Codeq {
     const buf = Buffer.from(source, "utf8")
@@ -305,7 +305,7 @@ export class Codeq {
     return Codeq.fromSource(source, displayPath)
   }
 
-  // ─── Output ───────────────────────────────────────────────────────────────
+  // --- Output ---
 
   toSource(): string {
     return this.sourceBytes.toString("utf8")
@@ -340,7 +340,7 @@ export class Codeq {
     return dest
   }
 
-  // ─── Public API ───────────────────────────────────────────────────────────
+  // --- Public API ---
 
   fileMap(): string[] {
     const functions = this.mapFunctions()
@@ -493,7 +493,7 @@ export class Codeq {
     )
 
     // For logic replacements, we splice starting right after the docstring's
-    // closing quotes — so we must prepend a newline + indentation ourselves.
+    // closing quotes - so we must prepend a newline + indentation ourselves.
     const needsLeadingNewline = what === CodePart.Logic
     const indentPrefix = " ".repeat(indentLevel)
     const prepared =
@@ -509,7 +509,7 @@ export class Codeq {
     this.tree = pyParser.parse(this.sourceBytes.toString("utf8"))
   }
 
-  // ─── Query internals ──────────────────────────────────────────────────────
+  // --- Query internals ---
 
   private queryFor(kind: CodeKind): Query {
     return kind === CodeKind.Func ? this.funcsQuery : this.classesQuery
@@ -711,7 +711,7 @@ export class Codeq {
   }
 }
 
-// ─── Pure helpers for map entries ────────────────────────────────────────────
+// --- Pure helpers for map entries ---
 
 function getCaptureKind(captures: CaptureMap, kind: string, what: string): Node | undefined {
   return match(what)
@@ -768,7 +768,7 @@ function classToResource(e: ClassMapEntry): CodeqObject {
   }
 }
 
-// ─── Quick smoke test (bun run codeq/codeq.ts) ─────────────────────────────────────
+// --- Quick smoke test (bun run codeq/codeq.ts) ---
 
 if (import.meta.main) {
   const source = `
