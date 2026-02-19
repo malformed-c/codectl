@@ -12,6 +12,7 @@ import { createRoom } from './room'
 
 async function loadConfig(): Promise<Config> {
   const text = await Bun.file('config.yaml').text()
+
   return YAML.parse(text) as Config
 }
 
@@ -35,11 +36,16 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
   for await (const line of console) {
     const text = line.trim()
-    if (!text) { process.stdout.write('> '); continue }
+
+    if (!text) {
+      process.stdout.write('> ')
+      continue
+    }
 
     // Slash commands
     if (text === '/new') {
       await historyStore.save(room.meta, orchestrator.getHistory())
+
       orchestrator.clearHistory()
       consola.info('Started new conversation')
       process.stdout.write('> ')
