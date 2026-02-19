@@ -102,6 +102,10 @@ export class Orchestrator {
     return [...this.history]
   }
 
+  setHistory(history: Message[]): void {
+    this.history = [...history]
+  }
+
   clearHistory(): void {
     this.history = []
     this.rebuildSystemMessage()
