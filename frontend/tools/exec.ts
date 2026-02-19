@@ -45,7 +45,7 @@ export const CodeTool: ToolDefinition = {
     properties: {
       language: {
         type: 'string',
-        enum: ['bash', 'python', 'typescript'],
+        enum: ['bash', 'python', 'typescript', 'sh', 'shell', 'py', 'ts'],
         description: 'The programming language of the code.',
       },
       code: { type: 'string', description: 'The code to execute.' },
@@ -96,8 +96,8 @@ export function createExecHandlers(): Record<string, ToolHandler> {
   const tsHandler: ToolHandler = async (args) => {
     const code = args.code as string
     try {
-      // Use bun eval to run code string
-      const proc = Bun.spawn(['bun', 'eval', code], {
+      // Use bun -e to run code string
+      const proc = Bun.spawn(['bun', '-e', code], {
         stdout: 'pipe',
         stderr: 'pipe',
       })
@@ -117,9 +117,9 @@ export function createExecHandlers(): Record<string, ToolHandler> {
     const lang = args.language as string
     const code = args.code as string
 
-    if (lang === 'bash') return bashHandler({ command: code })
-    if (lang === 'python') return pythonHandler({ code })
-    if (lang === 'typescript') return tsHandler({ code })
+    if (lang === 'bash' || lang === 'sh' || lang === 'shell') return bashHandler({ command: code })
+    if (lang === 'python' || lang === 'py') return pythonHandler({ code })
+    if (lang === 'typescript' || lang === 'ts') return tsHandler({ code })
 
     return { result: null, error: `Unsupported language: ${lang}` }
   }
