@@ -223,12 +223,33 @@ export class KoboldAdapter {
       ...(eos ? [eos] : []),
     ]
 
-    // DRY sequence breakers - include think tokens if present
+    // DRY sequence breakers - include think + tool tokens
     const dryBreakers = cfg.drySequenceBreakers ?? ['\n', ':', "'", '*']
-    const think = cfg.template.think
-    if (think) {
-      if (!dryBreakers.includes(think[0])) dryBreakers.push(think[0])
-      if (think[1] && !dryBreakers.includes(think[1])) dryBreakers.push(think[1])
+
+    const addBreaker = (token: string | undefined) => {
+      if (token && !dryBreakers.includes(token)) dryBreakers.push(token.trim())
+    }
+
+    const { think, toolCall, toolResult, availableTools } = cfg.template
+
+    if (think) { addBreaker(think[0]); addBreaker(think[1]) }
+
+    // toolCall / toolResult may be TemplatePair or rich - extract wrap tokens
+    const toolCallWrap = Array.isArray(toolCall) ? toolCall : toolCall?.wrap
+    const toolResultWrap = Array.isArray(toolResult) ? toolResult : toolResult?.wrap
+
+    if (toolCallWrap) { addBreaker(toolCallWrap[0]); addBreaker(toolCallWrap[1]) }
+    if (toolResultWrap) { addBreaker(toolResultWrap[0]); addBreaker(toolResultWrap[1]) }
+    if (availableTools) { addBreaker(availableTools[0]); addBreaker(availableTools[1]) }
+
+    // Mistral rich tokens
+    if (toolCall && !Array.isArray(toolCall) && toolCall.rich) {
+      addBreaker(toolCall.rich.callId)
+      addBreaker(toolCall.rich.args)
+    }
+    if (toolResult && !Array.isArray(toolResult) && toolResult.rich) {
+      addBreaker(toolResult.rich.callId)
+      addBreaker(toolResult.rich.content)
     }
 
     return {

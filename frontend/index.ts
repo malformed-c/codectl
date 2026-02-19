@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     // CLI door - one orchestrator, one room
     const orchestrator = new Orchestrator({
       adapter,
-      toolFormat: 'json',
+      toolFormat: 'typescript',
       autonomousTurns: 16,
     })
 

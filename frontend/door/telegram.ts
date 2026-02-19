@@ -192,7 +192,7 @@ export class TelegramDoor {
         await this.config.historyStore.save(room.meta, room.orchestrator.getHistory())
       }
 
-      const response = result.turn.content || '...'
+      const response = markdownToTelegramHTML(result.turn.content || '...')
       const chunks = splitMessage(response, this.config.maxMessageLength)
 
       for (const chunk of chunks) {
