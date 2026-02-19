@@ -1,3 +1,4 @@
+import { consola, createConsola } from "consola"
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
 import type { Message, ParsedTurn, TextTemplate } from './template'
@@ -28,19 +29,71 @@ export type OrchestratorConfig = {
   systemPrompt?: string
   tools?: ToolDefinition[]
   toolFormat?: ToolFormat
-  /** Max tool call rounds per user message before breaking the loop */
-  maxToolRounds?: number
+  /** Max autonomous turns before giving up */
+  autonomousTurns?: number
+  /** Current nesting depth (set by subagent tool) */
+  depth?: number
+  /** Max subagent nesting depth */
+  maxDepth?: number
 }
 
 export type TurnResult = {
   turn: ParsedTurn
-  mode: Mode
   toolsExecuted: Array<{ call: ToolCall; result: ToolResult }>
+}
+
+// --- Built-in: continue tool ---
+
+export const ContinueTool: ToolDefinition = {
+  name: 'continue',
+  description:
+    'Signal that you need more turns to complete the task. ' +
+    'Use when you have more work to do after this response.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: {
+        type: 'string',
+        description: 'Why you need to continue.',
+      },
+    },
+    required: [],
+  },
+  returns: {
+    type: 'object',
+    properties: {
+      accepted: { type: 'boolean', description: "Whether it was accepted by codectl system." },
+    },
+  },
+}
+
+// --- Built-in: done tool ---
+
+export const DoneTool: ToolDefinition = {
+  name: 'done',
+  description:
+    'Signal task completion. Call when you have finished your work. ' +
+    'Pass result to return a specific value, or omit to use your last response as the result.',
+  parameters: {
+    type: 'object',
+    properties: {
+      result: {
+        type: 'string',
+        description: 'The final result to return. Optional.',
+      },
+    },
+    required: [],
+  },
+  returns: {
+    type: 'object',
+    properties: {
+      accepted: { type: 'boolean', description: 'User choice.' },
+    },
+  },
 }
 
 // --- Git detection ---
 
-// TODO Doesnt work
 async function findGitRoot(dir: string): Promise<string | null> {
   const { dirname, join } = await import('node:path')
   let current = dir
@@ -51,6 +104,7 @@ async function findGitRoot(dir: string): Promise<string | null> {
     const parent = dirname(current)
 
     if (parent === current) return null
+
     current = parent
   }
 }
@@ -60,7 +114,7 @@ async function findGitRoot(dir: string): Promise<string | null> {
 export class Orchestrator {
   private readonly adapter: KoboldAdapter
   private readonly profile: TextTemplate
-  private readonly config: OrchestratorConfig
+  readonly config: OrchestratorConfig
   private readonly handlers = new Map<string, ToolHandler>()
   private readonly tools: ToolDefinition[] = []
 
@@ -73,15 +127,18 @@ export class Orchestrator {
     this.config = config
     this.profile = config.adapter.config.template
 
-    // Register built-in mode tool
-    this.registerTool(ModeTool, async (args) => {
-      const targetMode = args.mode as string
+    // TODO Refactor to tool/registerBuiltin()
+    // Built-in: mode
+    this.registerTool(ModeTool, async (args) =>
+      this.handleModeSwitch(args.mode as string)
+    )
 
-      const result = await this.handleModeSwitch(targetMode)
-      return result
-    })
+    // Built-in: done - handler is a no-op, loop detects it by name
+    this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
 
-    // Register user-provided tools
+    // Built-in: continue - handler is a no-op, loop detects it by name
+    this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
+
     for (const tool of config.tools ?? []) {
       this.tools.push(tool)
     }
@@ -94,61 +151,59 @@ export class Orchestrator {
     this.handlers.set(def.name, handler)
   }
 
-  getMode(): Mode {
-    return this.mode
-  }
-
-  getHistory(): Message[] {
-    return [...this.history]
-  }
-
-  setHistory(history: Message[]): void {
-    this.history = [...history]
-  }
+  getMode(): Mode { return this.mode }
+  getHistory(): Message[] { return [...this.history] }
+  setHistory(history: Message[]): void { this.history = [...history] }
 
   clearHistory(): void {
     this.history = []
     this.rebuildSystemMessage()
   }
 
-  abort(): void {
-    this.abortController?.abort()
-  }
+  abort(): void { this.abortController?.abort() }
 
   async chat(userMessage: string): Promise<TurnResult> {
     this.abortController = new AbortController()
 
-    // Ensure system message is first
-    if (this.history.length === 0) {
-      this.rebuildSystemMessage()
-    }
+    if (this.history.length === 0) this.rebuildSystemMessage()
 
     this.history.push({ role: 'user', content: userMessage })
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
-    const maxRounds = this.config.maxToolRounds ?? 8
+    const maxTurns = this.config.autonomousTurns ?? 16
     let finalTurn: ParsedTurn = { content: '' }
+    let doneResult: string | undefined
 
-    for (let round = 0; round < maxRounds; round++) {
+    for (let turn = 0; turn < maxTurns; turn++) {
       const messages = this.buildMessages()
 
-      const turn = await this.adapter.generate(messages)
-      finalTurn = turn
+      const parsed = await this.adapter.generate(messages)
 
-      // No tool calls - done
-      if (!turn.toolCalls?.length) {
-        this.history.push({ role: 'assistant', content: turn.content })
+      finalTurn = parsed
 
+      // Content turn with no tool calls - model is done, break
+      if (parsed.content && !parsed.toolCalls?.length) {
+        this.history.push({ role: 'assistant', content: parsed.content })
         break
       }
 
-      // Push the assistant turn with tool calls into history
-      this.history.push({ role: 'tool_call', content: turn.toolCalls.join('\n') })
+      // Record content if present alongside tool calls
+      if (parsed.content) {
+        this.history.push({ role: 'assistant', content: parsed.content })
+      }
 
-      console.log('LOG: received tool calls:', turn.toolCalls)
+      // No content, no tool calls - model stalled, break
+      if (!parsed.toolCalls?.length) break
 
-      // Execute each tool call
-      for (const rawCall of turn.toolCalls) {
+      // Push tool call turn
+      this.history.push({ role: 'tool_call', content: parsed.toolCalls.join('\n') })
+
+      let shouldStop = false
+      let shouldContinue = false
+
+      consola.trace('received tool calls:', parsed.toolCalls)
+
+      for (const rawCall of parsed.toolCalls) {
         let calls: ToolCall[]
 
         try {
@@ -161,29 +216,45 @@ export class Orchestrator {
           continue
         }
 
-        console.log('LOG: parsed tool calls:', calls)
+        consola.trace('parsed tool calls:', calls)
 
         for (const call of calls) {
+          // TODO Refactor to lambdas
+          if (call.name === 'done') {
+            doneResult = call.arguments.result as string | undefined
+            shouldStop = true
+          }
+
+          if (call.name === 'continue') {
+            shouldContinue = true
+          }
+
           const result = await this.executeToolCall(call)
 
           toolsExecuted.push({ call, result })
           this.history.push({ role: 'tool_result', content: renderToolResult(result) })
         }
       }
+
+      if (shouldStop) break
+      // shouldContinue - just keeps looping, already counted as a turn
     }
 
-    return { turn: finalTurn, mode: this.mode, toolsExecuted }
+    // done with explicit result overrides last content turn
+    if (doneResult !== undefined) {
+      finalTurn = { ...finalTurn, content: doneResult }
+    }
+
+    // TODO
+    return { turn: finalTurn, toolsExecuted }
   }
 
   // --- Internals ---
 
   private buildMessages(): Message[] {
-    const allTools = this.tools
+    if (this.tools.length === 0) return this.history
 
-    if (allTools.length === 0) return this.history
-
-    // Inject available tools into system turn
-    const toolsContent = renderTools(allTools, this.config.toolFormat ?? 'json')
+    const toolsContent = renderTools(this.tools, this.config.toolFormat ?? 'json')
     const [systemMsg, ...rest] = this.history
 
     const enrichedSystem: Message = {
@@ -222,10 +293,7 @@ export class Orchestrator {
 
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {
     const handler = this.handlers.get(call.name)
-
-    if (!handler) {
-      return { result: null, error: `Unknown tool: ${call.name}` }
-    }
+    if (!handler) return { result: null, error: `Unknown tool: ${call.name}` }
 
     try {
       return await handler(call.arguments)
@@ -236,8 +304,6 @@ export class Orchestrator {
   }
 
   private async handleModeSwitch(targetMode: string): Promise<ToolResult> {
-    const prev = this.mode
-
     if (targetMode === 'chat') {
       this.mode = { kind: 'chat' }
       this.rebuildSystemMessage()
@@ -254,14 +320,15 @@ export class Orchestrator {
       }
 
       this.mode = { kind: 'code/plan', gitRoot: gitRoot ?? '' }
-
       this.rebuildSystemMessage()
+
       return { result: { switched: targetMode, result: gitRoot, error: errMsg } }
     }
 
     return { result: null, error: `Unknown mode: ${targetMode}` }
   }
 
+  // TODO
   private defaultSystemPrompt(): string {
     return `You're in codectl system. You can have general conversations and help with code tasks.
 
@@ -290,22 +357,22 @@ if (import.meta.main) {
 
   const orchestrator = new Orchestrator({
     adapter,
-    toolFormat: 'python',
+    toolFormat: 'typescript',
   })
 
-  console.log('=== chat (no tools) ===')
+  consola.log('=== chat (no tools) ===')
   const r1 = await orchestrator.chat('Hi. Say hello in one sentence.')
-  console.log(r1.turn.content)
-  console.log('mode:', r1.mode)
+  consola.log(r1.turn.content)
+  consola.log('mode:', orchestrator.getMode())
 
-  console.log('\n=== tools ===')
-  const r2 = await orchestrator.chat('Can you list available tools.')
-  console.log(r2.turn.content)
-  console.log('mode:', r2.mode)
+  consola.log('\n=== mode switch ===')
+  const r2 = await orchestrator.chat('Switch to code/plan mode using tool calls.')
+  consola.log(r2.turn.content)
+  consola.log('mode:', orchestrator.getMode())
+  consola.log('tools executed:', r2.toolsExecuted)
 
-  console.log('\n=== mode switch ===')
-  const r3 = await orchestrator.chat('Can we test tools? Can you switch to code/plan mode using tool calls.')
-  console.log(r3.turn.content)
-  console.log('mode:', r3.mode)
-  console.log('tools executed:', r3.toolsExecuted)
+  consola.log('\n=== tools list ===')
+  const r3 = await orchestrator.chat('List available tools.')
+  consola.log(r3.turn.content)
+  consola.log('mode:', orchestrator.getMode())
 }
