@@ -11,3 +11,4 @@
 10. frontend/ Write more tests
 11. Move smoke tests to frontend/tests
 12. Replace console.log with consola and proper logging levels
+13. (Sub)Agent tool, like grok 4.20
