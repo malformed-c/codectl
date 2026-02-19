@@ -66,6 +66,20 @@ export type ParsedTurn = {
   content: string
 }
 
+export type ModelProfile = {
+  name: string
+  template: TextTemplate
+  parameters?: Record<string, unknown>
+}
+
+export type Config = {
+  api_server: string
+  api_type: string
+  history_path: string
+  default_model: string
+  available_models: string[]
+}
+
 // --- Built-in profiles ---
 //TODO add stop strings and optional newlines and trimming
 
