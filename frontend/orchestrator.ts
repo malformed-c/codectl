@@ -141,7 +141,6 @@ export async function findGitRoot(startDir: string): Promise<string | null> {
   }
 }
 
-
 // --- Orchestrator ---
 
 export class Orchestrator {
