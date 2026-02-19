@@ -9,4 +9,4 @@
 11. Move smoke tests to frontend/tests
 12. Add proper logging levels
 13. (Sub)Agent tool, like grok 4.20
-14. Tools reactive dependecies?
+14. Tools reactive prerequisites?
