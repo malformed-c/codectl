@@ -299,7 +299,14 @@ function extractAll(text: string, [open, close]: TemplatePair): string[] {
  * Remove all occurrences of a tagged block from text.
  */
 function stripTag(text: string, [open, close]: TemplatePair): string {
-  if (!close) return text.replaceAll(open, '')
+  // If no closing tag, we assume the tag consumes the rest of the string
+  if (!close) {
+    const start = text.indexOf(open)
+
+    if (start === -1) return text
+
+    return text.slice(0, start).trim()
+  }
 
   let result = text
   while (true) {
@@ -308,6 +315,7 @@ function stripTag(text: string, [open, close]: TemplatePair): string {
 
     const end = result.indexOf(close, start + open.length)
     if (end === -1) {
+      // If we found an open tag but no close tag, strip everything after it
       result = result.slice(0, start)
 
       break

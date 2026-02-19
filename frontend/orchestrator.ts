@@ -15,6 +15,7 @@ import {
 } from './tool'
 import { lstat } from "node:fs/promises"
 import { readFile } from "node:fs/promises"
+import { CodeqTools, createCodeqHandlers } from "./tools/codeq"
 
 // --- Types ---
 
@@ -360,6 +361,19 @@ export class Orchestrator {
       }
 
       this.mode = { kind: 'code/plan', gitRoot: gitRoot ?? '' }
+
+      // Register codeq tools now that we hopefully have a git root
+      const handlers = createCodeqHandlers(() => {
+        const m = this.mode
+
+        return m.kind !== 'chat' ? m.gitRoot : ''
+      })
+
+      for (const [name, handler] of Object.entries(handlers)) {
+        const def = CodeqTools.find(t => t.name === name)!
+        this.registerTool(def, handler)
+      }
+
       this.rebuildSystemMessage()
 
       return { result: { switched: targetMode, result: gitRoot, error: errMsg } }
@@ -368,9 +382,9 @@ export class Orchestrator {
     return { result: null, error: `Unknown mode: ${targetMode}` }
   }
 
-  // TODO
+  // TODO unhardcode
   private defaultSystemPrompt(): string {
-    return `You're in codectl system. You can have general conversations and help with code tasks.
+    return `You're orchestrator in codectl system. You can have general conversations and help with code tasks.
 
 In code/plan mode you can:
 - Access to codeq additional information
