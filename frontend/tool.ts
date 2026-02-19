@@ -259,23 +259,33 @@ function renderProse(_tools: ToolDefinition[]): string {
  * Parse a raw tool call string (extracted by template parser) into ToolCall[].
  * Handles both Mistral rich format and simple JSON array.
  */
+//TODO
 export function parseToolCalls(raw: string): ToolCall[] {
   const text = raw.trim()
 
-  try {
-    // Simple format: JSON array of {name, arguments}
-    const parsed = JSON.parse(text)
-    const arr = Array.isArray(parsed) ? parsed : [parsed]
+  // Rich format detection
+  if (text.includes('[ARGS]')) {
+    const [namePart, argsPart] = text.split('[ARGS]')
+    if (namePart && argsPart) {
+      const name = namePart.trim()
+      const argsJson = argsPart.trim()
 
-    return arr.map((item: Record<string, unknown>) => ({
-      callId: item.id as string | undefined,
-      name: item.name as string,
-      arguments: (item.arguments ?? item.args ?? {}) as Record<string, unknown>,
-    }))
-
-  } catch {
-    throw new Error(`Failed to parse tool call: ${text}`)
+      return [{
+        name,
+        arguments: JSON.parse(argsJson),
+      }]
+    }
   }
+
+  // Fallback to pure JSON
+  const parsed = JSON.parse(text)
+  const arr = Array.isArray(parsed) ? parsed : [parsed]
+
+  return arr.map((item: any) => ({
+    callId: item.id,
+    name: item.name,
+    arguments: item.arguments ?? item.args ?? {},
+  }))
 }
 
 /**

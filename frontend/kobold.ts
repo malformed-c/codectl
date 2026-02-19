@@ -71,7 +71,7 @@ async function delay(ms: number): Promise<void> {
 
 export class KoboldAdapter {
   private readonly server: string
-  private readonly config: KoboldConfig
+  readonly config: KoboldConfig
 
   constructor(config: KoboldConfig) {
     this.config = config

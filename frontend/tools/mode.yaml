@@ -2,7 +2,7 @@
 name: mode
 description: >
   Switch interaction mode. Use code/plan when the user wants to
-  modify code or you need to explore the codebase.
+  modify code or you need to explore the codebase. Use chat for general conversation.
 
 parameters:
   type: object

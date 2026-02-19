@@ -67,14 +67,15 @@ export type ParsedTurn = {
 }
 
 // --- Built-in profiles ---
+//TODO add stop strings and optional newlines and trimming
 
 export const Profiles = {
   // Mistral instruct
   mistral: {
     bos: '<s>',
     eos: '</s>',
-    system: ['[SYSTEM_PROMPT] ', ' [/SYSTEM_PROMPT]\n'],
-    userTurn: ['[INST] ', ' [/INST]\n'],
+    system: ['[SYSTEM_PROMPT]\n', '\n[/SYSTEM_PROMPT]\n'],
+    userTurn: ['[INST]\n', '\n[/INST]\n'],
     modelTurn: ['', '</s>\n'],
     toolCall: {
       wrap: ['[TOOL_CALLS]', ''],
@@ -84,14 +85,14 @@ export const Profiles = {
       }
     },
     toolResult: {
-      wrap: ['[TOOL_RESULTS]', '[/TOOL_RESULTS]\n'],
+      wrap: ['[TOOL_RESULTS]\n', '\n[/TOOL_RESULTS]\n'],
       rich: {
         callId: '[CALL_ID]',
         content: '[TOOL_CONTENT]',
       }
     },
-    think: ['[THINK]', '[/THINK]\n'],
-    availableTools: ['[AVAILABLE_TOOLS]', '[/AVAILABLE_TOOLS]\n'],
+    think: ['[THINK]', '[/THINK]'],
+    availableTools: ['[AVAILABLE_TOOLS]\n', '\n[/AVAILABLE_TOOLS]\n'],
     fim: {
       prefix: '[PREFIX]',
       middle: '[MIDDLE]',
