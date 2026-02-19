@@ -236,13 +236,15 @@ export class Orchestrator {
       return { result: { switched: 'chat' } }
     }
 
-    if (targetMode === 'code/plan' || targetMode === 'code/gen') {
+    if (targetMode === 'code/plan') {
       const gitRoot = await findGitRoot(process.cwd())
       let errMsg = undefined
 
       if (!gitRoot) {
         errMsg = 'No git repository found in current directory or any parent'
       }
+
+      this.mode = { kind: 'code/plan', gitRoot: gitRoot ?? '' }
 
       this.rebuildSystemMessage()
       return { result: { switched: targetMode, result: gitRoot, error: errMsg } }
