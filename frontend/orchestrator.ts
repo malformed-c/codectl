@@ -1,5 +1,5 @@
 import { consola } from "consola"
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
 import type { Message, ParsedTurn, TextTemplate } from './template'
@@ -13,6 +13,8 @@ import {
   renderToolResult,
   ModeTool,
 } from './tool'
+import { lstat } from "node:fs/promises"
+import { readFile } from "node:fs/promises"
 
 // --- Types ---
 
@@ -79,22 +81,66 @@ export const DoneTool: ToolDefinition = {
 
 // --- Helpers ---
 
-export async function findGitRoot(dir: string): Promise<string | null> {
-  let current = resolve(dir)
-  while (true) {
-    try {
-      // Check for .git directory
-      if (await Bun.file(join(current, '.git')).exists()) return current
+async function pathExists(path: string): Promise<false | "file" | "dir"> {
+  try {
+    const stat = await lstat(path)
 
-    } catch {
-      return null
+    if (stat.isDirectory()) return "dir"
+
+    if (stat.isFile()) return "file"
+
+    return false
+
+  } catch {
+    return false
+  }
+}
+
+export async function findGitRoot(startDir: string): Promise<string | null> {
+
+  let current = resolve(startDir)
+
+  while (true) {
+
+    const gitPath = join(current, ".git")
+
+    const type = await pathExists(gitPath)
+
+    // normal repo
+    if (type === "dir") {
+      return current
+    }
+
+    // worktree / submodule
+    if (type === "file") {
+
+      const content = await readFile(gitPath, "utf8")
+
+      const match = content.match(/^gitdir:\s*(.+)$/m)
+
+      if (!match) {
+        return current
+      }
+
+      let gitDir = match[1]!.trim()
+
+      if (!isAbsolute(gitDir)) {
+        gitDir = resolve(current, gitDir)
+      }
+
+      return dirname(gitDir)
     }
 
     const parent = dirname(current)
-    if (parent === current) return null
+
+    if (parent === current) {
+      return null
+    }
+
     current = parent
   }
 }
+
 
 // --- Orchestrator ---
 
