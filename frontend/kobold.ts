@@ -230,9 +230,13 @@ export class KoboldAdapter {
       if (token && !dryBreakers.includes(token)) dryBreakers.push(token.trim())
     }
 
-    const { think, toolCall, toolResult, availableTools } = cfg.template
+    const { think, userTurn, system, toolCall, toolResult, availableTools } = cfg.template
 
     if (think) { addBreaker(think[0]); addBreaker(think[1]) }
+
+    if (userTurn) { addBreaker(userTurn[0]); addBreaker(userTurn[1]) }
+
+    if (system) { addBreaker(system[0]); addBreaker(system[1]) }
 
     // toolCall / toolResult may be TemplatePair or rich - extract wrap tokens
     const toolCallWrap = Array.isArray(toolCall) ? toolCall : toolCall?.wrap

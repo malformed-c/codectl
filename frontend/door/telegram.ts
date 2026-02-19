@@ -132,15 +132,16 @@ export class TelegramDoor {
       const roomId = roomIdForChat(ctx.chat.id)
       const existing = this.registry.get(roomId)
 
-      if (existing) {
-        // Save current history before clearing
-        if (this.config.historyStore) {
-          await this.config.historyStore.save(
-            existing.meta,
-            existing.orchestrator.getHistory()
-          )
-        }
+      if (this.config.historyStore) {
+        if (existing) {
+          await this.config.historyStore.archive(roomId, existing.meta, existing.orchestrator.getHistory())
 
+        } else {
+          await this.config.historyStore.archive(roomId)
+        }
+      }
+
+      if (existing) {
         existing.orchestrator.clearHistory()
         touchRoom(existing)
       }

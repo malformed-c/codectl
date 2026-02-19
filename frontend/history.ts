@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, renameSync } from 'node:fs'
 import type { Message } from './template'
 import type { RoomMeta } from './room'
 
@@ -47,6 +47,30 @@ export class HistoryStore {
     const path = this.filePath(roomId)
 
     if (existsSync(path)) await Bun.file(path).delete?.()
+  }
+
+  async archive(roomId: string, meta?: RoomMeta, history?: Message[]): Promise<void> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const archiveId = `${roomId}.${timestamp}`
+
+    let data: PersistedRoom | null = null
+
+    if (meta && history) {
+      data = { meta: { ...meta, id: archiveId }, history }
+
+    } else {
+      data = await this.load(roomId)
+      if (data) {
+        data.meta.id = archiveId
+      }
+    }
+
+    if (data) {
+      await Bun.write(this.filePath(archiveId), JSON.stringify(data, null, 2))
+
+      // Delete the live file
+      await this.delete(roomId)
+    }
   }
 
   async list(): Promise<RoomMeta[]> {

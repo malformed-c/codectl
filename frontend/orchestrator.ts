@@ -16,6 +16,9 @@ import {
 import { lstat } from "node:fs/promises"
 import { readFile } from "node:fs/promises"
 import { CodeqTools, createCodeqHandlers } from "./tools/codeq"
+import { ExecTools, createExecHandlers } from "./tools/exec"
+import { SubagentTool, createSubagentHandler } from "./tools/subagent"
+import { MemoryTool, createMemoryHandler } from "./tools/memory"
 
 // --- Types ---
 
@@ -160,6 +163,7 @@ export class Orchestrator {
   readonly config: OrchestratorConfig
   private readonly handlers = new Map<string, ToolHandler>()
   private readonly tools: ToolDefinition[] = []
+  private readonly memory = new Map<string, string>()
 
   private history: Message[] = []
   private mode: Mode = { kind: 'chat' }
@@ -180,6 +184,28 @@ export class Orchestrator {
     this.registerTool(LibraryTool, async () => ({
       result: renderTools(this.tools, this.config.toolFormat ?? 'json')
     }))
+    this.registerTool(MemoryTool, createMemoryHandler(this.memory))
+
+    // Register codeq tools
+    const codeqHandlers = createCodeqHandlers(() => {
+      const m = this.mode
+      return m.kind !== 'chat' ? m.gitRoot : ''
+    })
+
+    for (const [name, handler] of Object.entries(codeqHandlers)) {
+      const def = CodeqTools.find(t => t.name === name)!
+      this.registerTool(def, handler)
+    }
+
+    // Register exec tools
+    const execHandlers = createExecHandlers()
+    for (const [name, handler] of Object.entries(execHandlers)) {
+      const def = ExecTools.find(t => t.name === name)!
+      this.registerTool(def, handler)
+    }
+
+    // Register subagent tool
+    this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
 
     // Register user tools
     for (const tool of config.tools ?? []) {
@@ -190,6 +216,7 @@ export class Orchestrator {
   // --- Public API ---
 
   registerTool(def: ToolDefinition, handler: ToolHandler): void {
+    if (this.handlers.has(def.name)) return
     this.tools.push(def)
     this.handlers.set(def.name, handler)
   }
@@ -301,12 +328,72 @@ export class Orchestrator {
     if (this.tools.length === 0) return this.history
 
     // CORE TOOLS that should always be in system prompt
-    // This avoids permanently bloating the system prompt
-    const coreToolNames = ['mode', 'done', 'continue', 'tool_library']
+    const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
     const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
 
     const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
     const [systemMsg, ...rest] = this.history
+
+    // Gradual shortening of tool results
+    let userTurnIndex = 0
+    const processedHistory = rest.map((msg, idx) => {
+      if (msg.role === 'user') {
+        userTurnIndex++
+      }
+
+      if (msg.role === 'tool_result') {
+        // Find how many user turns are ahead of this message
+        let turnsAhead = 0
+        for (let i = idx + 1; i < rest.length; i++) {
+          if (rest[i].role === 'user') turnsAhead++
+        }
+
+        if (turnsAhead === 0) {
+          return msg // Age 0: full
+        }
+
+        try {
+          // Attempt to parse and shorten
+          // The result might be wrapped in tool tags, so we need to handle that
+          // For now, let's do a simple string shortening if it looks like JSON
+          let content = msg.content
+          let prefix = ''
+          let suffix = ''
+
+          // Check for Mistral-style wrapping
+          if (this.profile.toolResult && typeof this.profile.toolResult !== 'function' && 'wrap' in this.profile.toolResult) {
+            const [open, close] = this.profile.toolResult.wrap
+            if (content.startsWith(open) && content.endsWith(close)) {
+              prefix = open
+              suffix = close
+              content = content.slice(open.length, -close.length)
+            }
+          }
+
+          if (turnsAhead === 1) {
+            // Age 1: shortened
+            if (content.length > 1000) {
+              content = content.slice(0, 1000) + '... (shortened)'
+            }
+          } else {
+            // Age 2+: minimal
+            // Try to see if it was an error
+            if (content.includes('"error":')) {
+              content = '{ "error": "original error preserved, result omitted" }'
+            } else {
+              content = '{ "result": "omitted" }'
+            }
+          }
+
+          return { ...msg, content: prefix + content + suffix }
+
+        } catch {
+          return msg
+        }
+      }
+
+      return msg
+    })
 
     const enrichedSystem: Message = {
       role: 'system',
@@ -314,7 +401,7 @@ export class Orchestrator {
       content: `${systemMsg?.content ?? ''}\n\n${this.profile.availableTools![0]}${toolsContent}${this.profile.availableTools![1]}`,
     }
 
-    return [enrichedSystem, ...rest]
+    return [enrichedSystem, ...processedHistory]
   }
 
   private rebuildSystemMessage(): void {
@@ -392,18 +479,6 @@ export class Orchestrator {
       }
 
       this.mode = { kind: 'code/plan', gitRoot: gitRoot ?? '' }
-
-      // Register codeq tools now that we hopefully have a git root
-      const handlers = createCodeqHandlers(() => {
-        const m = this.mode
-
-        return m.kind !== 'chat' ? m.gitRoot : ''
-      })
-
-      for (const [name, handler] of Object.entries(handlers)) {
-        const def = CodeqTools.find(t => t.name === name)!
-        this.registerTool(def, handler)
-      }
 
       this.rebuildSystemMessage()
 

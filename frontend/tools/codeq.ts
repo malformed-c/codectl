@@ -215,11 +215,19 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
         for (const entry of map) {
           if (entry === '---') continue
           for (const line of entry.split('\n')) {
-            lines.push(`    ${line}`)
+            const truncated = line.length > 100 ? line.slice(0, 97) + '...' : line
+            lines.push(`    ${truncated}`)
           }
         }
       } catch {
         lines.push(`  ${fileName}  (parse error)`)
+      }
+
+      if (lines.length > 500) {
+        lines.push('  ...')
+        lines.push('  (result truncated: too many lines)')
+
+        break
       }
     }
 
