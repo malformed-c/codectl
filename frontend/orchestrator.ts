@@ -1,4 +1,4 @@
-import { consola, createConsola } from "consola"
+import { consola } from "consola"
 import { dirname, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
@@ -43,63 +43,47 @@ export type TurnResult = {
   toolsExecuted: Array<{ call: ToolCall; result: ToolResult }>
 }
 
-// --- Built-in: continue tool ---
+// --- Built-in Tools ---
 
 export const ContinueTool: ToolDefinition = {
   name: 'continue',
-  description:
-    'Signal that you need more turns to complete the task. ' +
-    'Use when you have more work to do after this response.',
+  description: 'Signal that you need more turns to complete the task.',
   parameters: {
     type: 'object',
     properties: {
-      reason: {
-        type: 'string',
-        description: 'Why you need to continue.',
-      },
+      reason: { type: 'string', description: 'Why you need to continue.' },
     },
     required: [],
   },
   returns: {
     type: 'object',
-    properties: {
-      accepted: { type: 'boolean', description: "Whether it was accepted by codectl system." },
-    },
+    properties: { accepted: { type: 'boolean' } },
   },
 }
-
-// --- Built-in: done tool ---
 
 export const DoneTool: ToolDefinition = {
   name: 'done',
-  description:
-    'Signal task completion. Call when you have finished your work. ' +
-    'Pass result to return a specific value, or omit to use your last response as the result.',
+  description: 'Signal task completion. Optionally pass a result value.',
   parameters: {
     type: 'object',
     properties: {
-      result: {
-        type: 'string',
-        description: 'The final result to return. Optional.',
-      },
+      result: { type: 'string', description: 'The final result.' },
     },
     required: [],
   },
   returns: {
     type: 'object',
-    properties: {
-      accepted: { type: 'boolean', description: 'User choice.' },
-    },
+    properties: { accepted: { type: 'boolean' } },
   },
 }
 
-// --- Git detection ---
+// --- Helpers ---
 
 export async function findGitRoot(dir: string): Promise<string | null> {
   let current = resolve(dir)
-
   while (true) {
     try {
+      // Check for .git directory
       if (await Bun.file(join(current, '.git')).exists()) return current
 
     } catch {
@@ -131,17 +115,14 @@ export class Orchestrator {
     this.profile = config.adapter.config.template
 
     // TODO Refactor to tool/registerBuiltin()
-    // Built-in: mode
+    // Register built-ins
     this.registerTool(ModeTool, async (args) =>
       this.handleModeSwitch(args.mode as string)
     )
-
-    // Built-in: done - handler is a no-op, loop detects it by name
     this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
-
-    // Built-in: continue - handler is a no-op, loop detects it by name
     this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
 
+    // Register user tools
     for (const tool of config.tools ?? []) {
       this.tools.push(tool)
     }
@@ -168,6 +149,7 @@ export class Orchestrator {
   async chat(userMessage: string): Promise<TurnResult> {
     this.abortController = new AbortController()
 
+    // Ensure system message exists
     if (this.history.length === 0) this.rebuildSystemMessage()
 
     this.history.push({ role: 'user', content: userMessage })
@@ -177,38 +159,36 @@ export class Orchestrator {
     let finalTurn: ParsedTurn = { content: '' }
     let doneResult: string | undefined
 
-    for (let turn = 0; turn < maxTurns; turn++) {
+    // Label the loop so we can break from inside nested structures if needed
+    outerLoop: for (let turn = 0; turn < maxTurns; turn++) {
+      // Check abort signal
+      if (this.abortController.signal.aborted) break
+
       const messages = this.buildMessages()
 
       const parsed = await this.adapter.generate(messages)
 
       finalTurn = parsed
 
-      // Content turn with no tool calls - model is done, break
-      if (parsed.content && !parsed.toolCalls?.length) {
-        this.history.push({ role: 'assistant', content: parsed.content })
-        break
-      }
-
-      // Record content if present alongside tool calls
+      // Handle content
       if (parsed.content) {
         this.history.push({ role: 'assistant', content: parsed.content })
       }
 
-      // No content, no tool calls - model stalled, break
-      if (!parsed.toolCalls?.length) break
+      // Stop if no tools called
+      if (!parsed.toolCalls?.length) {
+        break outerLoop
+      }
 
-      // Push tool call turn
+      // Process tools
       this.history.push({ role: 'tool_call', content: parsed.toolCalls.join('\n') })
 
-      let shouldStop = false
-      let shouldContinue = false
+      let loopShouldStop = false
 
       consola.trace('received tool calls:', parsed.toolCalls)
 
       for (const rawCall of parsed.toolCalls) {
-        let calls: ToolCall[]
-
+        let calls: ToolCall[] = []
         try {
           calls = parseToolCalls(rawCall)
 
@@ -223,27 +203,30 @@ export class Orchestrator {
 
         for (const call of calls) {
           // TODO Refactor to lambdas
+          // Detect special control flow tools
           if (call.name === 'done') {
             doneResult = call.arguments.result as string | undefined
-            shouldStop = true
-          }
-
-          if (call.name === 'continue') {
-            shouldContinue = true
+            loopShouldStop = true
           }
 
           const result = await this.executeToolCall(call)
 
           toolsExecuted.push({ call, result })
-          this.history.push({ role: 'tool_result', content: renderToolResult(result) })
+
+          this.history.push({
+            role: 'tool_result',
+            content: renderToolResult(result)
+          })
         }
       }
 
-      if (shouldStop) break
-      // shouldContinue - just keeps looping, already counted as a turn
+      // If 'done' was called, break the autonomous loop
+      if (loopShouldStop) {
+        break outerLoop
+      }
     }
 
-    // done with explicit result overrides last content turn
+    // If 'done' provided a specific result override, use it as final content
     if (doneResult !== undefined) {
       finalTurn = { ...finalTurn, content: doneResult }
     }
@@ -255,8 +238,11 @@ export class Orchestrator {
   // --- Internals ---
 
   private buildMessages(): Message[] {
+    // If no tools, just return history
     if (this.tools.length === 0) return this.history
 
+    // Inject tools into system message for this specific request
+    // This avoids permanently bloating the history state
     const toolsContent = renderTools(this.tools, this.config.toolFormat ?? 'json')
     const [systemMsg, ...rest] = this.history
 
@@ -283,8 +269,8 @@ export class Orchestrator {
       .exhaustive()
 
     // Replace or insert system message
-    const sysIdx = this.history.findIndex((m) => m.role === 'system')
     const sysMsg: Message = { role: 'system', content: base + modeContext }
+    const sysIdx = this.history.findIndex((m) => m.role === 'system')
 
     if (sysIdx === -1) {
       this.history.unshift(sysMsg)
@@ -295,6 +281,9 @@ export class Orchestrator {
   }
 
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {
+    consola.trace("Executing tool", call)
+
+    // TODO handler wrapper
     const handler = this.handlers.get(call.name)
     if (!handler) return { result: null, error: `Unknown tool: ${call.name}` }
 
@@ -302,6 +291,8 @@ export class Orchestrator {
       return await handler(call.arguments)
 
     } catch (err) {
+      consola.error(`Error executing tool ${call.name}:`, err)
+
       return { result: null, error: String(err) }
     }
   }
@@ -316,6 +307,7 @@ export class Orchestrator {
 
     if (targetMode === 'code/plan') {
       const gitRoot = await findGitRoot(process.cwd())
+
       let errMsg = undefined
 
       if (!gitRoot) {
@@ -341,7 +333,7 @@ In code/plan mode you can:
 - Generate a CodePlan describing code modifications
 
 Tools are your hands, you must acknowledge tool results.
-You must use token tool calls syntax, like this: [TOOL_CALLS]...[CALL_ID]...[ARGS]...`
+You must use token tool calls syntax.`
   }
 }
 

@@ -138,6 +138,7 @@ export class TelegramDoor {
   private setupHandlers(): void {
     this.bot.command('start', async (ctx) => {
       console.trace('TG: start command')
+
       // TODO
       await ctx.reply(
         'Hello! This is codectl system. Send a message to start chatting.\n' +
@@ -226,6 +227,7 @@ export class TelegramDoor {
 
     } catch (err) {
       consola.error('Error handling Telegram message:', err)
+
       await ctx.reply('Something went wrong. Please try again.', {
         parse_mode: 'HTML'
       })
