@@ -80,6 +80,16 @@ export const DoneTool: ToolDefinition = {
   },
 }
 
+export const LibraryTool: ToolDefinition = {
+  name: 'tool_library',
+  description: 'List all available tools and their documentation. Use this to explore what you can do.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+}
+
 // --- Helpers ---
 
 async function pathExists(path: string): Promise<false | "file" | "dir"> {
@@ -167,6 +177,9 @@ export class Orchestrator {
     )
     this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
     this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
+    this.registerTool(LibraryTool, async () => ({
+      result: renderTools(this.tools, this.config.toolFormat ?? 'json')
+    }))
 
     // Register user tools
     for (const tool of config.tools ?? []) {
@@ -287,9 +300,12 @@ export class Orchestrator {
     // If no tools, just return history
     if (this.tools.length === 0) return this.history
 
-    // Inject tools into system message for this specific request
-    // This avoids permanently bloating the history state
-    const toolsContent = renderTools(this.tools, this.config.toolFormat ?? 'json')
+    // CORE TOOLS that should always be in system prompt
+    // This avoids permanently bloating the system prompt
+    const coreToolNames = ['mode', 'done', 'continue', 'tool_library']
+    const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
+
+    const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
     const [systemMsg, ...rest] = this.history
 
     const enrichedSystem: Message = {
@@ -334,13 +350,28 @@ export class Orchestrator {
     if (!handler) return { result: null, error: `Unknown tool: ${call.name}` }
 
     try {
-      return await handler(call.arguments)
+      const result = await handler(call.arguments)
+
+      const args = JSON.stringify(call.arguments)
+      const res = result.error ? `Error: ${result.error}` : this.shortenResult(result.result)
+      consola.debug(`Action: ${call.name}(${args}) -> ${res}`)
+
+      return result
 
     } catch (err) {
       consola.error(`Error executing tool ${call.name}:`, err)
 
       return { result: null, error: String(err) }
     }
+  }
+
+  private shortenResult(result: unknown): string {
+    if (result === undefined) return 'undefined'
+
+    const s = typeof result === 'string' ? result : JSON.stringify(result)
+    if (s.length <= 200) return s
+
+    return s.slice(0, 200) + '...'
   }
 
   private async handleModeSwitch(targetMode: string): Promise<ToolResult> {
@@ -383,16 +414,14 @@ export class Orchestrator {
   }
 
   // TODO unhardcode
+  // TODO dedent
   private defaultSystemPrompt(): string {
     return `You're orchestrator in codectl system. You can have general conversations and help with code tasks.
 
-In code/plan mode you can:
-- Access to codeq additional information
-- Explore the repository structure
-- Generate a CodePlan describing code modifications
+In code/plan mode you have access to additional tools for codebase exploration and modification.
 
 Tools are your hands, you must acknowledge tool results.
-You must use token tool calls syntax.`
+You must use token tool calls syntax, like this [TOOL_CALLS]...[CALL_ID]...[ARGS]`
   }
 }
 

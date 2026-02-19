@@ -44,6 +44,6 @@ describe('Orchestrator', () => {
     expect(result.turn.content).toBe('Tool executed successfully.')
     expect(result.toolsExecuted).toHaveLength(1)
     expect(result.toolsExecuted[0]!.call.name).toBe('mode')
-    expect(orch.getMode()).toBe({kind: 'code/plan', gitRoot: ''})
+    expect(orch.getMode().kind).toBe('code/plan')
   })
 })

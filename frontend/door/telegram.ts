@@ -47,20 +47,22 @@ function roomIdForChat(chatId: number): string {
  * Telegram supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a>
  */
 function markdownToTelegramHTML(md: string): string {
-  return Bun.markdown.render(md, {
+  const rendered = Bun.markdown.render(md, {
     heading: (children) => `<b>${children}</b>\n`,
     paragraph: (children) => `${children}\n`,
     strong: (children) => `<b>${children}</b>`,
     emphasis: (children) => `<i>${children}</i>`,
     strikethrough: (children) => `<s>${children}</s>`,
-    list: (children) => children,
-    listItem: (children) => `• ${children}\n`,
+    list: (children) => `\n${children}`,
+    listItem: (children) => `• ${children.trim()}\n`,
     link: (children, { href }) => `<a href="${href}">${children}</a>`,
     code: (children) => `<pre>${children}</pre>`,
     codespan: (children) => `<code>${children}</code>`,
     image: () => '',
     html: () => '',
   })
+
+  return rendered.trim()
 }
 
 // --- Telegram door ---
