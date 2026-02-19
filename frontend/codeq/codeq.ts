@@ -240,7 +240,7 @@ const TS_CLASSES_QUERY_STRING = `
 function pyImportInsertLine(lines: string[], parser: Parser): number {
   let start = 0
   if (lines[0]?.startsWith("#!")) start = 1
-  if (lines[start] && /^#\s*-\*-\s*coding:/.test(lines[start]!)) start += 1
+  if (lines[start] && /^#\s*-\*-\s*coding:/.test(lines[start])) start += 1
 
   const joined = lines.join("\n")
   const tmpTree = parser.parse(joined)
@@ -269,7 +269,7 @@ function pyImportInsertLine(lines: string[], parser: Parser): number {
 
 function tsImportInsertLine(lines: string[], parser: Parser): number {
   const joined = lines.join("\n")
-  const tmpTree = parser.parse(joined)!
+  const tmpTree = parser.parse(joined)
   const root = tmpTree.rootNode
 
   let importEnd = 0
@@ -402,7 +402,7 @@ export class Codeq {
   static fromSource(source: string, path = "<FILE>", lang?: LangConfig): Codeq {
     const l = lang ?? langConfigForPath(path)
     const buf = Buffer.from(source, "utf8")
-    const tree = l.parser.parse(source)!
+    const tree = l.parser.parse(source)
 
     return new Codeq(tree, buf, l, path)
   }
@@ -543,7 +543,7 @@ export class Codeq {
     if (source.endsWith("\n") && !newSource.endsWith("\n")) newSource += "\n"
 
     this.sourceBytes = Buffer.from(newSource, "utf8")
-    this.tree = this.lang.parser.parse(newSource)!
+    this.tree = this.lang.parser.parse(newSource)
 
     return true
   }
@@ -626,7 +626,7 @@ export class Codeq {
       Buffer.from(prepared, "utf8")
     )
 
-    this.tree = this.lang.parser.parse(this.sourceBytes.toString("utf8"))!
+    this.tree = this.lang.parser.parse(this.sourceBytes.toString("utf8"))
   }
 
   // --- Query internals ---
@@ -637,11 +637,11 @@ export class Codeq {
 
   private matches(
     kind: CodeKind
-  ): Array<{ pattern: number; captures: CaptureMap }> {
+  ): Array<{ patternIndex: number; captures: CaptureMap }> {
     const raw = this.queryFor(kind).matches(this.tree.rootNode)
 
     return raw.map((m) => ({
-      pattern: m.patternIndex,
+      patternIndex: m.patternIndex,
       captures: toCaptureMap(m.captures),
     }))
   }
@@ -655,6 +655,11 @@ export class Codeq {
       if (!funcNode) continue
 
       if (entriesById.has(funcNode.id)) continue
+
+      // Skip anonymous functions (e.g. unnamed arrow functions)
+      const nameNode = captures.get("func.name")?.[0]
+      const paramsNode = captures.get("func.params")?.[0]
+      if (!nameNode || !paramsNode) continue
 
       const decorators: string[] = []
       const decoratedNode = captures.get("func.decorated_node")?.[0]
@@ -674,8 +679,8 @@ export class Codeq {
       entriesById.set(funcNode.id, {
         start: funcNode.startIndex,
         end: funcNode.endIndex,
-        name: captures.get("func.name")![0]!.text,
-        params: captures.get("func.params")![0]!.text,
+        name: nameNode.text,
+        params: paramsNode.text,
         returnType: captures.get("func.return_type")?.[0]?.text ?? "",
         docstring,
         decorators,
@@ -694,11 +699,14 @@ export class Codeq {
 
       if (!classNode) continue
 
+      const classNameNode = captures.get("class.name")?.[0]
+      if (!classNameNode) continue
+
       const docNode = captures.get("class.docstring")?.[0]
       entries.push({
         start: classNode.startIndex,
         end: classNode.endIndex,
-        name: captures.get("class.name")![0]!.text,
+        name: classNameNode.text,
         superclasses: captures.get("class.superclasses")?.[0]?.text ?? "",
         docstring: docNode
           ? docNode.text.replace(/^["']{1,3}|["']{1,3}$/g, "").trim()
@@ -723,7 +731,9 @@ export class Codeq {
       const objName = nameNode.text
 
       if (kind === CodeKind.Func) {
-        const funcNode = captures.get("func.node")![0]!
+        const funcNode = captures.get("func.node")?.[0]
+        if (!funcNode) continue
+
         const className = this.enclosingClassName(funcNode)
         const fqn = className ? `${className}.${objName}` : objName
 
@@ -741,11 +751,11 @@ export class Codeq {
 
     if (candidates.length === 0) return null
 
-    if (candidates.length === 1) return candidates[0]!.captures
+    if (candidates.length === 1) return candidates[0].captures
 
     const uniqueFqns = [...new Set(candidates.map((c) => c.fqn))]
 
-    if (uniqueFqns.length === 1) return candidates[0]!.captures
+    if (uniqueFqns.length === 1) return candidates[0].captures
 
     throw new AmbiguousTargetError(
       `Ambiguous ${kind} target '${target}'. Matches: ${uniqueFqns.join(", ")}. ` +
@@ -795,9 +805,9 @@ export class Codeq {
 
     const node = targetNodes[0]
     return {
-      start: node!.startIndex,
-      end: node!.endIndex,
-      indentLevel: node!.startPosition.column,
+      start: node.startIndex,
+      end: node.endIndex,
+      indentLevel: node.startPosition.column,
     }
   }
 

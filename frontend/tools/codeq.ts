@@ -1,7 +1,7 @@
 import { Codeq, CodeKind, CodePart } from '../codeq/codeq'
 import type { ToolDefinition, ToolResult } from '../tool'
 import type { ToolHandler } from '../orchestrator'
-import { join, isAbsolute } from 'node:path'
+import { join, isAbsolute, relative, extname } from 'node:path'
 
 // --- Helpers ---
 
@@ -30,7 +30,50 @@ function codePartFrom(s: string): CodePart {
   return part
 }
 
+// --- Helpers ---
+
+const SUPPORTED_EXTS = new Set(['.py', '.ts', '.tsx', '.mts', '.cts'])
+
+function isSupportedFile(path: string): boolean {
+  return SUPPORTED_EXTS.has(extname(path).toLowerCase())
+}
+
+async function gitTrackedFiles(gitRoot: string): Promise<string[]> {
+  const proc = Bun.spawn(['git', 'ls-files'], {
+    cwd: gitRoot,
+    stdout: 'pipe',
+    stderr: 'ignore',
+  })
+  const text = await new Response(proc.stdout).text()
+  await proc.exited
+  return text.split('\n').filter(Boolean)
+}
+
 // --- Tool definitions ---
+
+export const CodeqRepomapTool: ToolDefinition = {
+  name: 'codeq_repomap',
+  description:
+    'Get a structural overview of the entire repository — directory tree with ' +
+    'function and class signatures per source file. Use this first to understand ' +
+    'the codebase before diving into specific files.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Subdirectory to scope the map to, relative to git root. Omit for full repo.',
+      },
+    },
+    required: [],
+  },
+  returns: {
+    type: 'object',
+    properties: {
+      repomap: { type: 'string', description: 'Structural overview of the repository.' },
+    },
+  },
+}
 
 export const CodeqFileMapTool: ToolDefinition = {
   name: 'codeq_filemap',
@@ -137,6 +180,54 @@ export const CodeqAddImportTool: ToolDefinition = {
  * gitRoot is retrieved from orchestrator mode at call time via a getter.
  */
 export function createCodeqHandlers(getGitRoot: () => string): Record<string, ToolHandler> {
+  const repomapHandler: ToolHandler = async (args) => {
+    const gitRoot = getGitRoot()
+    const scopeArg = args.path as string | undefined
+    const files = await gitTrackedFiles(gitRoot)
+
+    const lines: string[] = []
+    let currentDir = ''
+
+    for (const relFile of files.sort()) {
+      if (!isSupportedFile(relFile)) continue
+
+      // Scope filter
+      if (scopeArg) {
+        const scopeNorm = scopeArg.replace(/\/$/, '')
+        if (!relFile.startsWith(scopeNorm + '/') && relFile !== scopeNorm) continue
+      }
+
+      const dir = relFile.includes('/') ? relFile.slice(0, relFile.lastIndexOf('/')) : ''
+
+      if (dir !== currentDir) {
+        if (dir) lines.push(`${dir}/`)
+        currentDir = dir
+      }
+
+      const fileName = relFile.split('/').pop()!
+
+      try {
+        const codeq = await Codeq.fromFile(join(gitRoot, relFile))
+        const map = codeq.fileMap()
+
+        lines.push(`  ${fileName}`)
+
+        for (const entry of map) {
+          if (entry === '---') continue
+          for (const line of entry.split('\n')) {
+            lines.push(`    ${line}`)
+          }
+        }
+      } catch {
+        lines.push(`  ${fileName}  (parse error)`)
+      }
+    }
+
+    if (lines.length === 0) return { result: { repomap: '(no supported files found)' } }
+
+    return { result: { repomap: lines.join('\n') } }
+  }
+
   const fileMapHandler: ToolHandler = async (args) => {
     const path = resolvePath(getGitRoot(), args.path as string)
 
@@ -187,6 +278,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
   }
 
   return {
+    codeq_repomap: repomapHandler,
     codeq_filemap: fileMapHandler,
     codeq_retrieve: retrieveHandler,
     codeq_replace: replaceHandler,
@@ -197,6 +289,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
 // --- Convenience: all definitions ---
 
 export const CodeqTools: ToolDefinition[] = [
+  CodeqRepomapTool,
   CodeqFileMapTool,
   CodeqRetrieveTool,
   CodeqReplaceTool,
