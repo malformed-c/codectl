@@ -10,13 +10,14 @@ import { match } from "ts-pattern"
 await Parser.init()
 
 // Load WASM
-// const pythonWasm = await readFile("./node_modules/tree-sitter-python/tree-sitter-python.wasm")
 const pythonWasm = await Bun.file("./node_modules/tree-sitter-python/tree-sitter-python.wasm").bytes()
+const typescriptWasm = await Bun.file("./node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm").bytes()
+const tsxWasm = await Bun.file("./node_modules/tree-sitter-typescript/tree-sitter-tsx.wasm").bytes()
 
 // Load the language
 const Python = await Language.load(pythonWasm)
-
-// const TypeScript = await Language.load("./node_modules/tree-sitter-typescript/tree-sitter-typescript.wasm")
+const TypeScript = await Language.load(typescriptWasm)
+const TSX = await Language.load(tsxWasm)
 
 /* Capture name -> matching nodes */
 type CaptureMap = Map<string, Node[]>
@@ -123,13 +124,28 @@ interface ClassMapEntry {
 const pyParser = new Parser()
 pyParser.setLanguage(Python)
 
-// Add more languages here as needed:
-// const tsParser = new Parser()
-// tsParser.setLanguage(TypeScript)
+const tsParser = new Parser()
+tsParser.setLanguage(TypeScript)
 
-// --- Query strings (identical to Python version) ---
+const tsxParser = new Parser()
+tsxParser.setLanguage(TSX)
 
-const FUNCS_QUERY_STRING = `
+// --- Language config ---
+
+type LangConfig = {
+  parser: Parser
+  language: Language
+  funcsQueryStr: string
+  classesQueryStr: string
+  importNodeTypes: string[]
+  isImportStatement: (stmt: string) => boolean
+  importInsertLine: (lines: string[], parser: Parser) => number
+}
+
+// --- Query strings ---
+
+// Python
+const PY_FUNCS_QUERY_STRING = `
 (decorated_definition
     (decorator) @func.decorator
     definition: (function_definition
@@ -152,7 +168,7 @@ const FUNCS_QUERY_STRING = `
 ) @func.node
 `
 
-const CLASSES_QUERY_STRING = `
+const PY_CLASSES_QUERY_STRING = `
 (class_definition
     name: (identifier) @class.name
     superclasses: (argument_list)? @class.superclasses
@@ -161,6 +177,143 @@ const CLASSES_QUERY_STRING = `
     ) @class.body
 ) @class.node
 `
+
+// TypeScript / TSX
+const TS_FUNCS_QUERY_STRING = `
+(function_declaration
+    name: (identifier) @func.name
+    parameters: (formal_parameters) @func.params
+    return_type: (type_annotation)? @func.return_type
+    body: (statement_block) @func.body
+) @func.node
+
+(method_definition
+    name: (property_identifier) @func.name
+    parameters: (formal_parameters) @func.params
+    return_type: (type_annotation)? @func.return_type
+    body: (statement_block) @func.body
+) @func.node
+
+(arrow_function
+    parameters: (formal_parameters) @func.params
+    return_type: (type_annotation)? @func.return_type
+    body: (_) @func.body
+) @func.node
+
+(export_statement
+    declaration: (function_declaration
+        name: (identifier) @func.name
+        parameters: (formal_parameters) @func.params
+        return_type: (type_annotation)? @func.return_type
+        body: (statement_block) @func.body
+    ) @func.node
+) @func.decorated_node
+
+(lexical_declaration
+    (variable_declarator
+        name: (identifier) @func.name
+        value: (arrow_function
+            parameters: (formal_parameters) @func.params
+            return_type: (type_annotation)? @func.return_type
+            body: (_) @func.body
+        ) @func.node
+    )
+)
+`
+
+const TS_CLASSES_QUERY_STRING = `
+(class_declaration
+    name: (type_identifier) @class.name
+    (class_heritage)? @class.superclasses
+    body: (class_body) @class.body
+) @class.node
+
+(export_statement
+    declaration: (class_declaration
+        name: (type_identifier) @class.name
+        (class_heritage)? @class.superclasses
+        body: (class_body) @class.body
+    ) @class.node
+) @class.decorated_node
+`
+
+function pyImportInsertLine(lines: string[], parser: Parser): number {
+  let start = 0
+  if (lines[0]?.startsWith("#!")) start = 1
+  if (lines[start] && /^#\s*-\*-\s*coding:/.test(lines[start]!)) start += 1
+
+  const joined = lines.join("\n")
+  const tmpTree = parser.parse(joined)
+  const root = tmpTree.rootNode
+  const children = root.children.filter(
+    (c) => c.type !== "comment" && c.type !== "\n"
+  )
+
+  if (
+    children[0]?.type === "expression_statement"
+    && children[0].children[0]?.type === "string"
+  ) {
+    start = Math.max(start, children[0].endPosition.row + 1)
+  }
+
+  let importEnd = start
+  for (const child of root.children) {
+    if (child.startPosition.row < start) continue
+    if (child.type === "import_statement" || child.type === "import_from_statement") {
+      importEnd = Math.max(importEnd, child.endPosition.row + 1)
+    }
+  }
+
+  return importEnd > start ? importEnd : start
+}
+
+function tsImportInsertLine(lines: string[], parser: Parser): number {
+  const joined = lines.join("\n")
+  const tmpTree = parser.parse(joined)!
+  const root = tmpTree.rootNode
+
+  let importEnd = 0
+  for (const child of root.children) {
+    if (child.type === "import_statement" || child.type === "import_declaration") {
+      importEnd = Math.max(importEnd, child.endPosition.row + 1)
+    }
+  }
+
+  return importEnd
+}
+
+const PY_LANG: LangConfig = {
+  parser: pyParser,
+  language: Python,
+  funcsQueryStr: PY_FUNCS_QUERY_STRING,
+  classesQueryStr: PY_CLASSES_QUERY_STRING,
+  importNodeTypes: ["import_statement", "import_from_statement"],
+  isImportStatement: (s) => /^(import\s+|from\s+\S+\s+import\s+)/.test(s),
+  importInsertLine: pyImportInsertLine,
+}
+
+const TS_LANG: LangConfig = {
+  parser: tsParser,
+  language: TypeScript,
+  funcsQueryStr: TS_FUNCS_QUERY_STRING,
+  classesQueryStr: TS_CLASSES_QUERY_STRING,
+  importNodeTypes: ["import_statement", "import_declaration"],
+  isImportStatement: (s) => /^import\s/.test(s),
+  importInsertLine: tsImportInsertLine,
+}
+
+const TSX_LANG: LangConfig = {
+  ...TS_LANG,
+  parser: tsxParser,
+  language: TSX,
+}
+
+function langConfigForPath(path: string): LangConfig {
+  const ext = path.split(".").pop()?.toLowerCase() ?? ""
+  if (ext === "tsx") return TSX_LANG
+  if (ext === "ts" || ext === "mts" || ext === "cts") return TS_LANG
+  return PY_LANG  // default
+}
 
 // --- Helpers ---
 
@@ -223,70 +376,35 @@ function spliceBuf(
   return Buffer.concat([buf.subarray(0, start), replacement, buf.subarray(end)])
 }
 
-/* Find last import line index (0-based) to insert new imports after */
-function importInsertLine(lines: string[]): number {
-  let start = 0
-
-  if (lines[0]?.startsWith("#!")) start = 1
-  if (lines[start] && /^#\s*-\*-\s*coding:/.test(lines[start]!)) start += 1
-
-  // Skip module docstring
-  const joined = lines.join("\n")
-  const tmpTree = pyParser.parse(joined)!
-  const root = tmpTree.rootNode
-  const children = root.children.filter(
-    (c) => c.type !== "comment" && c.type !== "\n"
-  )
-
-  if (
-    children[0]?.type === "expression_statement"
-    && children[0].children[0]?.type === "string"
-  ) {
-    start = Math.max(start, children[0].endPosition.row + 1)
-  }
-
-  let importEnd = start
-  for (const child of root.children) {
-
-    if (child.startPosition.row < start) continue
-
-    if (
-      child.type === "import_statement"
-      || child.type === "import_from_statement"
-    ) {
-      importEnd = Math.max(importEnd, child.endPosition.row + 1)
-    }
-  }
-
-  return importEnd > start ? importEnd : start
-}
-
 // --- Main class ---
 
 export class Codeq {
   private tree: Tree
   private sourceBytes: Buffer
   private readonly filePath: string
+  private readonly lang: LangConfig
 
   private readonly funcsQuery: Query
   private readonly classesQuery: Query
 
-  constructor(tree: Tree, source: Buffer, path = "<FILE>") {
+  constructor(tree: Tree, source: Buffer, lang: LangConfig, path = "<FILE>") {
     this.tree = tree
     this.sourceBytes = Buffer.from(source)
     this.filePath = path
+    this.lang = lang
 
-    this.funcsQuery = new Query(Python, FUNCS_QUERY_STRING)
-    this.classesQuery = new Query(Python, CLASSES_QUERY_STRING)
+    this.funcsQuery = new Query(lang.language, lang.funcsQueryStr)
+    this.classesQuery = new Query(lang.language, lang.classesQueryStr)
   }
 
   // --- Factory methods ---
 
-  static fromSource(source: string, path = "<FILE>"): Codeq {
+  static fromSource(source: string, path = "<FILE>", lang?: LangConfig): Codeq {
+    const l = lang ?? langConfigForPath(path)
     const buf = Buffer.from(source, "utf8")
-    const tree = pyParser.parse(source)!
+    const tree = l.parser.parse(source)!
 
-    return new Codeq(tree, buf, path)
+    return new Codeq(tree, buf, l, path)
   }
 
   static async fromFile(filePath: string): Promise<Codeq> {
@@ -302,7 +420,9 @@ export class Codeq {
       displayPath = filePath
     }
 
-    return Codeq.fromSource(source, displayPath)
+    const lang = langConfigForPath(filePath)
+
+    return Codeq.fromSource(source, displayPath, lang)
   }
 
   // --- Output ---
@@ -407,7 +527,7 @@ export class Codeq {
 
     if (!statement) throw new Error("Import statement cannot be empty")
 
-    if (!/^(import\s+|from\s+\S+\s+import\s+)/.test(statement)) {
+    if (!this.lang.isImportStatement(statement)) {
       throw new Error(`Unsupported import statement: ${JSON.stringify(statement)}`)
     }
 
@@ -416,14 +536,14 @@ export class Codeq {
 
     if (lines.some((l) => l.trim() === statement)) return false
 
-    const insertAt = importInsertLine(lines)
+    const insertAt = this.lang.importInsertLine(lines, this.lang.parser)
     lines.splice(insertAt, 0, statement)
 
     let newSource = lines.join("\n")
     if (source.endsWith("\n") && !newSource.endsWith("\n")) newSource += "\n"
 
     this.sourceBytes = Buffer.from(newSource, "utf8")
-    this.tree = pyParser.parse(newSource)!
+    this.tree = this.lang.parser.parse(newSource)!
 
     return true
   }
@@ -506,7 +626,7 @@ export class Codeq {
       Buffer.from(prepared, "utf8")
     )
 
-    this.tree = pyParser.parse(this.sourceBytes.toString("utf8"))!
+    this.tree = this.lang.parser.parse(this.sourceBytes.toString("utf8"))!
   }
 
   // --- Query internals ---
@@ -603,8 +723,8 @@ export class Codeq {
       const objName = nameNode.text
 
       if (kind === CodeKind.Func) {
-        const funcNode = captures.get("func.node")![0]
-        const className = this.enclosingClassName(funcNode!)
+        const funcNode = captures.get("func.node")![0]!
+        const className = this.enclosingClassName(funcNode)
         const fqn = className ? `${className}.${objName}` : objName
 
         if (target === fqn || (!target.includes(".") && target === objName)) {
@@ -674,7 +794,6 @@ export class Codeq {
     }
 
     const node = targetNodes[0]
-
     return {
       start: node!.startIndex,
       end: node!.endIndex,
