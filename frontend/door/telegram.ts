@@ -1,17 +1,21 @@
-import { Bot, type Context } from 'grammy'
+import { Bot, Context } from 'grammy'
+import { hydrate } from "@grammyjs/hydrate"
+import type { HydrateFlavor } from "@grammyjs/hydrate"
 import { consola } from 'consola'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
-import { Orchestrator } from '../orchestrator'
+import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
+import type { KoboldAdapter } from '../kobold'
 
 // --- Types ---
 
 export type TelegramDoorConfig = {
   token: string
+  adapter: KoboldAdapter
   historyStore?: HistoryStore
-  /** Factory to create an orchestrator for a new room */
-  createOrchestrator: () => Orchestrator
-  /** Max message length before splitting (Telegram limit: 4096) */
+  /** Extra orchestrator config per room (adapter is injected, do not set here) */
+  orchestratorConfig?: Omit<OrchestratorConfig, 'adapter'>
+  /** Max message length before splitting (Telegram text limit: 4096, with media: 1024) */
   maxMessageLength?: number
 }
 
@@ -38,24 +42,90 @@ function roomIdForChat(chatId: number): string {
   return `telegram-${chatId}`
 }
 
+function markdownToTelegramHTML(md: string): string {
+  // Convert Markdown to HTML
+  const telegramSafeHTML = Bun.markdown.render(md, {
+    heading(children) {
+      return `<b>${children}</b>\n`
+    },
+    paragraph(children) {
+      return `${children}\n`
+    },
+    strong(children) {
+      return `<b>${children}</b>`
+    },
+    emphasis(children) {
+      return `<i>${children}</i>`
+    },
+    list(children) {
+      return children // now children is a string
+    },
+    listItem(children) {
+      return `• ${children}\n`
+    },
+    link(children, { href }) {
+      return `<a href="${href}">${children}</a>`
+    },
+    code(children, meta) {
+      return `<pre>${children}</pre>`
+    },
+    codespan(children) {
+      return `<code>${children}</code>`
+    },
+
+    // Optional: strip out unsupported stuff
+    html() {
+      return "" // ignore raw HTML
+    }
+  })
+
+
+  // Telegram supports only a subset of HTML tags:
+  // <b>, <i>, <u>, <s>, <code>, <pre>, <a>
+  // Strip unsupported tags or replace them
+  // We'll use a simple replace here for unsupported tags
+  return telegramSafeHTML
+}
+
 // --- Telegram door ---
 
 export class TelegramDoor {
-  private readonly bot: Bot
+  private readonly bot: Bot<HydrateFlavor<Context>>
   private readonly registry = new RoomRegistry()
   private readonly config: TelegramDoorConfig
 
   constructor(config: TelegramDoorConfig) {
     this.config = config
     this.bot = new Bot(config.token)
-    this.setupHandlers()
   }
 
   // --- Public API ---
 
   async start(): Promise<void> {
     consola.info('TelegramDoor starting...')
-    await this.bot.start()
+
+    // Middleware to allow only one user
+    this.bot
+      .use(async (ctx, next) => {
+        consola.trace('TG: Filter middleware')
+
+        if (!ctx.from || ctx.from.id !== Number(Bun.env.TELEGRAM_ALLOWED_USER!)) {
+          consola.warn(`Blocked message from ${ctx.from?.id}`)
+
+          return // stop processing this update
+        }
+
+        consola.trace('TG: Past filter middleware')
+
+        await next() // allowed user passes through
+      })
+      .use(hydrate())
+
+    this.setupHandlers()
+
+    await this.bot.start({
+      allowed_updates: ['message', 'callback_query']
+    })
   }
 
   async stop(): Promise<void> {
@@ -67,14 +137,19 @@ export class TelegramDoor {
 
   private setupHandlers(): void {
     this.bot.command('start', async (ctx) => {
+      console.trace('TG: start command')
       // TODO
       await ctx.reply(
-        "Hello! This is codectl system. Send a message to start chatting.\n" +
-        'Use /new to start a fresh conversation.'
+        'Hello! This is codectl system. Send a message to start chatting.\n' +
+        'Use /new to start a fresh conversation.', {
+        parse_mode: 'HTML'
+      }
       )
     })
 
     this.bot.command('new', async (ctx) => {
+      console.trace('TG: new command')
+
       const roomId = roomIdForChat(ctx.chat.id)
       const existing = this.registry.get(roomId)
 
@@ -91,14 +166,18 @@ export class TelegramDoor {
         touchRoom(existing)
       }
 
-      await ctx.reply('Started a new conversation.')
+      await ctx.reply('Started a new conversation.', {
+        parse_mode: 'HTML'
+      })
     })
 
     this.bot.command('mode', async (ctx) => {
       const room = this.getOrCreateRoom(ctx.chat.id)
       const mode = room.orchestrator.getMode()
 
-      await ctx.reply(`Current mode: ${mode.kind}`)
+      await ctx.reply(`Current mode: ${mode.kind}`, {
+        parse_mode: 'HTML'
+      })
     })
 
     this.bot.on('message:text', async (ctx) => {
@@ -110,6 +189,8 @@ export class TelegramDoor {
     const chatId = ctx.message.chat.id
     const text = ctx.message.text
     const room = this.getOrCreateRoom(chatId)
+
+    consola.trace('Handle TG message')
 
     // Restore persisted history if orchestrator is fresh
     if (room.orchestrator.getHistory().length === 0 && this.config.historyStore) {
@@ -138,12 +219,16 @@ export class TelegramDoor {
       const chunks = splitMessage(response, this.config.maxMessageLength)
 
       for (const chunk of chunks) {
-        await ctx.reply(chunk)
+        await ctx.reply(markdownToTelegramHTML(chunk), {
+          parse_mode: 'HTML'
+        })
       }
 
     } catch (err) {
       consola.error('Error handling Telegram message:', err)
-      await ctx.reply('Something went wrong. Please try again.')
+      await ctx.reply('Something went wrong. Please try again.', {
+        parse_mode: 'HTML'
+      })
     }
   }
 
@@ -151,39 +236,11 @@ export class TelegramDoor {
     const roomId = roomIdForChat(chatId)
 
     return this.registry.getOrCreate(roomId, () =>
-      createRoom(roomId, this.config.createOrchestrator(), `telegram:${chatId}`)
+      createRoom(
+        roomId,
+        new Orchestrator({ ...this.config.orchestratorConfig, adapter: this.config.adapter }),
+        `telegram:${chatId}`
+      )
     )
   }
-}
-
-// --- Smoke test ---
-
-if (import.meta.main) {
-  const token = process.env.TELEGRAM_BOT_TOKEN
-
-  if (!token) {
-    consola.error('TELEGRAM_BOT_TOKEN not set')
-    process.exit(1)
-  }
-
-  const { KoboldAdapter } = await import('../kobold')
-  const { Profiles } = await import('../template')
-  const { HistoryStore } = await import('../history.ts')
-
-  const store = new HistoryStore('./history')
-
-  const door = new TelegramDoor({
-    token,
-    historyStore: store,
-    createOrchestrator: () => new Orchestrator({
-      adapter: new KoboldAdapter({
-        apiServer: process.env.BASE_URL ?? 'http://127.0.0.1:5001/api',
-        template: Profiles.mistral,
-        temperature: 0.7,
-        numPredict: 512,
-      }),
-    }),
-  })
-
-  await door.start()
 }

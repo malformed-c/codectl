@@ -1,4 +1,5 @@
 import { consola, createConsola } from "consola"
+import { dirname, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
 import type { Message, ParsedTurn, TextTemplate } from './template'
@@ -94,17 +95,19 @@ export const DoneTool: ToolDefinition = {
 
 // --- Git detection ---
 
-async function findGitRoot(dir: string): Promise<string | null> {
-  const { dirname, join } = await import('node:path')
-  let current = dir
+export async function findGitRoot(dir: string): Promise<string | null> {
+  let current = resolve(dir)
 
   while (true) {
-    if (await Bun.file(join(current, '.git')).exists()) return current
+    try {
+      if (await Bun.file(join(current, '.git')).exists()) return current
+
+    } catch {
+      return null
+    }
 
     const parent = dirname(current)
-
     if (parent === current) return null
-
     current = parent
   }
 }

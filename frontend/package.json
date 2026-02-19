@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.30",
+    "@grammyjs/hydrate": "^1.6.0",
+    "@grammyjs/parse-mode": "^2.2.1",
     "ai": "^6.0.86",
     "consola": "^3.4.2",
     "destr": "^2.0.5",
