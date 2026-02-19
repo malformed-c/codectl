@@ -275,10 +275,18 @@ function extractAll(text: string, [open, close]: TemplatePair): string[] {
     if (start === -1) break
 
     const contentStart = start + open.length
-    if (!close) {
-      results.push(text.slice(contentStart).trim())
 
-      break
+    if (!close) {
+      // No closing tag - use the next occurrence of open as the boundary,
+      // so multiple [TOOL_CALLS]...[TOOL_CALLS]... are each extracted separately
+      const nextOpen = text.indexOf(open, contentStart)
+      const end = nextOpen === -1 ? text.length : nextOpen
+      const content = text.slice(contentStart, end).trim()
+
+      if (content) results.push(content)
+      cursor = end
+
+      continue
     }
 
     const end = text.indexOf(close, contentStart)
@@ -409,4 +417,3 @@ if (import.meta.main) {
   const rawQwen = `<think>reasoning here</think>\n<|im_start|>assistant\nreturn jwt.decode(token, SECRET)<|im_end|>`
   console.log(parse(rawQwen, Profiles.qwen))
 }
-
