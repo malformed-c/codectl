@@ -42,49 +42,25 @@ function roomIdForChat(chatId: number): string {
   return `telegram-${chatId}`
 }
 
+/**
+ * Convert markdown to Telegram-safe HTML.
+ * Telegram supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a>
+ */
 function markdownToTelegramHTML(md: string): string {
-  // Convert Markdown to HTML
-  const telegramSafeHTML = Bun.markdown.render(md, {
-    heading(children) {
-      return `<b>${children}</b>\n`
-    },
-    paragraph(children) {
-      return `${children}\n`
-    },
-    strong(children) {
-      return `<b>${children}</b>`
-    },
-    emphasis(children) {
-      return `<i>${children}</i>`
-    },
-    list(children) {
-      return children // now children is a string
-    },
-    listItem(children) {
-      return `• ${children}\n`
-    },
-    link(children, { href }) {
-      return `<a href="${href}">${children}</a>`
-    },
-    code(children, meta) {
-      return `<pre>${children}</pre>`
-    },
-    codespan(children) {
-      return `<code>${children}</code>`
-    },
-
-    // Optional: strip out unsupported stuff
-    html() {
-      return "" // ignore raw HTML
-    }
+  return Bun.markdown.render(md, {
+    heading: (children) => `<b>${children}</b>\n`,
+    paragraph: (children) => `${children}\n`,
+    strong: (children) => `<b>${children}</b>`,
+    emphasis: (children) => `<i>${children}</i>`,
+    strikethrough: (children) => `<s>${children}</s>`,
+    list: (children) => children,
+    listItem: (children) => `• ${children}\n`,
+    link: (children, { href }) => `<a href="${href}">${children}</a>`,
+    code: (children) => `<pre>${children}</pre>`,
+    codespan: (children) => `<code>${children}</code>`,
+    image: () => '',
+    html: () => '',
   })
-
-
-  // Telegram supports only a subset of HTML tags:
-  // <b>, <i>, <u>, <s>, <code>, <pre>, <a>
-  // Strip unsupported tags or replace them
-  // We'll use a simple replace here for unsupported tags
-  return telegramSafeHTML
 }
 
 // --- Telegram door ---
@@ -220,9 +196,13 @@ export class TelegramDoor {
       const chunks = splitMessage(response, this.config.maxMessageLength)
 
       for (const chunk of chunks) {
-        await ctx.reply(markdownToTelegramHTML(chunk), {
-          parse_mode: 'HTML'
-        })
+        try {
+          await ctx.reply(chunk, { parse_mode: 'HTML' })
+
+          // Fallback to plain text if HTML parse fails
+        } catch {
+          await ctx.reply(response)
+        }
       }
 
     } catch (err) {
