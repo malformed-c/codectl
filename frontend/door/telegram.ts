@@ -53,7 +53,7 @@ function markdownToTelegramHTML(md: string): string {
     strong: (children) => `<b>${children}</b>`,
     emphasis: (children) => `<i>${children}</i>`,
     strikethrough: (children) => `<s>${children}</s>`,
-    list: (children) => `\n${children}`,
+    list: (children) => `${children}\n`,
     listItem: (children) => `• ${children.trim()}\n`,
     link: (children, { href }) => `<a href="${href}">${children}</a>`,
     code: (children) => `<pre>${children}</pre>`,
