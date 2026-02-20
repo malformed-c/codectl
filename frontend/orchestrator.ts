@@ -310,8 +310,6 @@ export class Orchestrator {
       }
 
       // Process tools
-      this.history.push({ role: 'tool_call', content: parsed.toolCalls.join('\n') })
-
       let loopShouldStop = false
 
       consola.trace('received tool calls:', parsed.toolCalls)
@@ -319,9 +317,19 @@ export class Orchestrator {
       for (const rawCall of parsed.toolCalls) {
         let calls: ToolCall[] = []
         try {
+          this.history.push({
+            role: 'tool_call',
+            content: JSON.stringify({ raw: rawCall, calls }, null, 2),
+          })
+
           calls = parseToolCalls(rawCall)
 
         } catch (err) {
+          this.history.push({
+            role: 'tool_call',
+            content: JSON.stringify({ raw: rawCall, parseError: String(err) }, null, 2),
+          })
+
           const result: ToolResult = { result: null, error: `Failed to parse tool call: ${err}` }
           this.history.push({ role: 'tool_result', content: renderToolResult(result) })
           this.recordToolFailure()
