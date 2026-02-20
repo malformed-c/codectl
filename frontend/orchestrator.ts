@@ -22,6 +22,7 @@ import { ExecTools, createExecHandlers, PersistentShell } from "./tools/exec"
 import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
+import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
 import type { CodePlan } from "./codeplan.schema"
 
 // --- Types ---
@@ -56,6 +57,8 @@ export type OrchestratorConfig = {
   depth?: number
   /** Max subagent nesting depth */
   maxDepth?: number
+  /** Path to backend/ directory for Ansible subprocess. Defaults to ../backend relative to cwd. */
+  backendDir?: string
 }
 
 export type TurnResult = {
@@ -223,6 +226,13 @@ export class Orchestrator {
 
     // Codeplan validation tool (only meaningful in codeplan mode, but always registered)
     this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
+
+    // Codeplan execution tool
+    this.registerTool(RunPlanTool, createRunPlanHandler(
+      () => this.mode.kind !== 'chat' ? this.mode.gitRoot : '',
+      () => this.config.backendDir ?? join(dirname(process.cwd()), 'backend'),
+      this.adapter,
+    ))
 
     // Register subagent tool
     this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
