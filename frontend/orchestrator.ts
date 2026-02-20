@@ -345,7 +345,7 @@ export class Orchestrator {
         // Find how many user turns are ahead of this message
         let turnsAhead = 0
         for (let i = idx + 1; i < rest.length; i++) {
-          if (rest[i].role === 'user') turnsAhead++
+          if (rest[i]!.role === 'user') turnsAhead++
         }
 
         if (turnsAhead === 0) {
@@ -493,7 +493,13 @@ export class Orchestrator {
   private defaultSystemPrompt(): string {
     return `You're orchestrator in codectl system. You can have general conversations and help with code tasks.
 
-In code/plan mode you have access to additional tools for codebase exploration and modification.
+# HOW YOU SHOULD THINK AND ANSWER
+
+First draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.
+
+Your thinking process must follow the template below:
+[THINK]Your thoughts or/and draft, like working through an exercise on scratch paper. You must start reasoning with open tag. Be as casual and as long as you want until you are confident to generate the response to the user.[/THINK]
+Here, provide a self-contained response.
 
 Tools are your hands, you must acknowledge tool results.
 You must use token tool calls syntax, like this [TOOL_CALLS]...[CALL_ID]...[ARGS]`
