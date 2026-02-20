@@ -9,23 +9,37 @@ import {
   type ToolResult,
   type ToolFormat,
   parseToolCalls,
+  resolveArgs,
   renderTools,
   renderToolResult,
   ModeTool,
+  CallIdCacheTool,
 } from './tool'
 import { lstat } from "node:fs/promises"
 import { readFile } from "node:fs/promises"
 import { CodeqTools, createCodeqHandlers } from "./tools/codeq"
-import { ExecTools, createExecHandlers } from "./tools/exec"
+import { ExecTools, createExecHandlers, PersistentShell } from "./tools/exec"
 import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
+import { createCallIdCacheHandler } from "./tools/callid-cache"
+import type { CodePlan } from "./codeplan.schema"
 
 // --- Types ---
 
+/**
+ * chat     - plain conversation; no autonomous tool loop.
+ * agent    - full tool loop; ejects back to chat after too many consecutive failures.
+ * codeplan - conversational design loop for structured code-change plans (Ansible/Codeq).
+ *            The model proposes a CodePlan JSON; the system validates it and replies with
+ *            schema errors or a success confirmation.
+ */
 export type Mode =
   | { kind: 'chat' }
-  | { kind: 'code/plan'; gitRoot: string }
-  | { kind: 'code/gen'; gitRoot: string; streamId: string }
+  | { kind: 'agent'; gitRoot: string; consecutiveFailures: number }
+  | { kind: 'codeplan'; gitRoot: string; lastPlan?: CodePlan; validationErrors?: string[] }
+
+/** How many consecutive tool errors before the agent is ejected to chat mode. */
+const AGENT_MAX_CONSECUTIVE_FAILURES = 3
 
 export type ToolHandler = (
   args: Record<string, unknown>
@@ -164,6 +178,8 @@ export class Orchestrator {
   private readonly handlers = new Map<string, ToolHandler>()
   private readonly tools: ToolDefinition[] = []
   private readonly memory = new Map<string, string>()
+  private readonly callIdCache = new Map<string, string>()
+  private readonly shell = new PersistentShell()
 
   private history: Message[] = []
   private mode: Mode = { kind: 'chat' }
@@ -185,6 +201,7 @@ export class Orchestrator {
       result: renderTools(this.tools, this.config.toolFormat ?? 'json')
     }))
     this.registerTool(MemoryTool, createMemoryHandler(this.memory))
+    this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
 
     // Register codeq tools
     const codeqHandlers = createCodeqHandlers(() => {
@@ -197,12 +214,15 @@ export class Orchestrator {
       this.registerTool(def, handler)
     }
 
-    // Register exec tools
-    const execHandlers = createExecHandlers()
+    // Register exec tools (shared persistent shell)
+    const execHandlers = createExecHandlers(this.shell)
     for (const [name, handler] of Object.entries(execHandlers)) {
       const def = ExecTools.find(t => t.name === name)!
       this.registerTool(def, handler)
     }
+
+    // Codeplan validation tool (only meaningful in codeplan mode, but always registered)
+    this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
 
     // Register subagent tool
     this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
@@ -241,7 +261,10 @@ export class Orchestrator {
     this.history.push({ role: 'user', content: userMessage })
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
-    const maxTurns = this.config.autonomousTurns ?? 16
+    // In chat mode we only do a single inference pass (no autonomous loop)
+    const maxTurns = this.mode.kind === 'chat'
+      ? 1
+      : (this.config.autonomousTurns ?? 16)
     let finalTurn: ParsedTurn = { content: '' }
     let doneResult: string | undefined
 
@@ -251,7 +274,6 @@ export class Orchestrator {
       if (this.abortController.signal.aborted) break
 
       const messages = this.buildMessages()
-
       const parsed = await this.adapter.generate(messages)
 
       finalTurn = parsed
@@ -281,6 +303,9 @@ export class Orchestrator {
         } catch (err) {
           const result: ToolResult = { result: null, error: `Failed to parse tool call: ${err}` }
           this.history.push({ role: 'tool_result', content: renderToolResult(result) })
+          this.recordToolFailure()
+
+          if (this.wasEjected()) break outerLoop
 
           continue
         }
@@ -296,20 +321,25 @@ export class Orchestrator {
           }
 
           const result = await this.executeToolCall(call)
-
           toolsExecuted.push({ call, result })
 
           this.history.push({
             role: 'tool_result',
-            content: renderToolResult(result)
+            content: renderToolResult(result),
           })
+
+          // Track agent-mode failure ejection
+          if (result.error) {
+            this.recordToolFailure()
+            if (this.wasEjected()) { loopShouldStop = true; break }
+
+          } else {
+            this.resetToolFailures()
+          }
         }
       }
 
-      // If 'done' was called, break the autonomous loop
-      if (loopShouldStop) {
-        break outerLoop
-      }
+      if (loopShouldStop) break outerLoop
     }
 
     // If 'done' provided a specific result override, use it as final content
@@ -319,6 +349,29 @@ export class Orchestrator {
 
     // TODO
     return { turn: finalTurn, toolsExecuted }
+  }
+
+  /** Called after a tool error in agent mode; ejects to chat if threshold hit. */
+  private recordToolFailure(): void {
+    if (this.mode.kind !== 'agent') return
+    this.mode = { ...this.mode, consecutiveFailures: this.mode.consecutiveFailures + 1 }
+    if (this.mode.consecutiveFailures >= AGENT_MAX_CONSECUTIVE_FAILURES) {
+      consola.warn(`Agent hit ${AGENT_MAX_CONSECUTIVE_FAILURES} consecutive failures - ejecting to chat mode`)
+      this.mode = { kind: 'chat' }
+      this.rebuildSystemMessage()
+    }
+  }
+
+  /** Returns true if we were just ejected from agent mode. */
+  private wasEjected(): boolean {
+    return this.mode.kind === 'chat'
+  }
+
+  private resetToolFailures(): void {
+    if (this.mode.kind !== 'agent') return
+    if (this.mode.consecutiveFailures > 0) {
+      this.mode = { ...this.mode, consecutiveFailures: 0 }
+    }
   }
 
   // --- Internals ---
@@ -409,12 +462,22 @@ export class Orchestrator {
 
     const modeContext = match(this.mode)
       .with({ kind: 'chat' }, () => '')
-      .with({ kind: 'code/plan' }, ({ gitRoot }) =>
-        `\n\nYou are in code/plan mode. Git root: ${gitRoot}`
+      .with({ kind: 'agent' }, ({ gitRoot }) =>
+        `\n\nYou are in AGENT mode. Use tools continuously to accomplish the user's goal. ` +
+        `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}\nShell cwd is preserved between bash calls.`
       )
-      .with({ kind: 'code/gen' }, ({ gitRoot, streamId }) =>
-        `\n\nYou are in code/gen mode. Git root: ${gitRoot}. Resolving stream: ${streamId}`
-      )
+      .with({ kind: 'codeplan' }, ({ gitRoot, lastPlan, validationErrors }) => {
+        const planStatus = lastPlan
+          ? (validationErrors?.length
+            ? `\nLast plan had ${validationErrors.length} error(s): ${validationErrors.join('; ')}`
+            : '\nLast plan was valid.')
+          : '\nNo plan submitted yet.'
+        return (
+          `\n\nYou are in CODEPLAN mode. Collaborate on a CodePlan JSON with the user. ` +
+          `Use 'validate_plan' to check the schema; iterate until valid. ` +
+          `Git root: ${gitRoot}${planStatus}`
+        )
+      })
       .exhaustive()
 
     // Replace or insert system message
@@ -436,8 +499,12 @@ export class Orchestrator {
     const handler = this.handlers.get(call.name)
     if (!handler) return { result: null, error: `Unknown tool: ${call.name}` }
 
+    // Find the definition so we can resolve aliases + positional args
+    const def = this.tools.find(t => t.name === call.name)
+    const resolvedArgs = def ? resolveArgs(call.arguments, def) : call.arguments
+
     try {
-      const result = await handler(call.arguments)
+      const result = await handler(resolvedArgs)
 
       const args = JSON.stringify(call.arguments)
       const res = result.error ? `Error: ${result.error}` : this.shortenResult(result.result)
@@ -469,41 +536,108 @@ export class Orchestrator {
       return { result: { switched: 'chat' } }
     }
 
-    if (targetMode === 'code/plan') {
+    if (targetMode === 'agent') {
       const gitRoot = await findGitRoot(process.cwd())
 
-      let errMsg = undefined
-
-      if (!gitRoot) {
-        errMsg = 'No git repository found in current directory or any parent'
-      }
-
-      this.mode = { kind: 'code/plan', gitRoot: gitRoot ?? '' }
-
+      this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
       this.rebuildSystemMessage()
 
-      return { result: { switched: targetMode, result: gitRoot, error: errMsg } }
+      return { result: { switched: 'agent', gitRoot } }
+    }
+
+    if (targetMode === 'codeplan') {
+      const gitRoot = await findGitRoot(process.cwd())
+
+      if (!gitRoot) return { result: null, error: 'codeplan mode requires a git repository' }
+
+      this.mode = { kind: 'codeplan', gitRoot }
+      this.rebuildSystemMessage()
+      return { result: { switched: 'codeplan', gitRoot } }
     }
 
     return { result: null, error: `Unknown mode: ${targetMode}` }
   }
 
-  // TODO unhardcode
-  // TODO dedent
-  private defaultSystemPrompt(): string {
-    return `You're orchestrator in codectl system. You can have general conversations and help with code tasks.
+  private async handleValidatePlan(args: Record<string, unknown>): Promise<ToolResult> {
+    if (this.mode.kind !== 'codeplan') {
+      return { result: null, error: 'validate_plan is only available in codeplan mode' }
+    }
+    const raw = args.plan ?? args.json ?? args.codeplan
+    if (!raw) return { result: null, error: "'plan' argument is required" }
 
-# HOW YOU SHOULD THINK AND ANSWER
+    let parsed: unknown
+    try {
+      parsed = typeof raw === 'string' ? JSON.parse(raw as string) : raw
+    } catch (err) {
+      return { result: null, error: `Invalid JSON: ${err}` }
+    }
 
-First draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.
+    try {
+      const schemaModule = await import('./codeplan.schema')
+      const schema = (schemaModule as any).codePlanSchema ?? (schemaModule as any).default
+      if (!schema) throw new Error('schema not found')
 
-Your thinking process must follow the template below:
-[THINK]Your thoughts or/and draft, like working through an exercise on scratch paper. You must start reasoning with open tag. Be as casual and as long as you want until you are confident to generate the response to the user.[/THINK]
-Here, provide a self-contained response.
-
-Tools are your hands, you must acknowledge tool results.
-You must use token tool calls syntax, like this [TOOL_CALLS]...[CALL_ID]...[ARGS]`
+      const result = schema.safeParse(parsed)
+      if (result.success) {
+        this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), lastPlan: result.data, validationErrors: [] }
+        this.rebuildSystemMessage()
+        return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
+      } else {
+        const errors = result.error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`)
+        this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), validationErrors: errors }
+        this.rebuildSystemMessage()
+        return { result: { valid: false, errors } }
+      }
+    } catch (err) {
+      return { result: null, error: `Schema validation failed: ${err}` }
+    }
   }
+
+  // TODO unhardcode
+  private defaultSystemPrompt(): string {
+    return [
+      "You're the orchestrator in the codectl system.",
+      "",
+      "Modes:",
+      "  chat     - general conversation (default, single-turn)",
+      "  agent    - autonomous tool loop; call 'done' when task is complete.",
+      "             Ejected back to chat after 3 consecutive tool failures.",
+      "  codeplan - design a structured CodePlan JSON (Ansible-style).",
+      "             Use 'validate_plan' to check schema; iterate until valid.",
+      "",
+      "Tools are your hands - always acknowledge results.",
+      "Use token tool-call syntax: [TOOL_CALLS]...[CALL_ID]...[ARGS]",
+    ].join('\n')
+  }
+}
+
+// --- Validate plan tool definition (exported for registration) ---
+
+export const ValidatePlanTool: ToolDefinition = {
+  name: 'validate_plan',
+  description:
+    'Validate a CodePlan JSON object against the schema. ' +
+    'Returns { valid: true } on success or { valid: false, errors } with schema violations. ' +
+    'Only available in codeplan mode.',
+  parameters: {
+    type: 'object',
+    properties: {
+      plan: {
+        type: 'string',
+        description: 'The CodePlan JSON to validate (as a serialised string).',
+        aliases: ['json', 'codeplan'],
+      },
+    },
+    required: ['plan'],
+  },
+  returns: {
+    type: 'object',
+    properties: {
+      valid: { type: 'boolean', description: 'Whether the plan passed schema validation.' },
+      errors: { type: 'string', description: 'Validation errors (when valid is false).' },
+      message: { type: 'string', description: 'Success message (when valid is true).' },
+    },
+  },
 }
 
 // --- Smoke test ---

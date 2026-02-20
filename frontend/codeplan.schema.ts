@@ -1,6 +1,6 @@
 import z from "zod"
 
-const codePlanSchema = z.object({
+export const codePlanSchema = z.object({
   codePlan: z.array(
     z.object({
       apiVersion: z.string(),

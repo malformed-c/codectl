@@ -54,7 +54,7 @@ async function gitTrackedFiles(gitRoot: string): Promise<string[]> {
 export const CodeqRepomapTool: ToolDefinition = {
   name: 'codeq_repomap',
   description:
-    'Get a structural overview of the entire repository — directory tree with ' +
+    'Get a structural overview of the entire repository - directory tree with ' +
     'function and class signatures per source file. Use this first to understand ' +
     'the codebase before diving into specific files.',
   parameters: {

@@ -13,6 +13,8 @@ export type JsonSchemaProperty = {
   items?: JsonSchemaProperty
   properties?: Record<string, JsonSchemaProperty>
   required?: string[]
+  /** Alternative names the model may use for this parameter (e.g. 'cmd' for 'command'). */
+  aliases?: string[]
 }
 
 export type ToolParameters = {
@@ -337,19 +339,82 @@ export function renderToolResult(result: ToolResult, T?: ToolResultsTemplate): s
   return json
 }
 
+// --- Argument resolution ---
+
+/**
+ * Resolve model-provided args against a tool definition.
+ *
+ * Three resolution steps, applied in order:
+ *  1. Alias remapping  - if the model used an alias (e.g. "cmd"), remap to
+ *     the canonical property name (e.g. "command").
+ *  2. Positional fill  - required params that are still missing get filled
+ *     from leftover (unrecognised) keys in the order they appear in `required`.
+ *  3. Single-required shorthand - if there is exactly one required param and
+ *     the model provided exactly one value under *any* key, use it.
+ */
+export function resolveArgs(
+  args: Record<string, unknown>,
+  def: ToolDefinition
+): Record<string, unknown> {
+  const { properties, required = [] } = def.parameters
+  const resolved: Record<string, unknown> = {}
+
+  // Build a reverse alias map: alias -> canonical
+  const aliasMap = new Map<string, string>()
+  for (const [canonical, prop] of Object.entries(properties)) {
+    for (const alias of prop.aliases ?? []) {
+      aliasMap.set(alias, canonical)
+    }
+  }
+
+  // Step 1: remap aliases + collect unrecognised keys
+  const unrecognised: [string, unknown][] = []
+  for (const [key, val] of Object.entries(args)) {
+    const canonical = aliasMap.get(key) ?? (properties[key] ? key : null)
+    if (canonical) {
+      resolved[canonical] = val
+
+    } else {
+      unrecognised.push([key, val])
+    }
+  }
+
+  // Step 2: positional fill - match leftover values to still-missing required params
+  const missingRequired = required.filter((r) => !(r in resolved))
+
+  if (unrecognised.length > 0 && missingRequired.length > 0) {
+    // If exactly one required and one leftover: always fill it (single-required shorthand)
+    const fillCount = Math.min(unrecognised.length, missingRequired.length)
+    for (let i = 0; i < fillCount; i++) {
+      resolved[missingRequired[i]!] = unrecognised[i]![1]
+    }
+  }
+
+  // Pass through any remaining recognised optional params that weren't aliased
+  for (const [key, val] of Object.entries(args)) {
+    if (!(key in resolved) && properties[key]) {
+      resolved[key] = val
+    }
+  }
+
+  return resolved
+}
+
 // --- Built-in tools ---
 
 export const ModeTool: ToolDefinition = {
   name: "mode",
   description:
-    "Switch the current interaction mode. Use code/plan when the user wants to modify " +
-    "code or you need to explore the codebase. Use chat for general conversation.",
+    "Switch the current interaction mode. " +
+    "Use 'agent' when you want autonomous tool-driven work. " +
+    "Use 'codeplan' when you want to design and validate a structured code change plan. " +
+    "Use 'chat' for general conversation.",
   parameters: {
     type: "object",
     properties: {
       mode: {
         type: "string",
-        enum: ["chat", "code/plan"],
+        enum: ["chat", "agent", "codeplan"],
         description: "Target mode to switch to",
       },
       reason: {
@@ -363,6 +428,49 @@ export const ModeTool: ToolDefinition = {
     type: "object",
     properties: {
       switched: { type: "string", description: "The mode that was activated" },
+      error: { type: "string", description: "Error message if switch failed" },
+    },
+  },
+}
+
+/**
+ * Tool for storing and retrieving arbitrary values keyed by call ID.
+ * Lets the model cache expensive results and re-use them across turns.
+ */
+export const CallIdCacheTool: ToolDefinition = {
+  name: "call_cache",
+  description:
+    "Store or retrieve a value in the call-ID cache. " +
+    "Use 'set' to save a result you want to reference later, 'get' to retrieve it, " +
+    "'list' to see all stored keys, and 'delete' to remove one.",
+  parameters: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["set", "get", "delete", "list"],
+        description: "Cache operation to perform.",
+        aliases: ["op", "operation"],
+      },
+      id: {
+        type: "string",
+        description: "Cache key (call ID or any label).",
+        aliases: ["key", "call_id", "callId"],
+      },
+      value: {
+        type: "string",
+        description: "Value to store (only for 'set').",
+        aliases: ["data", "result", "content"],
+      },
+    },
+    required: ["action"],
+  },
+  returns: {
+    type: "object",
+    properties: {
+      value: { type: "string", description: "Retrieved value (for 'get')." },
+      keys: { type: "string", description: "Comma-separated list of keys (for 'list')." },
+      success: { type: "string", description: "Confirmation message." },
     },
   },
 }
