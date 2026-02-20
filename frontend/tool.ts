@@ -93,7 +93,12 @@ function renderJson(tools: ToolDefinition[]): string {
     tools.map((t) => ({
       name: t.name,
       description: t.description,
-      parameters: t.parameters,
+      parameters: {
+        ...t.parameters,
+        properties: Object.fromEntries(
+          Object.entries(t.parameters.properties).map(([k, { aliases: _aliases, ...prop }]) => [k, prop])
+        ),
+      },
       ...(t.returns ? { returns: t.returns } : {}),
     })),
     null,
@@ -116,6 +121,7 @@ function jsonTypeToTs(prop: JsonSchemaProperty, inline = false): string {
       if (!prop.properties) return "Record<string, unknown>"
       // Render as inline type literal: { key: type; key2: type }
       const fields = Object.entries(prop.properties).map(([k, v]) => `${k}: ${jsonTypeToTs(v)}`)
+
       return inline ? `{ ${fields.join("; ")} }` : `{\n${fields.map((f) => `  ${f}`).join("\n")}\n}`
     }
 

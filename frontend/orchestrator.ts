@@ -51,12 +51,19 @@ export type OrchestratorConfig = {
   systemPrompt?: string
   tools?: ToolDefinition[]
   toolFormat?: ToolFormat
+
   /** Max autonomous turns before giving up */
   autonomousTurns?: number
+
+  /** Max follow-through turns in chat mode when the model uses a tool (default: 3) */
+  chatToolTurns?: number
+
   /** Current nesting depth (set by subagent tool) */
   depth?: number
+
   /** Max subagent nesting depth */
   maxDepth?: number
+
   /** Path to backend/ directory for Ansible subprocess. Defaults to ../backend relative to cwd. */
   backendDir?: string
 }
@@ -271,10 +278,14 @@ export class Orchestrator {
     this.history.push({ role: 'user', content: userMessage })
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
-    // In chat mode we only do a single inference pass (no autonomous loop)
+
+    // Chat mode allows tool calls but caps at a small number of follow-through turns
+    // so the model can respond after executing a tool (e.g. tool_library → summarise).
+    // Agent/codeplan modes get the full autonomous turn budget.
     const maxTurns = this.mode.kind === 'chat'
-      ? 1
+      ? (this.config.chatToolTurns ?? 3)
       : (this.config.autonomousTurns ?? 16)
+
     let finalTurn: ParsedTurn = { content: '' }
     let doneResult: string | undefined
 

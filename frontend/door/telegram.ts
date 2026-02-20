@@ -195,7 +195,9 @@ export class TelegramDoor {
         await this.config.historyStore.save(room.meta, room.orchestrator.getHistory())
       }
 
-      const response = result.turn.content || '...'
+      const response = result.turn.content
+      if (!response) return  // model produced no text content (pure tool call turn)
+
       const chunks = splitMessage(response, this.config.maxMessageLength)
 
       for (const chunk of chunks) {
