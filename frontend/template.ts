@@ -74,8 +74,8 @@ export type Message = {
   /** Structured tool calls - present on tool_call messages instead of raw content. */
   calls?: StoredToolCall[]
 
-  /** Structured tool result - present on tool_result messages instead of raw content. */
-  result?: StoredToolResult
+  /** Structured tool results - present on tool_result messages instead of raw content. */
+  results?: StoredToolResult[]
 }
 
 export type FimRequest = {
@@ -276,6 +276,29 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
 }
 
 /**
+ * Render multiple StoredToolResults to the inner content string (without outer wrap tokens).
+ */
+export function renderStoredToolResults(results: StoredToolResult[], template: TextTemplate): string {
+  const tr = template.toolResult
+
+  // Mistral-style rich format
+  if (tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich) {
+    return results.map(r => renderStoredToolResult(r, template)).join('\n')
+  }
+
+  // Simple pair format - if multiple results, wrap them in a JSON array
+  if (results.length > 1) {
+    return JSON.stringify(results.map(r => ({
+      ...(r.callId ? { callId: r.callId } : {}),
+      ...(r.error ? { error: r.error } : { result: r.value })
+    })), null, 2)
+  }
+
+  // Single result - backward compatible with single-object JSON
+  return results[0] ? renderStoredToolResult(results[0], template) : ''
+}
+
+/**
  * Render a conversation to a single prompt string.
  * The returned string ends just after the last assistant open tag,
  * ready for the model to continue.
@@ -301,8 +324,8 @@ export function render(messages: Message[], template: TextTemplate): string {
         wrapPair(template.modelTurn, content)
       )
       .with({ role: 'tool_result' }, (m) => {
-        const inner = m.result
-          ? renderStoredToolResult(m.result, template)
+        const inner = m.results
+          ? renderStoredToolResults(m.results, template)
           : m.content
 
         return wrapPair(resolveWrap(template.toolResult, template.userTurn), inner)

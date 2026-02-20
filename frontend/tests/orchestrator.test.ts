@@ -9,18 +9,18 @@ class MockAdapter extends KoboldAdapter {
     super({ apiServer: 'http://localhost', template: Profiles.mistral })
   }
   override async generate(messages: any) {
-    // consola.log('DEBUG messages:', JSON.stringify(messages, null, 2));
+    // console.error('DEBUG messages:', JSON.stringify(messages, null, 2));
     const lastMessage = messages[messages.length - 1]
-    if (lastMessage.content.includes('Hello')) {
+    if (lastMessage.content?.includes('Hello')) {
       return { content: 'Hi there!', think: 'User said hello.' }
     }
     if (lastMessage.role === 'tool_result') {
       return { content: 'Tool executed successfully.' }
     }
-    if (lastMessage.content.includes('call tool')) {
+    if (lastMessage.content?.includes('call tool')) {
       return {
         content: 'Calling tool...',
-        toolCalls: ['mode[ARGS]{"mode": "code/plan"}']
+        toolCalls: ['mode[ARGS]{"mode": "codeplan"}']
       }
     }
     return { content: "I don't understand." }
@@ -44,6 +44,6 @@ describe('Orchestrator', () => {
     expect(result.turn.content).toBe('Tool executed successfully.')
     expect(result.toolsExecuted).toHaveLength(1)
     expect(result.toolsExecuted[0]!.call.name).toBe('mode')
-    expect(orch.getMode().kind).toBe('code/plan')
+    expect(orch.getMode().kind).toBe('codeplan')
   })
 })

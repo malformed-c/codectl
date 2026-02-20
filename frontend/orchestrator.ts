@@ -313,42 +313,48 @@ export class Orchestrator {
 
       consola.trace('received tool calls:', parsed.toolCalls)
 
+      const allCalls: ToolCall[] = []
+      const storedCalls: StoredToolCall[] = []
+
       for (const rawCall of parsed.toolCalls) {
-        let calls: ToolCall[] = []
         try {
-          calls = parseToolCalls(rawCall)
+          const calls = parseToolCalls(rawCall)
+          allCalls.push(...calls)
 
           // Store as structured calls - re-rendered to native format on send
-          const storedCalls: StoredToolCall[] = calls.map(c => ({
+          storedCalls.push(...calls.map(c => ({
             tool: c.name,
             ...(c.callId ? { callId: c.callId } : {}),
             ...c.arguments,
-          }))
-
-          this.history.push({
-            role: 'tool_call',
-            content: '',
-            calls: storedCalls,
-          })
+          })))
 
         } catch (err) {
+          // If we have a parse error, we push the raw call as a single message
+          // and record the error immediately.
           this.history.push({
             role: 'tool_call',
             content: rawCall,
           })
 
-          this.history.push({ role: 'tool_result', content: '', result: { error: `Failed to parse tool call: ${err}` } satisfies StoredToolResult })
+          this.history.push({ role: 'tool_result', content: '', results: [{ error: `Failed to parse tool call: ${err}` }] satisfies StoredToolResult[] })
           this.recordToolFailure()
 
           if (this.wasEjected()) break outerLoop
 
           continue
         }
+      }
 
-        consola.trace('parsed tool calls:', calls)
+      if (storedCalls.length > 0) {
+        this.history.push({
+          role: 'tool_call',
+          content: '',
+          calls: storedCalls,
+        })
 
-        for (const call of calls) {
-          // TODO Refactor to lambdas
+        const storedResults: StoredToolResult[] = []
+
+        for (const call of allCalls) {
           // Detect special control flow tools
           if (call.name === 'done') {
             doneResult = call.arguments.result as string | undefined
@@ -358,15 +364,11 @@ export class Orchestrator {
           const result = await this.executeToolCall(call)
           toolsExecuted.push({ call, result })
 
-          this.history.push({
-            role: 'tool_result',
-            content: '',
-            result: {
-              callId: result.callId,
-              error: result.error,
-              value: result.result,
-            } satisfies StoredToolResult,
-          })
+          storedResults.push({
+            callId: result.callId,
+            error: result.error,
+            value: result.result,
+          } satisfies StoredToolResult)
 
           // Track agent-mode failure ejection
           if (result.error) {
@@ -377,6 +379,12 @@ export class Orchestrator {
             this.resetToolFailures()
           }
         }
+
+        this.history.push({
+          role: 'tool_result',
+          content: '',
+          results: storedResults,
+        })
       }
 
       if (loopShouldStop) break outerLoop
@@ -444,12 +452,18 @@ export class Orchestrator {
         if (turnsAhead === 0) return msg // Age 0: full
 
         // Age 1+: shorten via structured result field
-        if (msg.result) {
+        if (msg.results) {
           if (turnsAhead === 1) {
             // Shorten long results
-            const preview = JSON.stringify(msg.result.value ?? msg.result.error ?? '')
+            const preview = JSON.stringify(msg.results.map(r => r.value ?? r.error ?? ''))
             if (preview.length > 1000) {
-              return { ...msg, result: { ...msg.result, value: preview.slice(0, 1000) + '... (shortened)' } }
+              return {
+                ...msg,
+                results: msg.results.map(r => ({
+                  ...r,
+                  value: typeof r.value === 'string' && r.value.length > 500 ? r.value.slice(0, 500) + '... (shortened)' : r.value
+                }))
+              }
             }
 
             return msg
@@ -458,9 +472,9 @@ export class Orchestrator {
           // Age 2+: minimal skeleton
           return {
             ...msg,
-            result: msg.result.error
+            results: msg.results.map(r => (r.error
               ? { error: 'original error preserved, result omitted' }
-              : { value: 'omitted' },
+              : { value: 'omitted' })),
           }
         }
 

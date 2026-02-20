@@ -58,3 +58,4 @@ id[TOOL_CALLS]
 it should be combined
 
 18. Combine tool results
+19. Refactor wrapper handler to lambdas

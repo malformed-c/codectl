@@ -29,11 +29,9 @@ describe('tool_call history', () => {
     const toolCall = orch.getHistory().find((m) => m.role === 'tool_call')
     expect(toolCall).toBeTruthy()
 
-    const parsed = JSON.parse(toolCall!.content) as { raw: string; calls: Array<{ name: string; arguments: Record<string, unknown> }> }
-    expect(parsed.raw).toBe('bash[ARGS]{}\nw[ARGS]{}\nid[ARGS]{}')
-    expect(parsed.calls).toEqual([
-      { name: 'bash', arguments: { command: 'w' } },
-      { name: 'bash', arguments: { command: 'id' } },
-    ])
+    expect(toolCall!.calls).toHaveLength(3)
+    expect(toolCall!.calls![0]).toEqual({ tool: 'bash' })
+    expect(toolCall!.calls![1]).toEqual({ tool: 'w' })
+    expect(toolCall!.calls![2]).toEqual({ tool: 'id' })
   })
 })
