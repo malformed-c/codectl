@@ -317,12 +317,11 @@ export class Orchestrator {
       for (const rawCall of parsed.toolCalls) {
         let calls: ToolCall[] = []
         try {
+          calls = parseToolCalls(rawCall)
           this.history.push({
             role: 'tool_call',
             content: JSON.stringify({ raw: rawCall, calls }, null, 2),
           })
-
-          calls = parseToolCalls(rawCall)
 
         } catch (err) {
           this.history.push({
