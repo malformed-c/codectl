@@ -283,7 +283,7 @@ export class Orchestrator {
     // so the model can respond after executing a tool (e.g. tool_library → summarise).
     // Agent/codeplan modes get the full autonomous turn budget.
     const maxTurns = this.mode.kind === 'chat'
-      ? (this.config.chatToolTurns ?? 3)
+      ? (this.config.chatToolTurns ?? 5)
       : (this.config.autonomousTurns ?? 16)
 
     let finalTurn: ParsedTurn = { content: '' }

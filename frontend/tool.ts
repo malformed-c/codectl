@@ -272,40 +272,57 @@ function renderProse(_tools: ToolDefinition[]): string {
 export function parseToolCalls(raw: string): ToolCall[] {
   const text = raw.trim()
 
+  const parseArguments = (argsText: string): Record<string, unknown> => {
+    try {
+      const parsed = JSON.parse(argsText)
+
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+
+      return { value: parsed }
+
+    } catch {
+      // Support shorthand calls such as: bash[ARGS]ls -la
+      return { value: argsText }
+    }
+  }
+
   // Rich format detection (Mistral-style)
   // [CALL_ID]id123[ARGS]{"param": "val"} or just tool_name[ARGS]{...}
   // TODO Unhardcode
   if (text.includes('[ARGS]')) {
-    let callId: string | undefined
-    let name = ''
-    let argsPart = ''
+    const normalized = text.replace(/\r\n?/g, '\n')
+    const starts: Array<{ start: number, name: string, callId?: string, argsStart: number }> = []
+    const marker = /(^|\n)\s*([^\n\[]+?)\s*(?:\[CALL_ID\](.*?)\s*)?\[ARGS\]/g
 
-    if (text.includes('[CALL_ID]')) {
-      const callIdMatch = text.match(/\[CALL_ID\](.*?)\[ARGS\]/)
-      const nameMatch = text.match(/^(.*?)\[CALL_ID\]/)
+    for (const match of normalized.matchAll(marker)) {
+      const full = match[0] ?? ''
+      const startOffset = match.index ?? 0
+      const consumedNewline = full.startsWith('\n') ? 1 : 0
 
-      if (callIdMatch) callId = callIdMatch[1]!.trim()
-      if (nameMatch) name = nameMatch[1]!.trim()
+      const start = startOffset + consumedNewline
+      const argsStart = startOffset + full.length
+      const name = (match[2] ?? '').trim()
+      const callId = match[3]?.trim() || undefined
 
-      const argsIndex = text.indexOf('[ARGS]')
-      argsPart = text.slice(argsIndex + 6).trim()
-
-    } else {
-      const [namePart, ...rest] = text.split('[ARGS]')
-      name = namePart!.trim()
-      argsPart = rest.join('[ARGS]').trim()
+      starts.push({ start, name, callId, argsStart })
     }
 
-    try {
-      return [{
-        callId,
-        name: name || 'unknown',
-        arguments: JSON.parse(argsPart),
-      }]
-
-    } catch (err) {
-      throw new Error(`Failed to parse tool arguments as JSON: ${err}`)
+    if (starts.length === 0) {
+      throw new Error(`Unrecognized rich tool call format: ${text}`)
     }
+
+    return starts.map((item, index) => {
+      const nextStart = starts[index + 1]?.start ?? normalized.length
+      const argsPart = normalized.slice(item.argsStart, nextStart).trim()
+
+      return {
+        callId: item.callId,
+        name: item.name || 'unknown',
+        arguments: parseArguments(argsPart),
+      }
+    })
   }
 
   // Fallback to pure JSON
