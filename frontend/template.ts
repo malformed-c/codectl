@@ -1,5 +1,6 @@
 // --- Types ---
 
+import consola from 'consola'
 import { match, P } from 'ts-pattern'
 
 type TemplatePair = [open: string, close: string]
@@ -232,9 +233,12 @@ export function renderToolCalls(calls: StoredToolCall[], template: TextTemplate)
     // Mistral-style rich format
     const { callId: callIdToken, args: argsToken } = tc.rich
 
-    return calls.map(({ tool, callId, ...args }) =>
-      `${tool}${callIdToken}${callId ?? ''}${argsToken}${JSON.stringify(args)}`
-    ).join('\n')
+    return calls.map(({ tool, callId, ...args }) => {
+      const callIdPart = callId ? `${callIdToken}${callId}` : ''
+      const argsPart = Object.keys(args).length ? JSON.stringify(args) : ''
+
+      return `${tool}${callIdPart}${argsToken}${argsPart}`
+    }).join('\n')
   }
 
   // Simple pair format - JSON array matching what the model originally produced

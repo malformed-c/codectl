@@ -3,6 +3,7 @@ import { readdirSync } from "node:fs"
 import { YAML } from "bun"
 
 import type { ToolResultsTemplate } from './template'
+import consola from "consola"
 
 // --- Types ---
 
@@ -302,8 +303,13 @@ export function parseToolCalls(raw: string): ToolCall[] {
   }
 
   const parseArguments = (argsText: string): Record<string, unknown> => {
+    const trimmed = argsText.trim()
+
+    // Empty args = no arguments
+    if (!trimmed) return {}
+
     try {
-      const parsed = JSON.parse(argsText)
+      const parsed = JSON.parse(trimmed)
 
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>
@@ -313,7 +319,7 @@ export function parseToolCalls(raw: string): ToolCall[] {
 
     } catch {
       // Support shorthand calls such as: bash[ARGS]ls -la
-      return { value: argsText }
+      return { value: trimmed }
     }
   }
 
