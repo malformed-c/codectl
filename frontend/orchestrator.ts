@@ -2,7 +2,7 @@ import { consola } from "consola"
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
-import type { Message, ParsedTurn, TextTemplate, StoredToolCall } from './template'
+import type { Message, ParsedTurn, TextTemplate, StoredToolCall, StoredToolResult } from './template'
 import {
   type ToolDefinition,
   type ToolCall,
@@ -11,7 +11,6 @@ import {
   parseToolCalls,
   resolveArgs,
   renderTools,
-  renderToolResult,
   ModeTool,
   CallIdCacheTool,
 } from './tool'
@@ -338,8 +337,7 @@ export class Orchestrator {
             content: rawCall,
           })
 
-          const result: ToolResult = { result: null, error: `Failed to parse tool call: ${err}` }
-          this.history.push({ role: 'tool_result', content: renderToolResult(result) })
+          this.history.push({ role: 'tool_result', content: '', result: { error: `Failed to parse tool call: ${err}` } satisfies StoredToolResult })
           this.recordToolFailure()
 
           if (this.wasEjected()) break outerLoop
@@ -362,7 +360,12 @@ export class Orchestrator {
 
           this.history.push({
             role: 'tool_result',
-            content: renderToolResult(result),
+            content: '',
+            result: {
+              callId: result.callId,
+              error: result.error,
+              result: result.result,
+            } satisfies StoredToolResult,
           })
 
           // Track agent-mode failure ejection
@@ -438,48 +441,39 @@ export class Orchestrator {
           if (rest[i]!.role === 'user') turnsAhead++
         }
 
-        if (turnsAhead === 0) {
-          return msg // Age 0: full
-        }
+        if (turnsAhead === 0) return msg // Age 0: full
 
-        try {
-          // Attempt to parse and shorten
-          // The result might be wrapped in tool tags, so we need to handle that
-          // For now, let's do a simple string shortening if it looks like JSON
-          let content = msg.content
-          let prefix = ''
-          let suffix = ''
-
-          // Check for Mistral-style wrapping
-          if (this.profile.toolResult && typeof this.profile.toolResult !== 'function' && 'wrap' in this.profile.toolResult) {
-            const [open, close] = this.profile.toolResult.wrap
-            if (content.startsWith(open) && content.endsWith(close)) {
-              prefix = open
-              suffix = close
-              content = content.slice(open.length, -close.length)
-            }
-          }
-
+        // Age 1+: shorten via structured result field
+        if (msg.result) {
           if (turnsAhead === 1) {
-            // Age 1: shortened
-            if (content.length > 1000) {
-              content = content.slice(0, 1000) + '... (shortened)'
+            // Shorten long results
+            const preview = JSON.stringify(msg.result.result ?? msg.result.error ?? '')
+            if (preview.length > 1000) {
+              return { ...msg, result: { ...msg.result, result: preview.slice(0, 1000) + '... (shortened)' } }
             }
-          } else {
-            // Age 2+: minimal
-            // Try to see if it was an error
-            if (content.includes('"error":')) {
-              content = '{ "error": "original error preserved, result omitted" }'
-            } else {
-              content = '{ "result": "omitted" }'
-            }
+
+            return msg
           }
 
-          return { ...msg, content: prefix + content + suffix }
-
-        } catch {
-          return msg
+          // Age 2+: minimal skeleton
+          return {
+            ...msg,
+            result: msg.result.error
+              ? { error: 'original error preserved, result omitted' }
+              : { result: 'omitted' },
+          }
         }
+
+        // Fallback: raw content shortening (legacy / parse-error entries)
+        if (turnsAhead === 1) {
+          return msg.content.length > 1000
+            ? { ...msg, content: msg.content.slice(0, 1000) + '... (shortened)' }
+            : msg
+        }
+
+        return { ...msg, content: msg.content.includes('"error":')
+          ? '{ "error": "original error preserved, result omitted" }'
+          : '{ "result": "omitted" }' }
       }
 
       return msg

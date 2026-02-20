@@ -55,11 +55,26 @@ export type StoredToolCall = {
   [key: string]: unknown
 }
 
+/**
+ * A structured tool result stored in history.
+ * Holds the raw result value so it is only serialized once at render time,
+ * preventing double-escaping when result is already a string.
+ */
+export type StoredToolResult = {
+  callId?: string
+  error?: string
+  result?: unknown
+}
+
 export type Message = {
   role: Role
   content: string
+
   /** Structured tool calls - present on tool_call messages instead of raw content. */
   calls?: StoredToolCall[]
+
+  /** Structured tool result - present on tool_result messages instead of raw content. */
+  result?: StoredToolResult
 }
 
 export type FimRequest = {
@@ -232,6 +247,27 @@ export function renderToolCalls(calls: StoredToolCall[], template: TextTemplate)
 }
 
 /**
+ * Render a StoredToolResult to the inner content string (without outer wrap tokens).
+ * Serializes the result value exactly once - avoids double-escaping when result is
+ * already a string (e.g. from renderTools).
+ */
+export function renderStoredToolResult(stored: StoredToolResult, template: TextTemplate): string {
+  const payload = stored.error
+    ? { error: stored.error }
+    : { result: stored.result }
+
+  const json = JSON.stringify(payload, null, 2)
+
+  const tr = template.toolResult
+  if (tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich) {
+    const rich = (tr as ToolResultsTemplate).rich!
+    return `${rich.callId}${stored.callId ?? ''}${rich.content}${json}`
+  }
+
+  return json
+}
+
+/**
  * Render a conversation to a single prompt string.
  * The returned string ends just after the last assistant open tag,
  * ready for the model to continue.
@@ -256,14 +292,19 @@ export function render(messages: Message[], template: TextTemplate): string {
       .with({ role: 'assistant' }, { role: 'model' }, ({ content }) =>
         wrapPair(template.modelTurn, content)
       )
-      .with({ role: 'tool_result' }, ({ content }) =>
-        wrapPair(resolveWrap(template.toolResult, template.userTurn), content)
-      )
+      .with({ role: 'tool_result' }, (m) => {
+        const inner = m.result
+          ? renderStoredToolResult(m.result, template)
+          : m.content
+
+        return wrapPair(resolveWrap(template.toolResult, template.userTurn), inner)
+      })
       .with({ role: 'tool_call' }, (m) => {
         // Re-render structured calls to native format if present
         const content = m.calls?.length
           ? renderToolCalls(m.calls, template)
           : m.content
+
         return wrapPair(resolveWrap(template.toolCall, template.modelTurn), content)
       })
       .exhaustive()
