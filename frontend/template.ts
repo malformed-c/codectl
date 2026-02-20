@@ -45,9 +45,21 @@ export type TextTemplate = {
 
 export type Role = 'system' | 'user' | 'assistant' | 'model' | 'tool_result' | 'tool_call'
 
+/**
+ * A structured tool call entry stored in history.
+ * The `tool` field is the tool name; all other fields are arguments.
+ */
+export type StoredToolCall = {
+  tool: string
+  callId?: string
+  [key: string]: unknown
+}
+
 export type Message = {
   role: Role
   content: string
+  /** Structured tool calls - present on tool_call messages instead of raw content. */
+  calls?: StoredToolCall[]
 }
 
 export type FimRequest = {
@@ -191,6 +203,35 @@ function wrap([open, close]: TemplatePair, content: string): string {
 }
 
 /**
+ * Render structured StoredToolCall[] back to the native content string
+ * for the given template (without the outer wrap tokens).
+ *
+ * Mistral rich:  toolname[CALL_ID]id[ARGS]{...}\ntoolname2[CALL_ID]...[ARGS]{...}
+ * Simple pair:   [{"name":"bash","arguments":{"command":"ls"}}]
+ */
+export function renderToolCalls(calls: StoredToolCall[], template: TextTemplate): string {
+  const tc = template.toolCall
+
+  if (tc && !Array.isArray(tc) && tc.rich) {
+    // Mistral-style rich format
+    const { callId: callIdToken, args: argsToken } = tc.rich
+
+    return calls.map(({ tool, callId, ...args }) =>
+      `${tool}${callIdToken}${callId ?? ''}${argsToken}${JSON.stringify(args)}`
+    ).join('\n')
+  }
+
+  // Simple pair format - JSON array matching what the model originally produced
+  return JSON.stringify(
+    calls.map(({ tool, callId, ...args }) => ({
+      name: tool,
+      ...(callId ? { id: callId } : {}),
+      arguments: args,
+    }))
+  )
+}
+
+/**
  * Render a conversation to a single prompt string.
  * The returned string ends just after the last assistant open tag,
  * ready for the model to continue.
@@ -218,9 +259,13 @@ export function render(messages: Message[], template: TextTemplate): string {
       .with({ role: 'tool_result' }, ({ content }) =>
         wrapPair(resolveWrap(template.toolResult, template.userTurn), content)
       )
-      .with({ role: 'tool_call' }, ({ content }) =>
-        wrapPair(resolveWrap(template.toolCall, template.modelTurn), content)
-      )
+      .with({ role: 'tool_call' }, (m) => {
+        // Re-render structured calls to native format if present
+        const content = m.calls?.length
+          ? renderToolCalls(m.calls, template)
+          : m.content
+        return wrapPair(resolveWrap(template.toolCall, template.modelTurn), content)
+      })
       .exhaustive()
 
     parts.push(part)

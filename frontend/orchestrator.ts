@@ -2,7 +2,7 @@ import { consola } from "consola"
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
-import type { Message, ParsedTurn, TextTemplate } from './template'
+import type { Message, ParsedTurn, TextTemplate, StoredToolCall } from './template'
 import {
   type ToolDefinition,
   type ToolCall,
@@ -318,15 +318,24 @@ export class Orchestrator {
         let calls: ToolCall[] = []
         try {
           calls = parseToolCalls(rawCall)
+
+          // Store as structured calls - re-rendered to native format on send
+          const storedCalls: StoredToolCall[] = calls.map(c => ({
+            tool: c.name,
+            ...(c.callId ? { callId: c.callId } : {}),
+            ...c.arguments,
+          }))
+
           this.history.push({
             role: 'tool_call',
-            content: JSON.stringify({ raw: rawCall, calls }, null, 2),
+            content: '',
+            calls: storedCalls,
           })
 
         } catch (err) {
           this.history.push({
             role: 'tool_call',
-            content: JSON.stringify({ raw: rawCall, parseError: String(err) }, null, 2),
+            content: rawCall,
           })
 
           const result: ToolResult = { result: null, error: `Failed to parse tool call: ${err}` }
@@ -420,22 +429,6 @@ export class Orchestrator {
     const processedHistory = rest.map((msg, idx) => {
       if (msg.role === 'user') {
         userTurnIndex++
-      }
-
-      if (msg.role === 'tool_call') {
-        // History stores { raw, calls } for debugging, but the model only needs
-        // the raw string (already in the template's native tool-call syntax).
-        try {
-          const parsed = JSON.parse(msg.content) as { raw?: string }
-          if (typeof parsed.raw === 'string') {
-            return { ...msg, content: parsed.raw }
-          }
-
-        } catch {
-          // fall through - content is already raw
-        }
-
-        return msg
       }
 
       if (msg.role === 'tool_result') {
