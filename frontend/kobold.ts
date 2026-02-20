@@ -283,7 +283,7 @@ export class KoboldAdapter {
       sampler_seed: cfg.samplerSeed ?? -1,
       grammar: cfg.grammar,
       stop_sequence: stopSequence,
-      dry_multiplier: cfg.dryMultiplier ?? 0.8,
+      dry_multiplier: cfg.dryMultiplier ?? 0.0,
       dry_base: cfg.dryBase ?? 1.75,
       dry_allowed_length: cfg.dryAllowedLength ?? 2,
       dry_penalty_last_n: cfg.dryPenaltyLastN ?? 320,
