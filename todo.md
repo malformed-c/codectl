@@ -14,3 +14,47 @@
 
 rerender: [TOOL_CALLS]mode[ARGS]{"mode":"agent","reason":"Automate running Bash commands and interacting with files"}
 16. Different sampler settings for different modes
+17. Incorrectly combining tool calls
+eg [TOOL_CALLS]bash[ARGS]
+w
+id
+[TOOL_CALLS]bash[ARGS]
+w
+id[TOOL_CALLS]
+->
+    {
+      "role": "tool_call",
+      "content": "",
+      "calls": [
+        {
+          "tool": "bash",
+          "value": "w\nid"
+        }
+      ]
+    },
+    {
+      "role": "tool_result",
+      "content": "",
+      "result": {
+        "value": {...}
+          "stderr": "",
+          "exitCode": 0,
+          "cwd": "/home/engi/git/codectl/frontend"
+        }
+      }
+    },
+    {
+      "role": "tool_call",
+      "content": "",
+      "calls": [
+        {
+          "tool": "bash",
+          "value": "w\nid"
+        }
+      ]
+    },
+    ...
+
+it should be combined
+
+18. Combine tool results
