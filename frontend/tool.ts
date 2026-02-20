@@ -328,6 +328,16 @@ export function parseToolCalls(raw: string): ToolCall[] {
   // Fallback to pure JSON
   try {
     const parsed = JSON.parse(text)
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      // Handle accidental replay of stored tool_call history payloads.
+      // Example: {"raw":"bash run w && id","calls":[]}
+      const historyRaw = (parsed as Record<string, unknown>).raw
+      if (typeof historyRaw === 'string') {
+        return parseToolCalls(historyRaw)
+      }
+    }
+
     const arr = Array.isArray(parsed) ? parsed : [parsed]
 
     return arr.map((item: any) => ({
