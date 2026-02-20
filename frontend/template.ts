@@ -63,7 +63,7 @@ export type StoredToolCall = {
 export type StoredToolResult = {
   callId?: string
   error?: string
-  result?: unknown
+  value?: unknown
 }
 
 export type Message = {
@@ -105,6 +105,7 @@ export type Config = {
   history_path: string
   default_model: string
   available_models: string[]
+  tool_format?: string
 }
 
 // --- Built-in profiles ---
@@ -256,9 +257,9 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
   // Only errors get a { error: ... } wrapper for model clarity.
   const body = stored.error
     ? JSON.stringify({ error: stored.error }, null, 2)
-    : typeof stored.result === 'string'
-      ? stored.result
-      : JSON.stringify(stored.result, null, 2)
+    : typeof stored.value === 'string'
+      ? stored.value
+      : JSON.stringify(stored.value, null, 2)
 
   const tr = template.toolResult
   if (tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich) {

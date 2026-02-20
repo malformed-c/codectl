@@ -26,11 +26,11 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
   const persisted = await historyStore.load(roomId)
   if (persisted) {
     orchestrator.setHistory(persisted.history)
+
     consola.info(`Restored ${persisted.history.length} messages from history`)
   }
 
   consola.info('codectl CLI ready. Type your message, Ctrl+C to exit.')
-  console.log()
 
   process.stdout.write('> ')
 
@@ -39,6 +39,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
     if (!text) {
       process.stdout.write('> ')
+
       continue
     }
 
@@ -47,7 +48,9 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
       await historyStore.save(room.meta, orchestrator.getHistory())
 
       orchestrator.clearHistory()
+
       consola.info('Started new conversation')
+
       process.stdout.write('> ')
 
       continue
@@ -55,6 +58,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
     if (text === '/mode') {
       consola.info('Mode:', orchestrator.getMode())
+
       process.stdout.write('> ')
 
       continue
@@ -70,12 +74,15 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
       }
 
       process.stdout.write('> ')
+
       continue
     }
 
     if (text === '/help') {
-      console.log('Commands: /new /mode /history /help')
+      consola.log('Commands: /new /mode /history /help')
+
       process.stdout.write('> ')
+
       continue
     }
 
@@ -83,13 +90,11 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
       const result = await orchestrator.chat(text)
       await historyStore.save(room.meta, orchestrator.getHistory())
 
-      console.log()
       if (result.turn.think) {
         consola.debug('[think]', result.turn.think)
       }
 
-      console.log(result.turn.content)
-      console.log()
+      consola.log(result.turn.content)
 
     } catch (err) {
       consola.error('Error:', err)
@@ -128,7 +133,7 @@ async function main(): Promise<void> {
       adapter,
       historyStore,
       orchestratorConfig: {
-        toolFormat: 'json',
+        toolFormat: (config.tool_format ?? 'json') as any,
         autonomousTurns: 16,
       },
     })
@@ -136,7 +141,9 @@ async function main(): Promise<void> {
     // Graceful shutdown
     process.on('SIGINT', async () => {
       consola.info('Shutting down...')
+
       await telegramDoor.stop()
+
       process.exit(0)
     })
 
@@ -146,14 +153,16 @@ async function main(): Promise<void> {
     // CLI door - one orchestrator, one room
     const orchestrator = new Orchestrator({
       adapter,
-      toolFormat: 'typescript',
+      toolFormat: (config.tool_format ?? 'json') as any,
       autonomousTurns: 16,
     })
 
     process.on('SIGINT', async () => {
       console.log()
       consola.info('Saving history...')
+
       await historyStore.save({ id: 'cli-default', createdAt: new Date(), updatedAt: new Date() }, orchestrator.getHistory())
+
       process.exit(0)
     })
 

@@ -364,7 +364,7 @@ export class Orchestrator {
             result: {
               callId: result.callId,
               error: result.error,
-              result: result.result,
+              value: result.result,
             } satisfies StoredToolResult,
           })
 
@@ -447,9 +447,9 @@ export class Orchestrator {
         if (msg.result) {
           if (turnsAhead === 1) {
             // Shorten long results
-            const preview = JSON.stringify(msg.result.result ?? msg.result.error ?? '')
+            const preview = JSON.stringify(msg.result.value ?? msg.result.error ?? '')
             if (preview.length > 1000) {
-              return { ...msg, result: { ...msg.result, result: preview.slice(0, 1000) + '... (shortened)' } }
+              return { ...msg, result: { ...msg.result, value: preview.slice(0, 1000) + '... (shortened)' } }
             }
 
             return msg
@@ -460,7 +460,7 @@ export class Orchestrator {
             ...msg,
             result: msg.result.error
               ? { error: 'original error preserved, result omitted' }
-              : { result: 'omitted' },
+              : { value: 'omitted' },
           }
         }
 
@@ -471,9 +471,11 @@ export class Orchestrator {
             : msg
         }
 
-        return { ...msg, content: msg.content.includes('"error":')
-          ? '{ "error": "original error preserved, result omitted" }'
-          : '{ "result": "omitted" }' }
+        return {
+          ...msg, content: msg.content.includes('"error":')
+            ? '{ "error": "original error preserved, result omitted" }'
+            : '{ "result": "omitted" }'
+        }
       }
 
       return msg

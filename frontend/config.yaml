@@ -2,6 +2,7 @@ api_server: "http://127.0.0.1:5001"
 api_type: "koboldcpp"
 history_path: "./histories"
 default_model: "sample-model"
+tool_format: "typescript"  # json | typescript | python
 # Pattern match?
 available_models:
   - "models/sample-model.yaml"
