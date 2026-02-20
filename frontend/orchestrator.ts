@@ -358,20 +358,13 @@ export class Orchestrator {
           const result = await this.executeToolCall(call)
           toolsExecuted.push({ call, result })
 
-          // If the handler returned a pre-serialized JSON string, parse it back
-          // so renderStoredToolResult only serializes once (no double-escaping).
-          let resultValue = result.result
-          if (typeof resultValue === 'string') {
-            try { resultValue = JSON.parse(resultValue) } catch { /* leave as string */ }
-          }
-
           this.history.push({
             role: 'tool_result',
             content: '',
             result: {
               callId: result.callId,
               error: result.error,
-              result: resultValue,
+              result: result.result,
             } satisfies StoredToolResult,
           })
 
