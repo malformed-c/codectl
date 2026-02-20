@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.ansible_bridge import run
-from backend.models import (
+from ansible_bridge import run
+from models import (
     AnsibleHandler,
     AnsibleItem,
     AnsibleMeta,

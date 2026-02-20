@@ -5,9 +5,9 @@ import sys
 from pydantic import ValidationError
 import typer
 
-import backend.ansible_bridge as ansible_bridge
+import ansible_bridge
 
-from .models import AnsibleReport, AnsibleRequest
+from models import AnsibleReport, AnsibleRequest
 
 app = typer.Typer(help="codectl backend - Ansible bridge.")
 

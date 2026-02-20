@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.ansible_bridge import ResultCallback, build_play_dicts, run
-from backend.models import (
+from ansible_bridge import ResultCallback, build_play_dicts, run
+from models import (
     AnsibleHandler,
     AnsibleItem,
     AnsibleMeta,

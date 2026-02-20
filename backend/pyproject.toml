@@ -19,7 +19,7 @@
 
     [project.scripts]
         codectl   = "main:app"
-        run-tests = "pytest:main"
+        tests = "pytest:main"
 
 [tool.setuptools]
     py-modules = ["main", "ansible_bridge", "models"]
