@@ -4,26 +4,25 @@
 
 [project]
     name = "codectl"
-    version = "0.1.0"
-    description = "Codectl backend"
+    version = "0.2.0"
+    description = "codectl backend - Ansible bridge"
     readme = "README.md"
-    requires-python = ">=3.14"
+    requires-python = ">=3.11"
     dependencies = [
-        "aiogram>=3.25.0",
-        "pytest>=9.0.2",
-        "smolagents[litellm]>=1.24.0",
-        "tree-sitter>=0.25.2",
-        "tree-sitter-python>=0.25.0",
+        "pydantic>=2.0",
+        "pyyaml>=6.0",
         "typer>=0.16.1",
-    ]
+        "pytest>=9.0",
+        "types-pyyaml>=6.0.12.20250915",
+        "ansible-core>=2.19.6",
+]
 
     [project.scripts]
         codectl   = "main:app"
         run-tests = "pytest:main"
 
 [tool.setuptools]
-    packages   = ["codeq"]
-    py-modules = ["main"]
+    py-modules = ["main", "ansible_bridge", "models"]
 
 [tool.pytest.ini_options]
     pythonpath = ["."]

@@ -1,18 +1,18 @@
 import z from "zod"
 
-// ---------------------------------------------------------------------------
+// ---
 // Shared
-// ---------------------------------------------------------------------------
+// ---
 
 const metaSchema = z.object({
   description: z.string(),
-  /** Optional ordering hint — items run lowest-first */
+  /** Optional ordering hint - items run lowest-first */
   order: z.number().int().optional(),
 })
 
-// ---------------------------------------------------------------------------
-// CodeEdit — handled by Bun / Codeq
-// ---------------------------------------------------------------------------
+// ---
+// CodeEdit - handled by Bun / Codeq
+// ---
 
 const functionEnsureSchema = z.discriminatedUnion("state", [
   z.object({
@@ -44,9 +44,9 @@ const codeEditSchema = z.object({
   }),
 })
 
-// ---------------------------------------------------------------------------
-// Ansible — handled by Python backend
-// ---------------------------------------------------------------------------
+// ---
+// Ansible - handled by Python backend
+// ---
 
 /**
  * A single Ansible task. `module` is the fully-qualified module name
@@ -80,9 +80,9 @@ const ansibleSchema = z.object({
   }),
 })
 
-// ---------------------------------------------------------------------------
+// ---
 // Unified CodePlan
-// ---------------------------------------------------------------------------
+// ---
 
 const planItemSchema = z.discriminatedUnion("kind", [
   codeEditSchema,
@@ -93,9 +93,9 @@ export const codePlanSchema = z.object({
   codePlan: z.array(planItemSchema).min(1),
 })
 
-// ---------------------------------------------------------------------------
+// ---
 // Exported types
-// ---------------------------------------------------------------------------
+// ---
 
 export type CodePlan = z.infer<typeof codePlanSchema>
 export type PlanItem = z.infer<typeof planItemSchema>
