@@ -422,6 +422,22 @@ export class Orchestrator {
         userTurnIndex++
       }
 
+      if (msg.role === 'tool_call') {
+        // History stores { raw, calls } for debugging, but the model only needs
+        // the raw string (already in the template's native tool-call syntax).
+        try {
+          const parsed = JSON.parse(msg.content) as { raw?: string }
+          if (typeof parsed.raw === 'string') {
+            return { ...msg, content: parsed.raw }
+          }
+
+        } catch {
+          // fall through - content is already raw
+        }
+
+        return msg
+      }
+
       if (msg.role === 'tool_result') {
         // Find how many user turns are ahead of this message
         let turnsAhead = 0

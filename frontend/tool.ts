@@ -272,6 +272,35 @@ function renderProse(_tools: ToolDefinition[]): string {
 export function parseToolCalls(raw: string): ToolCall[] {
   const text = raw.trim()
 
+  const toCalls = (parsed: unknown): ToolCall[] => {
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const parsedObject = parsed as Record<string, unknown>
+
+      // Handle accidental replay of stored tool_call history payloads.
+      const historyCalls = parsedObject.calls
+      if (Array.isArray(historyCalls) && historyCalls.every((item) => item && typeof item === 'object')) {
+        return historyCalls.map((item: any) => ({
+          callId: item.id ?? item.callId,
+          name: item.name ?? item.tool,
+          arguments: item.arguments ?? item.args ?? item.parameters ?? {},
+        }))
+      }
+
+      const historyRaw = parsedObject.raw
+      if (typeof historyRaw === 'string') {
+        return parseToolCalls(historyRaw)
+      }
+    }
+
+    const arr = Array.isArray(parsed) ? parsed : [parsed]
+
+    return arr.map((item: any) => ({
+      callId: item.id ?? item.callId,
+      name: item.name ?? item.tool,
+      arguments: item.arguments ?? item.args ?? item.parameters ?? {},
+    }))
+  }
+
   const parseArguments = (argsText: string): Record<string, unknown> => {
     try {
       const parsed = JSON.parse(argsText)
