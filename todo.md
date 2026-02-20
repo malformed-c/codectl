@@ -10,5 +10,6 @@
 12. Add proper logging levels
 13. (Sub)Agent tool, like grok 4.20
 14. Tools reactive prerequisites?
-15. When rerendering tools, add spaces
+15. When rerendering tools, add spaces, eg model: [TOOL_CALLS]bash[ARGS]{"command":"ls -l /home/egi/git/codectl"}
+rerender: [TOOL_CALLS]bash[ARGS]{"command":"ls -l /home/egi/git/codectl"}
 16. Different sampler settings for different modes
