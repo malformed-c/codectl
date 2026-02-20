@@ -304,13 +304,13 @@ if (import.meta.main) {
     numPredict: 200,
   })
 
-  console.log('=== status ===')
-  console.log(await kobold.status())
+  consola.log('=== status ===')
+  consola.log(await kobold.status())
 
-  console.log('\n=== generate ===')
+  consola.log('\n=== generate ===')
   const result = await kobold.generate([
     { role: 'system', content: 'You are a helpful assistant.' },
     { role: 'user', content: 'Say hello in one sentence.' },
   ])
-  console.log(result)
+  consola.log(result)
 }

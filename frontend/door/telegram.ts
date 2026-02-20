@@ -115,7 +115,7 @@ export class TelegramDoor {
 
   private setupHandlers(): void {
     this.bot.command('start', async (ctx) => {
-      console.trace('TG: start command')
+      consola.trace('TG: start command')
 
       // TODO
       await ctx.reply(
@@ -127,7 +127,7 @@ export class TelegramDoor {
     })
 
     this.bot.command('new', async (ctx) => {
-      console.trace('TG: new command')
+      consola.trace('TG: new command')
 
       const roomId = roomIdForChat(ctx.chat.id)
       const existing = this.registry.get(roomId)

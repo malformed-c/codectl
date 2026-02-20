@@ -540,20 +540,20 @@ export const CallIdCacheTool: ToolDefinition = {
 // --- Smoke test ---
 
 if (import.meta.main) {
-  console.log("=== json ===")
-  console.log(renderTools([ModeTool], "json"))
+  consola.log("=== json ===")
+  consola.log(renderTools([ModeTool], "json"))
 
-  console.log("\n=== typescript ===")
-  console.log(renderTools([ModeTool], "typescript"))
+  consola.log("\n=== typescript ===")
+  consola.log(renderTools([ModeTool], "typescript"))
 
-  console.log("\n=== python ===")
-  console.log(renderTools([ModeTool], "python"))
+  consola.log("\n=== python ===")
+  consola.log(renderTools([ModeTool], "python"))
 
-  console.log("\n=== parseToolCalls ===")
+  consola.log("\n=== parseToolCalls ===")
   const raw = JSON.stringify([{ name: "mode", arguments: { mode: "code/plan", reason: "user wants to edit files" } }])
-  console.log(parseToolCalls(raw))
+  consola.log(parseToolCalls(raw))
 
-  console.log("\n=== renderToolResult ===")
-  console.log(renderToolResult({ result: { switched: "code/plan" } }))
-  console.log(renderToolResult({ result: null, error: "unknown mode" }))
+  consola.log("\n=== renderToolResult ===")
+  consola.log(renderToolResult({ result: { switched: "code/plan" } }))
+  consola.log(renderToolResult({ result: null, error: "unknown mode" }))
 }

@@ -926,15 +926,15 @@ def foo(bar: bool) -> bool:
 
   const codeq = Codeq.fromSource(source)
 
-  console.log("=== fileMap ===")
-  console.log(codeq.fileMap().join("\n"))
+  consola.log("=== fileMap ===")
+  consola.log(codeq.fileMap().join("\n"))
 
-  console.log("\n=== replace foo logic ===")
+  consola.log("\n=== replace foo logic ===")
   codeq.replace(CodeKind.Func, "foo", CodePart.Logic, `return not bar`)
-  console.log(codeq.toSource())
+  consola.log(codeq.toSource())
 
-  console.log("\n=== addImport ===")
+  consola.log("\n=== addImport ===")
   const added = codeq.addImport("from jose import jwt")
-  console.log("added:", added)
-  console.log(codeq.toSource())
+  consola.log("added:", added)
+  consola.log(codeq.toSource())
 }

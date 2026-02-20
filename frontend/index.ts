@@ -158,7 +158,6 @@ async function main(): Promise<void> {
     })
 
     process.on('SIGINT', async () => {
-      console.log()
       consola.info('Saving history...')
 
       await historyStore.save({ id: 'cli-default', createdAt: new Date(), updatedAt: new Date() }, orchestrator.getHistory())

@@ -9,7 +9,7 @@ class MockAdapter extends KoboldAdapter {
     super({ apiServer: 'http://localhost', template: Profiles.mistral })
   }
   override async generate(messages: any) {
-    // console.log('DEBUG messages:', JSON.stringify(messages, null, 2));
+    // consola.log('DEBUG messages:', JSON.stringify(messages, null, 2));
     const lastMessage = messages[messages.length - 1]
     if (lastMessage.content.includes('Hello')) {
       return { content: 'Hi there!', think: 'User said hello.' }

@@ -490,20 +490,20 @@ if (import.meta.main) {
     { role: "user", content: "resolve stream_jwt_001" },
   ]
 
-  console.log("=== render ===")
-  console.log(render(messages, template))
+  consola.log("=== render ===")
+  consola.log(render(messages, template))
 
-  console.log("\n=== renderFim ===")
-  console.log(renderFim({
+  consola.log("\n=== renderFim ===")
+  consola.log(renderFim({
     prefix: "def verify_token(token: str) -> dict:\n    ",
     suffix: "\n\ndef login(): pass",
   }, template))
 
-  console.log("\n=== parse (mistral) ===")
+  consola.log("\n=== parse (mistral) ===")
   const raw = `[THINK]I need to decode the JWT[/THINK]\nreturn jwt.decode(token, SECRET)`
-  console.log(parse(raw, template))
+  consola.log(parse(raw, template))
 
-  console.log("\n=== parse (qwen) ===")
+  consola.log("\n=== parse (qwen) ===")
   const rawQwen = `<think>reasoning here</think>\n<|im_start|>assistant\nreturn jwt.decode(token, SECRET)<|im_end|>`
-  console.log(parse(rawQwen, Profiles.qwen))
+  consola.log(parse(rawQwen, Profiles.qwen))
 }
