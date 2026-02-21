@@ -328,8 +328,12 @@ export class Orchestrator {
       finalTurn = parsed
 
       // Handle content
-      if (parsed.content) {
-        this.history.push({ role: 'assistant', content: parsed.content })
+      if (parsed.content || parsed.think) {
+        this.history.push({
+          role: 'assistant',
+          content: parsed.content,
+          ...(parsed.think ? { think: parsed.think } : {}),
+        })
       }
 
       // Stop if no tools called

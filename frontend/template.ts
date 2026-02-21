@@ -71,6 +71,9 @@ export type Message = {
   role: Role
   content: string
 
+  /** Reasoning/think block - stored separately and re-rendered before content. */
+  think?: string
+
   /** Structured tool calls - present on tool_call messages instead of raw content. */
   calls?: StoredToolCall[]
 
@@ -321,9 +324,14 @@ export function render(messages: Message[], template: TextTemplate): string {
       .with({ role: 'user' }, ({ content }) =>
         wrapPair(template.userTurn, content)
       )
-      .with({ role: 'assistant' }, { role: 'model' }, ({ content }) =>
-        wrapPair(template.modelTurn, content)
-      )
+      .with({ role: 'assistant' }, { role: 'model' }, (m) => {
+        // Re-emit think block before content if the template supports it
+        const thinkPart = (m.think && template.think)
+          ? wrapPair(template.think, m.think)
+          : ''
+
+        return wrapPair(template.modelTurn, thinkPart + m.content)
+      })
       .with({ role: 'tool_result' }, (m) => {
         const inner = m.results
           ? renderStoredToolResults(m.results, template)
