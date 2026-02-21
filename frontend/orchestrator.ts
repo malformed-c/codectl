@@ -824,12 +824,14 @@ export class Orchestrator {
       return { result: null, error: `Invalid JSON: ${err}` }
     }
 
-    // auto-unwrap common LLM mistake
+    // auto-unwrap common LLM mistake: model may pass the array directly,
+    // the full {codePlan:[]} object, or nest it under .plan or .value
     const normalized =
-      parsed?.codePlan ? parsed :
-        parsed?.plan?.codePlan ? parsed.plan :
-          parsed?.value?.codePlan ? parsed.value :
-            parsed
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any).codePlan ? parsed :
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any).plan?.codePlan ? (parsed as any).plan :
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any).value?.codePlan ? (parsed as any).value :
+            Array.isArray(parsed) ? { codePlan: parsed } :
+              parsed
 
     try {
       const result = codePlanSchema.safeParse(normalized)
@@ -895,7 +897,7 @@ export const ValidatePlanTool: ToolDefinition = {
       plan: {
         type: 'object',
         description: 'The CodePlan JSON to validate.',
-        aliases: ['json', 'codeplan', 'value'],
+        aliases: ['json', 'codeplan', 'codePlan', 'value'],
       },
     },
     required: ['plan'],
