@@ -100,6 +100,36 @@ function renderBlock(tokens: any[]): string {
   }).join('')
 }
 
+/**
+ * Best-effort markdown stripper for the plain-text fallback path.
+ * Keeps the text readable without Telegram HTML parse_mode.
+ */
+function stripMarkdownToPlain(md: string): string {
+  return md
+    // Fenced code blocks — keep content, drop fences
+    .replace(/```[^\n]*\n([\s\S]*?)```/g, '$1')
+    // Inline code
+    .replace(/`([^`]+)`/g, '$1')
+    // Bold / italic / strikethrough
+    .replace(/\*\*\*(.+?)\*\*\*/gs, '$1')
+    .replace(/\*\*(.+?)\*\*/gs, '$1')
+    .replace(/\*(.+?)\*/gs, '$1')
+    .replace(/___(.+?)___/gs, '$1')
+    .replace(/__(.+?)__/gs, '$1')
+    .replace(/_(.+?)_/gs, '$1')
+    .replace(/~~(.+?)~~/gs, '$1')
+    // Headings
+    .replace(/^#{1,6}\s+/gm, '')
+    // Block quote markers
+    .replace(/^>\s?/gm, '')
+    // List markers → bullet
+    .replace(/^(\s*)[-*+]\s+/gm, '$1• ')
+    .replace(/^(\s*)\d+\.\s+/gm, '$1')
+    // Literal two-char \n sequences the model sometimes emits
+    .replace(/\\n/g, '\n')
+    .trim()
+}
+
 function markdownToTelegramHTML(md: string | undefined | null): string {
   if (!md) return ''
 
@@ -112,7 +142,7 @@ function markdownToTelegramHTML(md: string | undefined | null): string {
 
     consola.warn('markdownToTelegramHTML failed, sending plain text:', err)
 
-    return escapeHtml(md)
+    return stripMarkdownToPlain(md)
   }
 }
 
@@ -249,7 +279,9 @@ export class TelegramDoor {
               await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
 
             } catch {
-              await ctx.reply(chunk)
+              // HTML parse failed — fall back to stripped plain text so the
+              // user gets readable content instead of raw markdown.
+              await ctx.reply(stripMarkdownToPlain(chunk))
             }
           }
         }
