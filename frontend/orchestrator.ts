@@ -851,8 +851,8 @@ export const ValidatePlanTool: ToolDefinition = {
     type: 'object',
     properties: {
       plan: {
-        type: 'string',
-        description: 'The CodePlan JSON to validate (as a serialised string).',
+        type: 'object',
+        description: 'The CodePlan JSON to validate.',
         aliases: ['json', 'codeplan', 'value'],
       },
     },
