@@ -91,7 +91,7 @@ function renderBlock(tokens: any[]): string {
           // list_item.tokens may contain a nested text token with inline tokens inside
           const inner = item.tokens.flatMap((t: any) => t.tokens ?? [{ type: 'text', text: t.text, raw: t.raw }])
 
-          return `? ${renderInline(inner).trim()}\n`
+          return `- ${renderInline(inner).trim()}\n`
         }).join('') + '\n'
       }
 
@@ -258,9 +258,9 @@ export class TelegramDoor {
         if (intermediate.toolsExecuted.length > 0) {
           const lines = intermediate.toolsExecuted.map(({ call, result }) => {
             const args = JSON.stringify(call.arguments)
-            const status = result.error ? `? ${result.error}` : `?`
+            const status = result.error ? `E: ${result.error}` : `R`
 
-            return `  ${status} <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`
+            return `${status} <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`
           })
 
           try {
@@ -274,7 +274,7 @@ export class TelegramDoor {
         // Show call immediately before it runs
         const args = JSON.stringify(call.arguments)
         try {
-          await ctx.reply(`? <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
+          await ctx.reply(`T: <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 
         } catch (err) {
           consola.warn('Failed to send call notification:', err)
