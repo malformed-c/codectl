@@ -24,46 +24,126 @@ init_plugin_loader([])
 class ResultCallback(CallbackBase):
     """Captures per-task results from all v2_runner_on_* hooks."""
 
-    def __init__(self) -> None:
+    def __init__(self, variable_manager: VariableManager):
         super().__init__()
-        self.results: list[TaskResult] = []
+        self.variable_manager = variable_manager
+        self.results = []
+        self.summary = {}
 
-    def v2_runner_on_ok(self, result: Any) -> None:
-        changed = result._result.get("changed", False)
+    def v2_runner_on_ok(self, result):
+
+        host = result._host
+        data = result._result
+
+        # Store facts
+        if "ansible_facts" in data:
+            self.variable_manager.set_host_facts(host, data["ansible_facts"])
+
+        # Store register
+        if result._task.register:
+            self.variable_manager.set_host_variable(host, result._task.register, data)
+
+        changed = data.get("changed", False)
+
         self.results.append(
             TaskResult(
                 name=result._task.get_name(),
                 status="changed" if changed else "ok",
-                message=result._result.get("msg", ""),
+                message=data.get("msg", ""),
             )
         )
 
-    def v2_runner_on_failed(self, result: Any, ignore_errors: bool = False) -> None:
+    def v2_runner_on_failed(self, result, ignore_errors=False):
+
+        host = result._host
+        data = result._result
+
+        if result._task.register:
+            self.variable_manager.set_host_variable(host, result._task.register, data)
+
         self.results.append(
             TaskResult(
                 name=result._task.get_name(),
                 status="failed",
-                message=result._result.get("msg", str(result._result)),
+                message=data.get("msg", str(data)),
             )
         )
 
-    def v2_runner_on_skipped(self, result: Any) -> None:
+    def v2_runner_on_skipped(self, result):
+
+        host = result._host
+        data = result._result
+
+        if result._task.register:
+            self.variable_manager.set_host_variable(host, result._task.register, data)
+
         self.results.append(
             TaskResult(
                 name=result._task.get_name(),
                 status="skipped",
-                message=result._result.get("msg", ""),
+                message=data.get("msg", ""),
             )
         )
 
-    def v2_runner_on_unreachable(self, result: Any) -> None:
+    def v2_runner_on_unreachable(self, result):
+
+        host = result._host
+        data = result._result
+
+        if result._task.register:
+            self.variable_manager.set_host_variable(host, result._task.register, data)
+
         self.results.append(
             TaskResult(
                 name=result._task.get_name(),
                 status="unreachable",
-                message=result._result.get("msg", ""),
+                message=data.get("msg", ""),
             )
         )
+
+    def v2_runner_item_on_ok(self, result):
+
+        host = result._host
+        data = result._result
+
+        if result._task.register:
+            current = self.variable_manager.get_vars(host=host).get(
+                result._task.register, {"results": []}
+            )
+
+            current["results"].append(data)
+
+            self.variable_manager.set_host_variable(
+                host, result._task.register, current
+            )
+
+    def v2_playbook_on_stats(self, stats):
+        """
+        Called at the end of the playbook run.
+        Collects per-host statistics and overall summary.
+        """
+        summary = {
+            "ok": {},
+            "changed": {},
+            "failed": {},
+            "skipped": {},
+            "unreachable": {},
+        }
+
+        for host in stats.processed:
+            summary["ok"][host] = stats.ok.get(host, 0)
+            summary["changed"][host] = stats.changed.get(host, 0)
+            summary["failed"][host] = stats.failures.get(host, 0)
+            summary["skipped"][host] = stats.skipped.get(host, 0)
+            summary["unreachable"][host] = stats.dark.get(host, 0)
+
+        # Store in callback for later retrieval
+        self.summary = summary
+
+        for category, hosts in summary.items():
+            print(f"{category}:")
+            for host, count in hosts.items():
+                print(f"  {host}: {count}")
 
 
 # ---
@@ -150,12 +230,13 @@ def run(items: list[AnsibleItem]) -> AnsibleReport:
         verbosity=0,
         syntax=None,
         start_at_task=None,
+        gather_facts=False,
     )
 
     loader = DataLoader()
-    callback = ResultCallback()
     inventory = InventoryManager(loader=loader, sources="localhost,")
     variable_manager = VariableManager(loader=loader, inventory=inventory)
+    callback = ResultCallback(variable_manager)
 
     play_dicts = build_play_dicts(sorted_items)
 
