@@ -2,12 +2,11 @@ import { Bot, Context } from 'grammy'
 import { hydrate } from "@grammyjs/hydrate"
 import type { HydrateFlavor } from "@grammyjs/hydrate"
 import { consola } from 'consola'
+import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
 import type { KoboldAdapter } from '../kobold'
-import { marked, Renderer } from 'marked'
-
 
 // --- Types ---
 
@@ -55,39 +54,58 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
 }
 
+// Walk inline token array (paragraph contents, list items, etc.)
+function renderInline(tokens: any[]): string {
+  return tokens.map(tok => {
+    switch (tok.type) {
+      case 'text': return escapeHtml(tok.text)
+      case 'strong': return `<b>${renderInline(tok.tokens ?? [])}</b>`
+      case 'em': return `<i>${renderInline(tok.tokens ?? [])}</i>`
+      case 'del': return `<s>${renderInline(tok.tokens ?? [])}</s>`
+      case 'codespan': return `<code>${escapeHtml(tok.text)}</code>`
+      case 'link': return `<a href="${escapeHtml(tok.href ?? '')}">${renderInline(tok.tokens ?? [])}</a>`
+      case 'image': return ''
+      case 'html': return ''
+      case 'br': return '\n'
+      case 'escape': return escapeHtml(tok.text)
+      default: return escapeHtml(tok.raw ?? '')
+    }
+  }).join('')
+}
+
+// Walk block token array
+function renderBlock(tokens: any[]): string {
+  return tokens.map(tok => {
+    switch (tok.type) {
+      case 'heading': return `<b>${renderInline(tok.tokens ?? [])}</b>\n`
+      case 'paragraph': return `${renderInline(tok.tokens ?? [])}\n`
+      case 'code': return `<pre>${escapeHtml(tok.text)}</pre>\n`
+      case 'blockquote': return `<i>${renderBlock(tok.tokens ?? []).trim()}</i>\n`
+      case 'hr': return '\n'
+      case 'space': return ''
+      case 'html': return ''
+      case 'list': {
+        return tok.items.map((item: any) => {
+          // list_item.tokens may contain a nested text token with inline tokens inside
+          const inner = item.tokens.flatMap((t: any) => t.tokens ?? [{ type: 'text', text: t.text, raw: t.raw }])
+
+          return `• ${renderInline(inner).trim()}\n`
+        }).join('') + '\n'
+      }
+
+      default: return escapeHtml(tok.raw ?? '')
+    }
+  }).join('')
+}
+
 function markdownToTelegramHTML(md: string): string {
   try {
-    const renderer = new Renderer()
+    const tokens = marked.lexer(md)
 
-    // Block elements
-    renderer.heading = ({ text }: any) => `<b>${text}</b>\n`
-    renderer.paragraph = ({ text }: any) => `${text}\n`
-    renderer.strong = ({ text }: any) => `<b>${text}</b>`
-    renderer.em = ({ text }: any) => `<i>${text}</i>`
-    renderer.del = ({ text }: any) => `<s>${text}</s>`
-    renderer.link = ({ href, text }: any) => `<a href="${escapeHtml(href ?? '')}">${text}</a>`
-    renderer.image = () => ''
-    renderer.html = () => ''
-    renderer.hr = () => '\n'
-    renderer.br = () => '\n'
-
-    // Code - escape content, Telegram's <pre> does not support language attributes
-    renderer.code = ({ text }: any) => `<pre>${escapeHtml(text)}</pre>\n`
-    renderer.codespan = ({ text }: any) => `<code>${escapeHtml(text)}</code>`
-
-    // Lists
-    renderer.list = ({ body }: any) => `${body}\n`
-    renderer.listitem = ({ text }: any) => `• ${text.trim()}\n`
-
-    // Blockquote
-    renderer.blockquote = ({ text }: any) => `<i>${text.trim()}</i>\n`
-
-    // Escape plain text at leaf level
-    renderer.text = ({ text }: any) => escapeHtml(text)
-
-    return (marked(md, { renderer, async: false }) as string).trim()
+    return renderBlock(tokens).trim()
 
   } catch (err) {
+
     consola.warn('markdownToTelegramHTML failed, sending plain text:', err)
 
     return escapeHtml(md)
