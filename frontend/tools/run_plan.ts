@@ -55,7 +55,14 @@ export function createRunPlanHandler(
       return { result: null, error: `Invalid JSON: ${err}` }
     }
 
-    const validated = codePlanSchema.safeParse(parsed)
+    // auto-unwrap common LLM mistake
+    const normalized =
+      parsed?.codePlan ? parsed :
+        parsed?.plan?.codePlan ? parsed.plan :
+          parsed?.value?.codePlan ? parsed.value :
+            parsed
+
+    const validated = codePlanSchema.safeParse(normalized)
     if (!validated.success) {
       const errors = validated.error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
 

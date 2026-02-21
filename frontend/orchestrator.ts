@@ -789,8 +789,15 @@ export class Orchestrator {
       return { result: null, error: `Invalid JSON: ${err}` }
     }
 
+    // auto-unwrap common LLM mistake
+    const normalized =
+      parsed?.codePlan ? parsed :
+        parsed?.plan?.codePlan ? parsed.plan :
+          parsed?.value?.codePlan ? parsed.value :
+            parsed
+
     try {
-      const result = codePlanSchema.safeParse(parsed)
+      const result = codePlanSchema.safeParse(normalized)
       if (result.success) {
         this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), lastPlan: result.data, validationErrors: [] }
         this.rebuildSystemMessage()
