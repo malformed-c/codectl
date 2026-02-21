@@ -268,13 +268,42 @@ export class Orchestrator {
 
   abort(): void { this.abortController?.abort() }
 
-  async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
-    this.abortController = new AbortController()
+  /**
+   * Headless agent run: injects the goal into the system prompt and starts the
+   * autonomous loop without a user turn. The model talks only with the system.
+   * Automatically switches to agent mode if not already in it.
+   */
+  async run(goal: string, onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
+    if (this.mode.kind !== 'agent') {
+      const gitRoot = await findGitRoot(process.cwd())
+      this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
+    }
 
+    // Inject goal into system message so there's no user turn at all
+    this.history = []
+    const base = this.config.systemPrompt ?? this.defaultSystemPrompt()
+    const { gitRoot } = this.mode as Extract<Mode, { kind: 'agent' }>
+    this.history.push({
+      role: 'system',
+      content: `${base}\n\nYou are in AGENT mode. Use tools continuously to accomplish the goal below. ` +
+        `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}\n\n` +
+        `GOAL:\n${goal}`,
+    })
+
+    return this.runLoop(onTurn)
+  }
+
+  async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
     // Ensure system message exists
     if (this.history.length === 0) this.rebuildSystemMessage()
 
     this.history.push({ role: 'user', content: userMessage })
+
+    return this.runLoop(onTurn)
+  }
+
+  private async runLoop(onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
+    this.abortController = new AbortController()
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
 
@@ -461,40 +490,63 @@ export class Orchestrator {
         // Age 1+: shorten via structured result field
         if (msg.results) {
           if (turnsAhead === 1) {
-            // Shorten long results
-            const totalLength = msg.results.reduce((acc, r) => acc + JSON.stringify(r.value ?? r.error ?? '').length, 0)
-            if (totalLength > 1000) {
-              const perItemLimit = Math.max(100, Math.floor(1000 / msg.results.length))
+            // Shorten long results; errors preserved fully
+            const totalLength = msg.results.reduce((acc, r) => {
 
-              return {
-                ...msg,
-                results: msg.results.map(r => ({
-                  ...r,
-                  value: typeof r.value === 'string'
-                    ? (r.value.length > perItemLimit ? r.value.slice(0, perItemLimit) + '... (shortened)' : r.value)
-                    : (JSON.stringify(r.value).length > perItemLimit ? JSON.stringify(r.value).slice(0, perItemLimit) + '... (shortened)' : r.value)
-                }))
-              }
+              // Errors always preserved at age 1
+              if (r.error) return acc
+
+              return acc + JSON.stringify(r.value ?? '').length
+            }, 0)
+
+            if (totalLength > 1000) {
+              const nonErrorCount = msg.results.filter(r => !r.error).length
+              const perItemLimit = Math.max(100, Math.floor(1000 / Math.max(1, nonErrorCount)))
+
+              const shortened = msg.results.map(r => {
+                if (r.error) return r // preserve errors
+
+                const serialized = typeof r.value === 'string' ? r.value : JSON.stringify(r.value)
+
+                if (serialized.length > perItemLimit) {
+                  consola.debug(`[shortening] age=1 truncating result from ${serialized.length} to ${perItemLimit} chars`)
+
+                  return { ...r, value: serialized.slice(0, perItemLimit) + '... (shortened)' }
+                }
+
+                return r
+              })
+
+              return { ...msg, results: shortened }
             }
 
             return msg
           }
 
-          // Age 2+: minimal skeleton
+          // Age 2+: minimal skeleton; keep error messages
+          consola.debug(`[shortening] age=${turnsAhead} collapsing ${msg.results.length} result(s)`)
+
           return {
             ...msg,
-            results: msg.results.map(r => (r.error
-              ? { error: 'original error preserved, result omitted' }
-              : { value: 'omitted' })),
+            results: msg.results.map(r => r.error
+              ? { error: r.error }  // preserve actual error text
+              : { value: 'omitted' }
+            ),
           }
         }
 
         // Fallback: raw content shortening (legacy / parse-error entries)
         if (turnsAhead === 1) {
-          return msg.content.length > 1000
-            ? { ...msg, content: msg.content.slice(0, 1000) + '... (shortened)' }
-            : msg
+          if (msg.content.length > 1000) {
+            consola.debug(`[shortening] age=1 truncating raw content from ${msg.content.length} chars`)
+
+            return { ...msg, content: msg.content.slice(0, 1000) + '... (shortened)' }
+          }
+
+          return msg
         }
+
+        consola.debug(`[shortening] age=${turnsAhead} collapsing raw content`)
 
         return {
           ...msg, content: msg.content.includes('"error":')
@@ -677,7 +729,11 @@ export class Orchestrator {
         return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
 
       } else {
-        const errors = result.error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`)
+        const issues = result.error?.errors ?? result.error?.issues ?? []
+        const errors: string[] = issues.length
+          ? issues.map((e: any) => `${(e.path ?? []).join('.') || '(root)'}: ${e.message}`)
+          : [`Validation failed: ${JSON.stringify(result.error)}`]
+
         this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), validationErrors: errors }
         this.rebuildSystemMessage()
 
@@ -721,7 +777,7 @@ export const ValidatePlanTool: ToolDefinition = {
       plan: {
         type: 'string',
         description: 'The CodePlan JSON to validate (as a serialised string).',
-        aliases: ['json', 'codeplan'],
+        aliases: ['json', 'codeplan', 'value'],
       },
     },
     required: ['plan'],

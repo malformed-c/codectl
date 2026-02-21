@@ -65,6 +65,13 @@ function markdownToTelegramHTML(md: string): string {
   return rendered.trim()
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 // --- Telegram door ---
 
 export class TelegramDoor {
@@ -183,20 +190,40 @@ export class TelegramDoor {
     }
 
     // Show typing indicator
-    // Add timeout
+    // TODO Add timeout
     await ctx.replyWithChatAction('typing')
 
     try {
       await room.orchestrator.chat(text, async (intermediate) => {
+        // Show tool activity
+        if (intermediate.toolsExecuted.length > 0) {
+          const lines = intermediate.toolsExecuted.map(({ call, result }) => {
+            const args = JSON.stringify(call.arguments)
+            const status = result.error
+              ? `❌ ${result.error}`
+              : `✓`
+
+            return `<code>${escapeHtml(call.name)}(${escapeHtml(args)})</code> ${status}`
+          })
+
+          try {
+            await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
+
+          } catch (err) {
+            consola.warn('Failed to send tool activity message:', err)
+          }
+        }
+
+        // Send text response if present
         const response = intermediate.turn.content
         if (!response) return
 
         const chunks = splitMessage(response, this.config.maxMessageLength)
         for (const chunk of chunks) {
           try {
-            await ctx.reply(chunk, { parse_mode: 'Markdown' })
-
+            await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
           } catch {
+            // Fallback to plain text if HTML conversion failed
             await ctx.reply(chunk)
           }
         }
