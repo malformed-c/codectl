@@ -68,3 +68,4 @@ it should be combined
 26. Tool library optional filter arg
 27. Normalize Ansible playbook when field is missing from the model with the default value
 28. Entropy based codeplan + agent mode
+29. FSM history and message crawler
