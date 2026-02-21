@@ -10,11 +10,21 @@ from ansible.parsing.dataloader import DataLoader
 from ansible.playbook.play import Play
 from ansible.plugins.callback import CallbackBase
 from ansible.plugins.loader import init_plugin_loader
+from ansible.plugins.loader import init_plugin_loader
 from ansible.vars.manager import VariableManager
 
-from models import AnsibleItem, AnsibleReport, TaskResult
+from models import AnsibleHandler, AnsibleItem, AnsibleReport, AnsibleTask, TaskResult
 
-init_plugin_loader([])
+# Standard loader
+loader = DataLoader()
+
+# Add collection paths explicitly
+collection_paths = [
+    "/home/engi/.ansible/collections",
+    "/usr/share/ansible/collections",
+]
+loader.set_basedir(collection_paths)
+init_plugin_loader(collection_paths)
 
 # ---
 # Result callback
@@ -151,24 +161,19 @@ class ResultCallback(CallbackBase):
 # ---
 
 
-def _task_to_dict(task: Any) -> dict[str, Any]:
-    d: dict[str, Any] = {
+def _task_to_dict(task: AnsibleTask) -> dict[str, Any]:
+    return {
         "name": task.name,
-        task.module: task.args if task.args else {},
+        task.module: task.args or {},
+        **({"when": task.when} if task.when else {}),
+        **({"notify": task.notify} if task.notify else {}),
     }
-    if task.when:
-        d["when"] = task.when
-
-    if task.notify:
-        d["notify"] = task.notify
-
-    return d
 
 
-def _handler_to_dict(handler: Any) -> dict[str, Any]:
+def _handler_to_dict(handler: AnsibleHandler) -> dict[str, Any]:
     return {
         "name": handler.name,
-        handler.module: handler.args if handler.args else {},
+        handler.module: handler.args or {},
     }
 
 

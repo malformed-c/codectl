@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---
@@ -15,6 +15,11 @@ class AnsibleTask(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     when: str | None = None
     notify: str | None = None
+
+    @field_validator("args")
+    @classmethod
+    def ensure_args_dict(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return v or {}
 
 
 class AnsibleHandler(BaseModel):
