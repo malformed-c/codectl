@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { formatRunPlanFailure } from '../tools/run_plan'
+import { createRunPlanHandler, formatRunPlanFailure } from '../tools/run_plan'
 import type { PlanRunResult } from '../plan_runner'
 
 function baseFailureResult(): PlanRunResult {
@@ -58,5 +58,20 @@ describe('formatRunPlanFailure', () => {
     expect(error.indexOf('[failed] Restart service: unit failed')).toBeLessThan(
       error.indexOf('Backend error: ansible-runner exited with code 2'),
     )
+  })
+})
+
+describe('createRunPlanHandler', () => {
+  test('returns schema errors instead of throwing when plan is invalid', async () => {
+    const handler = createRunPlanHandler(
+      () => '/repo',
+      () => '/repo/backend',
+      {} as any,
+    )
+
+    const result = await handler({ plan: { notAPlan: true } })
+
+    expect(result.result).toBeNull()
+    expect(result.error).toContain('Plan failed schema validation:')
   })
 })

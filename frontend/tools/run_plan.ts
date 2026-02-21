@@ -64,7 +64,8 @@ export function createRunPlanHandler(
 
     const validated = codePlanSchema.safeParse(normalized)
     if (!validated.success) {
-      const errors = validated.error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
+      const issues = validated.error.issues ?? []
+      const errors = issues.map(e => `${e.path.join('.')}: ${e.message}`)
 
       return { result: null, error: `Plan failed schema validation:\n${errors.join('\n')}` }
     }
