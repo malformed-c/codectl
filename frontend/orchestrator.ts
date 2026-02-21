@@ -604,15 +604,24 @@ export class Orchestrator {
             return msg
           }
 
-          // Age 2+: minimal skeleton; keep error messages
+          // Age 2+: minimal skeleton; keep error messages, collapse all other fields
           consola.debug(`[shortening] age=${turnsAhead} collapsing ${msg.results.length} result(s)`)
 
           return {
             ...msg,
-            results: msg.results.map(r => r.error
-              ? { error: r.error }  // preserve actual error text
-              : { value: 'omitted' }
-            ),
+            results: msg.results.map(r => {
+              if (r.error) return { error: r.error } // preserve errors
+
+              // Preserve the original tool fields, but collapse all non-error values
+              const collapsed: Record<string, unknown> = {}
+              for (const key of Object.keys(r)) {
+                if (key === "error") continue
+
+                collapsed[key] = "" // collapse all fields to empty string
+              }
+
+              return collapsed
+            }),
           }
         }
 
@@ -630,9 +639,10 @@ export class Orchestrator {
         consola.debug(`[shortening] age=${turnsAhead} collapsing raw content`)
 
         return {
-          ...msg, content: msg.content.includes('"error":')
+          ...msg,
+          content: msg.content.includes('"error":')
             ? '{ "error": "original error preserved, result omitted" }'
-            : '{ "result": "omitted" }'
+            : ''  // collapse non-error content completely
         }
       }
 
