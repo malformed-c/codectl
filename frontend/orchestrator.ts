@@ -22,7 +22,7 @@ import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
-import type { CodePlan } from "./codeplan.schema"
+import { codePlanSchema, type CodePlan } from "./codeplan.schema"
 
 // --- Types ---
 
@@ -790,12 +790,7 @@ export class Orchestrator {
     }
 
     try {
-      const schemaModule = await import('./codeplan.schema')
-      const schema = (schemaModule as any).codePlanSchema ?? (schemaModule as any).default
-
-      if (!schema) throw new Error('schema not found')
-
-      const result = schema.safeParse(parsed)
+      const result = codePlanSchema.safeParse(parsed)
       if (result.success) {
         this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), lastPlan: result.data, validationErrors: [] }
         this.rebuildSystemMessage()

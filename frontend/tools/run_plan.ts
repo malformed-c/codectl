@@ -15,7 +15,7 @@ export const RunPlanTool: ToolDefinition = {
     type: 'object',
     properties: {
       plan: {
-        type: 'string',
+        type: 'object',
         description: 'The validated CodePlan JSON to execute.',
         aliases: ['json', 'codeplan'],
       },
