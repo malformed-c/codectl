@@ -5,6 +5,7 @@ import { runPlan } from '../plan_runner'
 import type { CodePlan } from '../codeplan.schema'
 import { codePlanSchema } from '../codeplan.schema'
 import type { PlanRunResult } from '../plan_runner'
+import destr from 'destr'
 
 export const RunPlanTool: ToolDefinition = {
   name: 'run_plan',
@@ -26,13 +27,13 @@ export const RunPlanTool: ToolDefinition = {
   returns: {
     type: 'object',
     properties: {
-      ok:              { type: 'boolean', description: 'Whether all phases succeeded.' },
-      failedPhase:     { type: 'string',  description: 'Phase that failed (if ok=false).' },
-      dryApplyErrors:  { type: 'string',  description: 'Codeq errors found during dry apply.' },
-      conflictedFiles: { type: 'string',  description: 'Files modified externally since plan started.' },
-      written:         { type: 'string',  description: 'Files written by CodeEdit phase.' },
-      ansibleReport:   { type: 'string',  description: 'Structured Ansible execution report.' },
-      error:           { type: 'string',  description: 'Top-level error message.' },
+      ok: { type: 'boolean', description: 'Whether all phases succeeded.' },
+      failedPhase: { type: 'string', description: 'Phase that failed (if ok=false).' },
+      dryApplyErrors: { type: 'string', description: 'Codeq errors found during dry apply.' },
+      conflictedFiles: { type: 'string', description: 'Files modified externally since plan started.' },
+      written: { type: 'string', description: 'Files written by CodeEdit phase.' },
+      ansibleReport: { type: 'string', description: 'Structured Ansible execution report.' },
+      error: { type: 'string', description: 'Top-level error message.' },
     },
   },
 }
@@ -46,7 +47,15 @@ export function createRunPlanHandler(
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
-    const validated = codePlanSchema.safeParse(raw)
+    let parsed: unknown
+    try {
+      parsed = typeof raw === 'string' ? destr(raw as string) : raw
+
+    } catch (err) {
+      return { result: null, error: `Invalid JSON: ${err}` }
+    }
+
+    const validated = codePlanSchema.safeParse(parsed)
     if (!validated.success) {
       const errors = validated.error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
 

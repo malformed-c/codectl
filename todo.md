@@ -61,3 +61,4 @@ it should be combined
 19. Refactor wrapper handler to lambdas
 20. Store mode in the history and restore it when loading
 21. Store all model state and restore it
+22. Check tool handler result,
