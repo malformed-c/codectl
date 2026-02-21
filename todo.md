@@ -65,3 +65,5 @@ it should be combined
 23. Auto normalize or punish the model when opening token isn't found but closing one is
 24. Let model pass values from memory to tools as variables
 25. Interrupt the model at the boundary when user message
+26. Tool library optional filter arg
+27. Normalize Ansible playbook when field is missing from the model with the default value
