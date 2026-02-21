@@ -19,7 +19,7 @@ export const RunPlanTool: ToolDefinition = {
       plan: {
         type: 'object',
         description: 'The validated CodePlan JSON to execute.',
-        aliases: ['json', 'codeplan'],
+        aliases: ['json', 'codeplan', 'codePlan', 'value'],
       },
     },
     required: ['plan'],
@@ -99,6 +99,7 @@ export function formatRunPlanFailure(result: PlanRunResult): string {
 
   if (result.dryApplyErrors?.length) {
     hasConcreteReason = true
+
     parts.push('Dry apply errors:')
     for (const e of result.dryApplyErrors) {
       parts.push(`  ${e.resource} / ${e.operation}: ${e.error}`)
@@ -107,6 +108,7 @@ export function formatRunPlanFailure(result: PlanRunResult): string {
 
   if (result.conflictedFiles?.length) {
     hasConcreteReason = true
+
     parts.push(`Files modified externally: ${result.conflictedFiles.join(', ')}`)
   }
 
@@ -118,16 +120,19 @@ export function formatRunPlanFailure(result: PlanRunResult): string {
       if (r.status === 'failed' || r.status === 'unreachable') {
         hasTaskFailures = true
         hasConcreteReason = true
+
         parts.push(`  [${r.status}] ${r.name}: ${r.message}`)
       }
     }
 
     if (result.ansibleReport.error) {
       hasConcreteReason = true
+
       parts.push(`  Backend error: ${result.ansibleReport.error}`)
 
     } else if (!hasTaskFailures) {
       parts.push('  Backend error: unknown ansible failure')
+
       hasConcreteReason = true
     }
   }
