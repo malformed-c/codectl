@@ -77,6 +77,8 @@ export type TurnResult = {
 
 export type CallEvent = {
   call: ToolCall
+  result?: ToolResult
+  pending?: boolean
 }
 
 // --- Built-in Tools ---
@@ -392,7 +394,7 @@ export class Orchestrator {
           // Fire onCall immediately for each parsed call so the door can show it before execution
           if (onCall) {
             for (const call of calls) {
-              await onCall({ call })
+              await onCall({ call, pending: true })
             }
           }
 
@@ -431,6 +433,9 @@ export class Orchestrator {
           }
 
           const result = await this.executeToolCall(call)
+
+          // Fire onCall with result so door can update the message
+          if (onCall) await onCall({ call, result })
 
           const execution = { call, result }
           turnTools.push(execution)

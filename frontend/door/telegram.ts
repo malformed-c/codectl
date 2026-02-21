@@ -240,7 +240,7 @@ export class TelegramDoor {
 
     try {
       await room.orchestrator.chat(text, async (intermediate) => {
-        // Send model's text content first (may accompany a tool call)
+        // Send model's text content (final response after all tools done)
         const response = intermediate.turn.content
         if (response) {
           const chunks = splitMessage(response, this.config.maxMessageLength)
@@ -253,31 +253,43 @@ export class TelegramDoor {
             }
           }
         }
-
-        // Show tool results after execution
-        if (intermediate.toolsExecuted.length > 0) {
-          const lines = intermediate.toolsExecuted.map(({ call, result }) => {
-            const args = JSON.stringify(call.arguments)
-            const status = result.error ? `E: ${result.error}` : `R:`
-
-            return `${status} <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`
-          })
-
+      }, async ({ call, result, pending }: CallEvent) => {
+        if (pending) {
+          // Show call before it runs
+          const args = JSON.stringify(call.arguments)
           try {
-            await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
+            await ctx.reply(`⏳ <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 
           } catch (err) {
-            consola.warn('Failed to send tool result message:', err)
+            consola.warn('Failed to send call notification:', err)
           }
-        }
-      }, async ({ call }: CallEvent) => {
-        // Show call immediately before it runs
-        const args = JSON.stringify(call.arguments)
-        try {
-          await ctx.reply(`T: <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 
-        } catch (err) {
-          consola.warn('Failed to send call notification:', err)
+        } else if (result) {
+          // Show result immediately after execution
+          const status = result.error
+            ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
+            : `✅ <b>${escapeHtml(call.name)}</b>`
+
+          const resultStr = result.error
+            ? null
+            : typeof result.result === 'string'
+              ? result.result
+              : JSON.stringify(result.result, null, 2)
+
+          const preview = resultStr && resultStr.length > 300
+            ? resultStr.slice(0, 300) + '\n…'
+            : resultStr
+
+          const msg = preview
+            ? `${status}\n<pre>${escapeHtml(preview)}</pre>`
+            : status
+
+          try {
+            await ctx.reply(msg, { parse_mode: 'HTML' })
+
+          } catch (err) {
+            consola.warn('Failed to send tool result:', err)
+          }
         }
       })
 
