@@ -9,15 +9,12 @@ from ansible.module_utils.common.collections import ImmutableDict
 from ansible.parsing.dataloader import DataLoader
 from ansible.playbook.play import Play
 from ansible.plugins.callback import CallbackBase
-from ansible.utils.collection_loader._collection_finder import _AnsibleCollectionFinder
+from ansible.plugins.loader import init_plugin_loader
 from ansible.vars.manager import VariableManager
 
 from models import AnsibleItem, AnsibleReport, TaskResult
 
-# When Ansible is used via the Python API (not the CLI) the collection finder
-# is never installed into sys.meta_path, so FQCNs like ansible.builtin.copy
-# can't be resolved. Install it once at import time.
-_AnsibleCollectionFinder(paths=[])._install()
+init_plugin_loader([])
 
 # ---
 # Result callback
