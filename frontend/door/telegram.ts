@@ -235,7 +235,21 @@ export class TelegramDoor {
 
     try {
       await room.orchestrator.chat(text, async (intermediate) => {
-        // Show tool activity
+        // Send model's text content first (may accompany a tool call)
+        const response = intermediate.turn.content
+        if (response) {
+          const chunks = splitMessage(response, this.config.maxMessageLength)
+          for (const chunk of chunks) {
+            try {
+              await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
+
+            } catch {
+              await ctx.reply(chunk)
+            }
+          }
+        }
+
+        // Then show tool activity
         if (intermediate.toolsExecuted.length > 0) {
           const lines = intermediate.toolsExecuted.map(({ call, result }) => {
             const args = JSON.stringify(call.arguments)
@@ -251,20 +265,6 @@ export class TelegramDoor {
 
           } catch (err) {
             consola.warn('Failed to send tool activity message:', err)
-          }
-        }
-
-        // Send text response if present
-        const response = intermediate.turn.content
-        if (!response) return
-
-        const chunks = splitMessage(response, this.config.maxMessageLength)
-        for (const chunk of chunks) {
-          try {
-            await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
-          } catch {
-            // Fallback to plain text if HTML conversion failed
-            await ctx.reply(chunk)
           }
         }
       })
