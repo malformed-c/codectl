@@ -339,16 +339,19 @@ export class Orchestrator {
       const isThinkOnly = parsed.think && !parsed.content && !parsed.toolCalls?.length
       if (isThinkOnly) {
         consola.warn('[think-only] model produced reasoning with no content/tools - injecting correction')
+
         this.history.push({
           role: 'assistant',
           content: '',
           think: parsed.think,
         })
+
         this.history.push({
-          role: 'user',
-          content: '[SYSTEM] You forgot to close your reasoning tag or produce a response. ' +
+          role: 'system',
+          content: 'You forgot to close your reasoning tag or produce a response. Your reasoning tags are [THINK][/THINK]. ' +
             'Please complete your response now with either a tool call or a final message.',
         })
+
         continue
       }
 
@@ -381,7 +384,9 @@ export class Orchestrator {
       for (const rawCall of parsed.toolCalls) {
         try {
           const calls = parseToolCalls(rawCall)
+
           consola.info('parsed tool calls:', calls)
+
           allCalls.push(...calls)
 
           // Fire onCall immediately for each parsed call so the door can show it before execution
@@ -400,6 +405,7 @@ export class Orchestrator {
 
         } catch (err) {
           consola.error('failed to parse tool call:', err)
+
           immediateResults.push({ error: `Failed to parse tool call: ${err}` })
           const wasAgent = this.mode.kind === 'agent'
           this.recordToolFailure()
@@ -449,6 +455,7 @@ export class Orchestrator {
         }
 
         consola.info('storing tool results in history:', this.shortenStoredResults(storedResults))
+
         this.history.push({
           role: 'tool_result',
           content: '',
@@ -475,7 +482,9 @@ export class Orchestrator {
     if (this.mode.kind !== 'agent') return
     this.mode = { ...this.mode, consecutiveFailures: this.mode.consecutiveFailures + 1 }
     if (this.mode.consecutiveFailures >= AGENT_MAX_CONSECUTIVE_FAILURES) {
+
       consola.warn(`Agent hit ${AGENT_MAX_CONSECUTIVE_FAILURES} consecutive failures - ejecting to chat mode`)
+
       this.mode = { kind: 'chat' }
       this.rebuildSystemMessage()
     }
