@@ -258,7 +258,7 @@ export class TelegramDoor {
         if (intermediate.toolsExecuted.length > 0) {
           const lines = intermediate.toolsExecuted.map(({ call, result }) => {
             const args = JSON.stringify(call.arguments)
-            const status = result.error ? `E: ${result.error}` : `R`
+            const status = result.error ? `E: ${result.error}` : `R:`
 
             return `${status} <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`
           })
