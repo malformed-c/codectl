@@ -64,3 +64,4 @@ it should be combined
 22. Check tool handler result, count it as failure
 23. Auto normalize or punish the model when opening token isn't found but closing one is
 24. Let model pass values from memory to tools as variables
+25. Interrupt the model at the boundary when user message
