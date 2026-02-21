@@ -67,3 +67,4 @@ it should be combined
 25. Interrupt the model at the boundary when user message
 26. Tool library optional filter arg
 27. Normalize Ansible playbook when field is missing from the model with the default value
+28. Entropy based codeplan + agent mode
