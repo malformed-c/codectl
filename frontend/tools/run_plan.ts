@@ -42,7 +42,7 @@ export function createRunPlanHandler(
   adapter: KoboldAdapter,
 ): ToolHandler {
   return async (args) => {
-    const raw = args.plan ?? args.json ?? args.codeplan
+    const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
     let parsed: unknown

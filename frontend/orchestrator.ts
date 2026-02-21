@@ -778,7 +778,7 @@ export class Orchestrator {
       return { result: null, error: 'validate_plan is only available in codeplan mode' }
     }
 
-    const raw = args.plan ?? args.json ?? args.codeplan
+    const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
     let parsed: unknown
