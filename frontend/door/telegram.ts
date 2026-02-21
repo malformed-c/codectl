@@ -47,7 +47,9 @@ function roomIdForChat(chatId: number): string {
  * Convert markdown to Telegram-safe HTML.
  * Telegram supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a>
  */
-function escapeHtml(text: string): string {
+function escapeHtml(text: string | undefined | null): string {
+  if (!text) return ''
+
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -89,7 +91,7 @@ function renderBlock(tokens: any[]): string {
           // list_item.tokens may contain a nested text token with inline tokens inside
           const inner = item.tokens.flatMap((t: any) => t.tokens ?? [{ type: 'text', text: t.text, raw: t.raw }])
 
-          return `• ${renderInline(inner).trim()}\n`
+          return `? ${renderInline(inner).trim()}\n`
         }).join('') + '\n'
       }
 
@@ -157,6 +159,7 @@ export class TelegramDoor {
 
   async stop(): Promise<void> {
     await this.bot.stop()
+
     consola.info('TelegramDoor stopped')
   }
 
@@ -255,7 +258,7 @@ export class TelegramDoor {
         if (intermediate.toolsExecuted.length > 0) {
           const lines = intermediate.toolsExecuted.map(({ call, result }) => {
             const args = JSON.stringify(call.arguments)
-            const status = result.error ? `❌ ${result.error}` : `✓`
+            const status = result.error ? `? ${result.error}` : `?`
 
             return `  ${status} <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`
           })
@@ -271,7 +274,7 @@ export class TelegramDoor {
         // Show call immediately before it runs
         const args = JSON.stringify(call.arguments)
         try {
-          await ctx.reply(`⏳ <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
+          await ctx.reply(`? <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 
         } catch (err) {
           consola.warn('Failed to send call notification:', err)
