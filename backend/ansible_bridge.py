@@ -10,6 +10,7 @@ from ansible.parsing.dataloader import DataLoader
 from ansible.playbook.play import Play
 from ansible.plugins.callback import CallbackBase
 from ansible.vars.manager import VariableManager
+
 from models import AnsibleItem, AnsibleReport, TaskResult
 
 
@@ -158,12 +159,22 @@ def run(items: list[AnsibleItem]) -> AnsibleReport:
 
     tqm: TaskQueueManager | None = None
     try:
-        tqm = TaskQueueManager(
+
+        class _TQM(TaskQueueManager):
+            """TQM subclass that loads a pre-built callback instead of a named plugin."""
+
+            def load_callbacks(self) -> None:
+                if self._callback_plugins:
+                    return
+                callback._init_callback_methods()
+                callback.set_options()
+                self._callback_plugins = [callback]
+
+        tqm = _TQM(
             inventory=inventory,
             variable_manager=variable_manager,
             loader=loader,
             passwords={},
-            stdout_callback=callback,
         )
 
         for play_dict in play_dicts:
@@ -174,7 +185,7 @@ def run(items: list[AnsibleItem]) -> AnsibleReport:
             )
             tqm.run(play)
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return AnsibleReport(
             ok=False,
             results=callback.results,
