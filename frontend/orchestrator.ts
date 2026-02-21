@@ -373,6 +373,15 @@ export class Orchestrator {
         break outerLoop
       }
 
+      // #23: Malformed token correction — model used closing token without opening.
+      // Auto-normalize already happened in parse(); now log + count as failure so the
+      // model receives an inline correction in the tool_result.
+      if (parsed.malformed) {
+        consola.warn('Malformed tool call: closing token found without opening token. Auto-normalized.')
+
+        this.recordToolFailure()
+      }
+
       // Process tools
       let loopShouldStop = false
 
@@ -416,6 +425,13 @@ export class Orchestrator {
         }
       }
 
+      // #23: Append malformed-token correction to tool results so model sees it
+      if (parsed.malformed) {
+        immediateResults.unshift({
+          error: 'Malformed tool call: your response contained a closing tool token without the opening token. Always start tool calls with the opening token.',
+        })
+      }
+
       if (storedCalls.length > 0 || immediateResults.length > 0) {
         this.history.push({
           role: 'tool_call',
@@ -448,7 +464,8 @@ export class Orchestrator {
           })
 
           // Track agent-mode failure ejection
-          if (result.error) {
+          // #22: Count explicit errors AND null results (handler returned nothing useful) as failures.
+          if (result.error || result.result === null) {
             const wasAgent = this.mode.kind === 'agent'
             this.recordToolFailure()
 
@@ -693,6 +710,24 @@ export class Orchestrator {
         const cachedValue = this.callIdCache.get(val)
         resolvedArgs[key] = cachedValue
         consola.debug(`Auto-resolved arg '${key}': ${val} -> (cached value)`)
+      }
+    }
+
+    // --- #24: Memory Variable Interpolation ---
+    // Substitute $key or ${key} references in string args with memory values.
+    for (const [key, val] of Object.entries(resolvedArgs)) {
+      if (typeof val === 'string' && val.includes('$')) {
+        resolvedArgs[key] = val.replace(/\$\{([^}]+)\}|\$([\w]+)/g, (_match, braced, bare) => {
+          const memKey = braced ?? bare
+          const memVal = this.memory.get(memKey)
+          if (memVal !== undefined) {
+            consola.debug(`Memory interpolation: $${memKey} -> (value)`)
+
+            return memVal
+          }
+
+          return _match // leave unresolved refs as-is
+        })
       }
     }
 

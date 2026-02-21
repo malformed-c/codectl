@@ -61,4 +61,6 @@ it should be combined
 19. Refactor wrapper handler to lambdas
 20. Store mode in the history and restore it when loading
 21. Store all model state and restore it
-22. Check tool handler result,
+22. Check tool handler result, count it as failure
+23. Auto normalize or punish the model when opening token isn't found but closing one is
+24. Let model pass values from memory to tools as variables

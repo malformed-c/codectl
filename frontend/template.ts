@@ -95,6 +95,9 @@ export type ParsedTurn = {
   toolCalls?: string[]
   toolResults?: string[]
   content: string
+
+  /** True if tool call tokens were malformed (close found but open missing) and were auto-normalized. */
+  malformed?: boolean
 }
 
 export type ModelProfile = {
@@ -501,6 +504,16 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
   // Extract tool calls - resolve to wrap pair regardless of rich/simple
   if (template.toolCall) {
     const pair = resolveWrap(template.toolCall, template.modelTurn)
+    const [open, close] = pair
+
+    // #23: Detect orphan close token (close present but open absent).
+    // Auto-normalize by prepending the open token so extractAll can parse it.
+    // Mark as malformed so the orchestrator can inject a correction.
+    if (close && text.includes(close) && !text.includes(open)) {
+      text = open + text
+      result.malformed = true
+    }
+
     const calls = extractAll(text, pair)
     if (calls.length > 0) {
       result.toolCalls = calls
