@@ -6,6 +6,8 @@ import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
 import type { KoboldAdapter } from '../kobold'
+import { marked, Renderer } from 'marked'
+
 
 // --- Types ---
 
@@ -46,30 +48,50 @@ function roomIdForChat(chatId: number): string {
  * Convert markdown to Telegram-safe HTML.
  * Telegram supports: <b>, <i>, <u>, <s>, <code>, <pre>, <a>
  */
-function markdownToTelegramHTML(md: string): string {
-  const rendered = Bun.markdown.render(md, {
-    heading: (children) => `<b>${children}</b>\n`,
-    paragraph: (children) => `${children}\n`,
-    strong: (children) => `<b>${children}</b>`,
-    emphasis: (children) => `<i>${children}</i>`,
-    strikethrough: (children) => `<s>${children}</s>`,
-    list: (children) => `${children}\n`,
-    listItem: (children) => `? ${children.trim()}\n`,
-    link: (children, { href }) => `<a href="${href}">${children}</a>`,
-    code: (children) => `<pre>${children}</pre>`,
-    codespan: (children) => `<code>${children}</code>`,
-    image: () => '',
-    html: () => '',
-  })
-
-  return rendered.trim()
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+function markdownToTelegramHTML(md: string): string {
+  try {
+    const renderer = new Renderer()
+
+    // Block elements
+    renderer.heading = ({ text }: any) => `<b>${text}</b>\n`
+    renderer.paragraph = ({ text }: any) => `${text}\n`
+    renderer.strong = ({ text }: any) => `<b>${text}</b>`
+    renderer.em = ({ text }: any) => `<i>${text}</i>`
+    renderer.del = ({ text }: any) => `<s>${text}</s>`
+    renderer.link = ({ href, text }: any) => `<a href="${escapeHtml(href ?? '')}">${text}</a>`
+    renderer.image = () => ''
+    renderer.html = () => ''
+    renderer.hr = () => '\n'
+    renderer.br = () => '\n'
+
+    // Code - escape content, Telegram's <pre> does not support language attributes
+    renderer.code = ({ text }: any) => `<pre>${escapeHtml(text)}</pre>\n`
+    renderer.codespan = ({ text }: any) => `<code>${escapeHtml(text)}</code>`
+
+    // Lists
+    renderer.list = ({ body }: any) => `${body}\n`
+    renderer.listitem = ({ text }: any) => `• ${text.trim()}\n`
+
+    // Blockquote
+    renderer.blockquote = ({ text }: any) => `<i>${text.trim()}</i>\n`
+
+    // Escape plain text at leaf level
+    renderer.text = ({ text }: any) => escapeHtml(text)
+
+    return (marked(md, { renderer, async: false }) as string).trim()
+
+  } catch (err) {
+    consola.warn('markdownToTelegramHTML failed, sending plain text:', err)
+
+    return escapeHtml(md)
+  }
 }
 
 // --- Telegram door ---
