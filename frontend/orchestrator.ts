@@ -781,16 +781,8 @@ export class Orchestrator {
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
-    let parsed: unknown
     try {
-      parsed = typeof raw === 'string' ? JSON.parse(raw as string) : raw
-
-    } catch (err) {
-      return { result: null, error: `Invalid JSON: ${err}` }
-    }
-
-    try {
-      const result = codePlanSchema.safeParse(parsed)
+      const result = codePlanSchema.safeParse(raw)
       if (result.success) {
         this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), lastPlan: result.data, validationErrors: [] }
         this.rebuildSystemMessage()

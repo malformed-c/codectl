@@ -45,15 +45,7 @@ export function createRunPlanHandler(
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
-    let parsed: unknown
-    try {
-      parsed = typeof raw === 'string' ? JSON.parse(raw as string) : raw
-
-    } catch (err) {
-      return { result: null, error: `Invalid JSON: ${err}` }
-    }
-
-    const validated = codePlanSchema.safeParse(parsed)
+    const validated = codePlanSchema.safeParse(raw)
     if (!validated.success) {
       const errors = validated.error.errors.map(e => `${e.path.join('.')}: ${e.message}`)
 
