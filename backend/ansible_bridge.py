@@ -17,8 +17,7 @@ from models import AnsibleItem, AnsibleReport, TaskResult
 # When Ansible is used via the Python API (not the CLI) the collection finder
 # is never installed into sys.meta_path, so FQCNs like ansible.builtin.copy
 # can't be resolved. Install it once at import time.
-_AnsibleCollectionFinder(paths=[]).install()
-
+_AnsibleCollectionFinder(paths=[])._install()
 
 # ---
 # Result callback
