@@ -257,16 +257,17 @@ export function renderToolCalls(calls: StoredToolCall[], template: TextTemplate)
  * already a string (e.g. from renderTools).
  */
 export function renderStoredToolResult(stored: StoredToolResult, template: TextTemplate): string {
-  // Serialize result directly - strings pass through as-is, objects get stringified.
-  // Only errors get a { error: ... } wrapper for model clarity.
-  const body = stored.error
-    ? JSON.stringify({ error: stored.error }, null, 2)
-    : typeof stored.value === 'string'
-      ? stored.value
-      : JSON.stringify(stored.value, null, 2)
-
   const tr = template.toolResult
-  if (tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich) {
+  const isRich = tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich
+
+  // Serialize result - wrapped in { result: ... } or { error: ... } for model clarity.
+  // This matches previous renderToolResult behavior.
+  const body = JSON.stringify({
+    ...(stored.callId && !isRich ? { callId: stored.callId } : {}),
+    ...(stored.error ? { error: stored.error } : { result: stored.value }),
+  }, null, 2)
+
+  if (isRich) {
     const rich = (tr as ToolResultsTemplate).rich!
 
     return `${rich.callId}${stored.callId ?? ''}${rich.content}${body}`

@@ -311,14 +311,16 @@ export class Orchestrator {
       // Process tools
       let loopShouldStop = false
 
-      consola.trace('received tool calls:', parsed.toolCalls)
+      consola.info('received tool calls:', parsed.toolCalls)
 
       const allCalls: ToolCall[] = []
       const storedCalls: StoredToolCall[] = []
+      const immediateResults: StoredToolResult[] = []
 
       for (const rawCall of parsed.toolCalls) {
         try {
           const calls = parseToolCalls(rawCall)
+          consola.info('parsed tool calls:', calls)
           allCalls.push(...calls)
 
           // Store as structured calls - re-rendered to native format on send
@@ -329,30 +331,23 @@ export class Orchestrator {
           })))
 
         } catch (err) {
-          // If we have a parse error, we push the raw call as a single message
-          // and record the error immediately.
-          this.history.push({
-            role: 'tool_call',
-            content: rawCall,
-          })
-
-          this.history.push({ role: 'tool_result', content: '', results: [{ error: `Failed to parse tool call: ${err}` }] satisfies StoredToolResult[] })
+          consola.error('failed to parse tool call:', err)
+          immediateResults.push({ error: `Failed to parse tool call: ${err}` })
+          const wasAgent = this.mode.kind === 'agent'
           this.recordToolFailure()
 
-          if (this.wasEjected()) break outerLoop
-
-          continue
+          if (wasAgent && this.wasEjected()) break
         }
       }
 
-      if (storedCalls.length > 0) {
+      if (storedCalls.length > 0 || immediateResults.length > 0) {
         this.history.push({
           role: 'tool_call',
-          content: '',
+          content: parsed.toolCalls.join('\n'), // Keep raw calls for reference if needed
           calls: storedCalls,
         })
 
-        const storedResults: StoredToolResult[] = []
+        const storedResults: StoredToolResult[] = [...immediateResults]
 
         for (const call of allCalls) {
           // Detect special control flow tools
@@ -368,18 +363,20 @@ export class Orchestrator {
             callId: result.callId,
             error: result.error,
             value: result.result,
-          } satisfies StoredToolResult)
+          })
 
           // Track agent-mode failure ejection
           if (result.error) {
+            const wasAgent = this.mode.kind === 'agent'
             this.recordToolFailure()
-            if (this.wasEjected()) { loopShouldStop = true; break }
+            if (wasAgent && this.wasEjected()) { loopShouldStop = true; break }
 
           } else {
             this.resetToolFailures()
           }
         }
 
+        consola.info('storing tool results in history:', storedResults)
         this.history.push({
           role: 'tool_result',
           content: '',
@@ -455,13 +452,17 @@ export class Orchestrator {
         if (msg.results) {
           if (turnsAhead === 1) {
             // Shorten long results
-            const preview = JSON.stringify(msg.results.map(r => r.value ?? r.error ?? ''))
-            if (preview.length > 1000) {
+            const totalLength = msg.results.reduce((acc, r) => acc + JSON.stringify(r.value ?? r.error ?? '').length, 0)
+            if (totalLength > 1000) {
+              const perItemLimit = Math.max(100, Math.floor(1000 / msg.results.length))
+
               return {
                 ...msg,
                 results: msg.results.map(r => ({
                   ...r,
-                  value: typeof r.value === 'string' && r.value.length > 500 ? r.value.slice(0, 500) + '... (shortened)' : r.value
+                  value: typeof r.value === 'string'
+                    ? (r.value.length > perItemLimit ? r.value.slice(0, perItemLimit) + '... (shortened)' : r.value)
+                    : (JSON.stringify(r.value).length > perItemLimit ? JSON.stringify(r.value).slice(0, perItemLimit) + '... (shortened)' : r.value)
                 }))
               }
             }
@@ -555,7 +556,7 @@ export class Orchestrator {
 
       const args = JSON.stringify(call.arguments)
       const res = result.error ? `Error: ${result.error}` : this.shortenResult(result.result)
-      consola.debug(`Action: ${call.name}(${args}) -> ${res}`)
+      consola.info(`Action: ${call.name}(${args}) -> ${res}`)
 
       return result
 
