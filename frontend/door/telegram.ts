@@ -106,7 +106,7 @@ function renderBlock(tokens: any[]): string {
  */
 function stripMarkdownToPlain(md: string): string {
   return md
-    // Fenced code blocks — keep content, drop fences
+    // Fenced code blocks - keep content, drop fences
     .replace(/```[^\n]*\n([\s\S]*?)```/g, '$1')
     // Inline code
     .replace(/`([^`]+)`/g, '$1')
@@ -279,7 +279,7 @@ export class TelegramDoor {
               await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
 
             } catch {
-              // HTML parse failed — fall back to stripped plain text so the
+              // HTML parse failed - fall back to stripped plain text so the
               // user gets readable content instead of raw markdown.
               await ctx.reply(stripMarkdownToPlain(chunk))
             }
