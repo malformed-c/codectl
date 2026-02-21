@@ -653,6 +653,11 @@ export class Orchestrator {
           : '\nNo plan submitted yet.'
         return (
           `\n\nYou are in CODEPLAN mode. Collaborate on a CodePlan JSON with the user. ` +
+          'CodePlan' +
+          '  └── codePlan[]' +
+          '        └── PlanItem' +
+          '              ├── CodeEdit' +
+          '              └── Ansible' +
           `Use 'validate_plan' to check the schema; iterate until valid. ` +
           `Git root: ${gitRoot}${planStatus}`
         )
