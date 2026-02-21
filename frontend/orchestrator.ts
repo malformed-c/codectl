@@ -268,7 +268,7 @@ export class Orchestrator {
 
   abort(): void { this.abortController?.abort() }
 
-  async chat(userMessage: string): Promise<TurnResult> {
+  async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
     this.abortController = new AbortController()
 
     // Ensure system message exists
@@ -305,6 +305,8 @@ export class Orchestrator {
 
       // Stop if no tools called
       if (!parsed.toolCalls?.length) {
+        if (onTurn) await onTurn({ turn: parsed, toolsExecuted: [] })
+
         break outerLoop
       }
 
@@ -313,6 +315,7 @@ export class Orchestrator {
 
       consola.info('received tool calls:', parsed.toolCalls)
 
+      const turnTools: TurnResult['toolsExecuted'] = []
       const allCalls: ToolCall[] = []
       const storedCalls: StoredToolCall[] = []
       const immediateResults: StoredToolResult[] = []
@@ -357,7 +360,10 @@ export class Orchestrator {
           }
 
           const result = await this.executeToolCall(call)
-          toolsExecuted.push({ call, result })
+
+          const execution = { call, result }
+          turnTools.push(execution)
+          toolsExecuted.push(execution)
 
           storedResults.push({
             callId: result.callId,
@@ -369,6 +375,7 @@ export class Orchestrator {
           if (result.error) {
             const wasAgent = this.mode.kind === 'agent'
             this.recordToolFailure()
+
             if (wasAgent && this.wasEjected()) { loopShouldStop = true; break }
 
           } else {
@@ -376,12 +383,14 @@ export class Orchestrator {
           }
         }
 
-        consola.info('storing tool results in history:', storedResults)
+        consola.info('storing tool results in history:', this.shortenStoredResults(storedResults))
         this.history.push({
           role: 'tool_result',
           content: '',
           results: storedResults,
         })
+
+        if (onTurn) await onTurn({ turn: parsed, toolsExecuted: turnTools })
       }
 
       if (loopShouldStop) break outerLoop
@@ -414,6 +423,7 @@ export class Orchestrator {
 
   private resetToolFailures(): void {
     if (this.mode.kind !== 'agent') return
+
     if (this.mode.consecutiveFailures > 0) {
       this.mode = { ...this.mode, consecutiveFailures: 0 }
     }
@@ -549,14 +559,38 @@ export class Orchestrator {
 
     // Find the definition so we can resolve aliases + positional args
     const def = this.tools.find(t => t.name === call.name)
-    const resolvedArgs = def ? resolveArgs(call.arguments, def) : call.arguments
+    const resolvedArgs = def ? resolveArgs(call.arguments, def) : { ...call.arguments }
+
+    // --- Automatic Call-ID Resolution ---
+    for (const [key, val] of Object.entries(resolvedArgs)) {
+      if (typeof val === 'string' && this.callIdCache.has(val)) {
+        const cachedValue = this.callIdCache.get(val)
+        resolvedArgs[key] = cachedValue
+        consola.debug(`Auto-resolved arg '${key}': ${val} -> (cached value)`)
+      }
+    }
 
     try {
       const result = await handler(resolvedArgs)
 
+      // Ensure callId is preserved if not returned by handler
+      if (!result.callId && call.callId) {
+        result.callId = call.callId
+      }
+
       const args = JSON.stringify(call.arguments)
       const res = result.error ? `Error: ${result.error}` : this.shortenResult(result.result)
       consola.info(`Action: ${call.name}(${args}) -> ${res}`)
+
+      // --- Automatic Call-ID Caching ---
+      if (result.callId && result.result !== undefined && !result.error) {
+        const cacheValue = typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(result.result)
+
+        this.callIdCache.set(result.callId, cacheValue)
+        consola.debug(`Auto-cached result for ${result.callId}`)
+      }
 
       return result
 
@@ -574,6 +608,13 @@ export class Orchestrator {
     if (s.length <= 200) return s
 
     return s.slice(0, 200) + '...'
+  }
+
+  private shortenStoredResults(results: StoredToolResult[]): string {
+    return JSON.stringify(results.map(r => ({
+      ...r,
+      value: r.value !== undefined ? this.shortenResult(r.value) : undefined
+    })))
   }
 
   private async handleModeSwitch(targetMode: string): Promise<ToolResult> {
@@ -610,12 +651,14 @@ export class Orchestrator {
     if (this.mode.kind !== 'codeplan') {
       return { result: null, error: 'validate_plan is only available in codeplan mode' }
     }
+
     const raw = args.plan ?? args.json ?? args.codeplan
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
     let parsed: unknown
     try {
       parsed = typeof raw === 'string' ? JSON.parse(raw as string) : raw
+
     } catch (err) {
       return { result: null, error: `Invalid JSON: ${err}` }
     }
@@ -623,19 +666,24 @@ export class Orchestrator {
     try {
       const schemaModule = await import('./codeplan.schema')
       const schema = (schemaModule as any).codePlanSchema ?? (schemaModule as any).default
+
       if (!schema) throw new Error('schema not found')
 
       const result = schema.safeParse(parsed)
       if (result.success) {
         this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), lastPlan: result.data, validationErrors: [] }
         this.rebuildSystemMessage()
+
         return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
+
       } else {
         const errors = result.error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`)
         this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), validationErrors: errors }
         this.rebuildSystemMessage()
+
         return { result: { valid: false, errors } }
       }
+
     } catch (err) {
       return { result: null, error: `Schema validation failed: ${err}` }
     }

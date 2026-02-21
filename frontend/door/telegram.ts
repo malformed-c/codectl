@@ -54,7 +54,7 @@ function markdownToTelegramHTML(md: string): string {
     emphasis: (children) => `<i>${children}</i>`,
     strikethrough: (children) => `<s>${children}</s>`,
     list: (children) => `${children}\n`,
-    listItem: (children) => `• ${children.trim()}\n`,
+    listItem: (children) => `? ${children.trim()}\n`,
     link: (children, { href }) => `<a href="${href}">${children}</a>`,
     code: (children) => `<pre>${children}</pre>`,
     codespan: (children) => `<code>${children}</code>`,
@@ -187,27 +187,26 @@ export class TelegramDoor {
     await ctx.replyWithChatAction('typing')
 
     try {
-      const result = await room.orchestrator.chat(text)
+      await room.orchestrator.chat(text, async (intermediate) => {
+        const response = intermediate.turn.content
+        if (!response) return
+
+        const chunks = splitMessage(response, this.config.maxMessageLength)
+        for (const chunk of chunks) {
+          try {
+            await ctx.reply(chunk, { parse_mode: 'Markdown' })
+
+          } catch {
+            await ctx.reply(chunk)
+          }
+        }
+      })
+
       touchRoom(room)
 
       // Persist after each turn
       if (this.config.historyStore) {
         await this.config.historyStore.save(room.meta, room.orchestrator.getHistory())
-      }
-
-      const response = result.turn.content
-      if (!response) return  // model produced no text content (pure tool call turn)
-
-      const chunks = splitMessage(response, this.config.maxMessageLength)
-
-      for (const chunk of chunks) {
-        try {
-          await ctx.reply(chunk, { parse_mode: 'Markdown' })
-
-          // Fallback to plain text if HTML parse fails
-        } catch {
-          await ctx.reply(response)
-        }
       }
 
     } catch (err) {

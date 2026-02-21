@@ -87,14 +87,24 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
     }
 
     try {
-      const result = await orchestrator.chat(text)
+      const result = await orchestrator.chat(text, (intermediate) => {
+        if (intermediate.turn.think) {
+          consola.debug('[think]', intermediate.turn.think)
+        }
+
+        if (intermediate.turn.content) {
+          consola.log(intermediate.turn.content)
+        }
+
+        for (const te of intermediate.toolsExecuted) {
+          const args = JSON.stringify(te.call.arguments)
+          const res = te.result.error ? `Error: ${te.result.error}` : 'success'
+
+          consola.info(`  🛠️  ${te.call.name}(${args}) -> ${res}`)
+        }
+      })
+
       await historyStore.save(room.meta, orchestrator.getHistory())
-
-      if (result.turn.think) {
-        consola.debug('[think]', result.turn.think)
-      }
-
-      consola.log(result.turn.content)
 
     } catch (err) {
       consola.error('Error:', err)
@@ -171,5 +181,6 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   consola.error('Fatal:', err)
+
   process.exit(1)
 })
