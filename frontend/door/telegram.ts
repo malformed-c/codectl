@@ -5,7 +5,7 @@ import { consola } from 'consola'
 import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
-import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
+import { Orchestrator, type OrchestratorConfig, type CallEvent } from '../orchestrator'
 import type { KoboldAdapter } from '../kobold'
 
 // --- Types ---
@@ -98,7 +98,9 @@ function renderBlock(tokens: any[]): string {
   }).join('')
 }
 
-function markdownToTelegramHTML(md: string): string {
+function markdownToTelegramHTML(md: string | undefined | null): string {
+  if (!md) return ''
+
   try {
     const tokens = marked.lexer(md)
 
@@ -249,23 +251,30 @@ export class TelegramDoor {
           }
         }
 
-        // Then show tool activity
+        // Show tool results after execution
         if (intermediate.toolsExecuted.length > 0) {
           const lines = intermediate.toolsExecuted.map(({ call, result }) => {
             const args = JSON.stringify(call.arguments)
-            const status = result.error
-              ? `❌ ${result.error}`
-              : `✓`
+            const status = result.error ? `❌ ${result.error}` : `✓`
 
-            return `<code>${escapeHtml(call.name)}(${escapeHtml(args)})</code> ${status}`
+            return `  ${status} <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`
           })
 
           try {
             await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 
           } catch (err) {
-            consola.warn('Failed to send tool activity message:', err)
+            consola.warn('Failed to send tool result message:', err)
           }
+        }
+      }, async ({ call }: CallEvent) => {
+        // Show call immediately before it runs
+        const args = JSON.stringify(call.arguments)
+        try {
+          await ctx.reply(`⏳ <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
+
+        } catch (err) {
+          consola.warn('Failed to send call notification:', err)
         }
       })
 

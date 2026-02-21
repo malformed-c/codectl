@@ -65,11 +65,18 @@ export type OrchestratorConfig = {
 
   /** Path to backend/ directory for Ansible subprocess. Defaults to ../backend relative to cwd. */
   backendDir?: string
+
+  /** How many assistant think blocks to keep in history (oldest are stripped). Default: 2 */
+  maxThinkHistory?: number
 }
 
 export type TurnResult = {
   turn: ParsedTurn
   toolsExecuted: Array<{ call: ToolCall; result: ToolResult }>
+}
+
+export type CallEvent = {
+  call: ToolCall
 }
 
 // --- Built-in Tools ---
@@ -273,7 +280,7 @@ export class Orchestrator {
    * autonomous loop without a user turn. The model talks only with the system.
    * Automatically switches to agent mode if not already in it.
    */
-  async run(goal: string, onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
+  async run(goal: string, onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
     if (this.mode.kind !== 'agent') {
       const gitRoot = await findGitRoot(process.cwd())
       this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
@@ -290,19 +297,19 @@ export class Orchestrator {
         `GOAL:\n${goal}`,
     })
 
-    return this.runLoop(onTurn)
+    return this.runLoop(onTurn, onCall)
   }
 
-  async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
+  async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
     // Ensure system message exists
     if (this.history.length === 0) this.rebuildSystemMessage()
 
     this.history.push({ role: 'user', content: userMessage })
 
-    return this.runLoop(onTurn)
+    return this.runLoop(onTurn, onCall)
   }
 
-  private async runLoop(onTurn?: (result: TurnResult) => void | Promise<void>): Promise<TurnResult> {
+  private async runLoop(onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
     this.abortController = new AbortController()
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
@@ -327,7 +334,25 @@ export class Orchestrator {
 
       finalTurn = parsed
 
-      // Handle content
+      // Detect think-only output: model produced reasoning but no content and no tool calls.
+      // This usually means it forgot to close the think tag. Punish it with a correction.
+      const isThinkOnly = parsed.think && !parsed.content && !parsed.toolCalls?.length
+      if (isThinkOnly) {
+        consola.warn('[think-only] model produced reasoning with no content/tools - injecting correction')
+        this.history.push({
+          role: 'assistant',
+          content: '',
+          think: parsed.think,
+        })
+        this.history.push({
+          role: 'user',
+          content: '[SYSTEM] You forgot to close your reasoning tag or produce a response. ' +
+            'Please complete your response now with either a tool call or a final message.',
+        })
+        continue
+      }
+
+      // Handle content + think
       if (parsed.content || parsed.think) {
         this.history.push({
           role: 'assistant',
@@ -359,6 +384,13 @@ export class Orchestrator {
           consola.info('parsed tool calls:', calls)
           allCalls.push(...calls)
 
+          // Fire onCall immediately for each parsed call so the door can show it before execution
+          if (onCall) {
+            for (const call of calls) {
+              await onCall({ call })
+            }
+          }
+
           // Store as structured calls - re-rendered to native format on send
           storedCalls.push(...calls.map(c => ({
             tool: c.name,
@@ -379,7 +411,7 @@ export class Orchestrator {
       if (storedCalls.length > 0 || immediateResults.length > 0) {
         this.history.push({
           role: 'tool_call',
-          content: parsed.toolCalls.join('\n'), // Keep raw calls for reference if needed
+          content: parsed.toolCalls.join('\n'),
           calls: storedCalls,
         })
 
@@ -475,6 +507,17 @@ export class Orchestrator {
     const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
     const [systemMsg, ...rest] = this.history
 
+    // Think pushout: keep only the last N think blocks, strip the rest.
+    // Older reasoning is noise; retaining too many balloons the context window.
+    const maxThink = this.config.maxThinkHistory ?? 2
+    const assistantThinkIndices = rest
+      .map((m, i) => (m.role === 'assistant' && m.think ? i : -1))
+      .filter(i => i !== -1)
+
+    const stripThinkBefore = assistantThinkIndices.length > maxThink
+      ? assistantThinkIndices[assistantThinkIndices.length - maxThink]!
+      : -1
+
     // Gradual shortening of tool results
     let userTurnIndex = 0
     const processedHistory = rest.map((msg, idx) => {
@@ -557,6 +600,14 @@ export class Orchestrator {
             ? '{ "error": "original error preserved, result omitted" }'
             : '{ "result": "omitted" }'
         }
+      }
+
+      // Strip old think blocks beyond the retention window
+      if (msg.role === 'assistant' && msg.think && idx < stripThinkBefore) {
+        consola.debug(`[think-pushout] stripping think from assistant turn at idx=${idx}`)
+
+        const { think: _, ...rest } = msg
+        return rest
       }
 
       return msg
