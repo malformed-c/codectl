@@ -663,7 +663,7 @@ export class Orchestrator {
       .with({ kind: 'chat' }, () => '')
       .with({ kind: 'agent' }, ({ gitRoot }) =>
         `\n\nYou are in AGENT mode. Use tools continuously to accomplish the user's goal. ` +
-        `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}\nShell cwd is preserved between bash calls.`
+        `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}.`
       )
       .with({ kind: 'codeplan' }, ({ gitRoot, lastPlan, validationErrors }) => {
         const planStatus = lastPlan
