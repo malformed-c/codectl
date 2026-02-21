@@ -373,7 +373,7 @@ export class Orchestrator {
         break outerLoop
       }
 
-      // #23: Malformed token correction — model used closing token without opening.
+      // #23: Malformed token correction - model used closing token without opening.
       // Auto-normalize already happened in parse(); now log + count as failure so the
       // model receives an inline correction in the tool_result.
       if (parsed.malformed) {
@@ -671,10 +671,10 @@ export class Orchestrator {
         return (
           `\n\nYou are in CODEPLAN mode. Collaborate on a CodePlan JSON with the user. ` +
           'CodePlan' +
-          '  └── codePlan[]' +
-          '        └── PlanItem' +
-          '              ├── CodeEdit' +
-          '              └── Ansible' +
+          '  └-- codePlan[]' +
+          '        └-- PlanItem' +
+          '              ├-- CodeEdit' +
+          '              └-- Ansible' +
           `Use 'validate_plan' to check the schema; iterate until valid. ` +
           `Git root: ${gitRoot}${planStatus}`
         )

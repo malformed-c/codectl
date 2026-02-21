@@ -3,7 +3,7 @@ import type { ToolHandler } from '../orchestrator'
 
 export const MemoryTool: ToolDefinition = {
   name: 'memory',
-  description: 'Manage short-term memory for the current session. Store values with set, then reference them in any tool argument using $key or ${key} syntax — the orchestrator substitutes the stored value before the tool runs.',
+  description: 'Manage short-term memory for the current session. Store values with set, then reference them in any tool argument using $key or ${key} syntax - the orchestrator substitutes the stored value before the tool runs.',
   parameters: {
     type: 'object',
     properties: {
