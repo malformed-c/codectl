@@ -4,6 +4,7 @@ import type { KoboldAdapter } from '../kobold'
 import { runPlan } from '../plan_runner'
 import type { CodePlan } from '../codeplan.schema'
 import { codePlanSchema } from '../codeplan.schema'
+import type { PlanRunResult } from '../plan_runner'
 
 export const RunPlanTool: ToolDefinition = {
   name: 'run_plan',
@@ -61,32 +62,7 @@ export function createRunPlanHandler(
     const result = await runPlan(plan, { adapter, gitRoot, backendDir })
 
     if (!result.ok) {
-      // Format a clear error report for the model to reason about
-      const parts: string[] = [`Plan execution failed at phase: ${result.failedPhase}`]
-
-      if (result.dryApplyErrors?.length) {
-        parts.push('Dry apply errors:')
-        for (const e of result.dryApplyErrors) {
-          parts.push(`  ${e.resource} / ${e.operation}: ${e.error}`)
-        }
-      }
-
-      if (result.conflictedFiles?.length) {
-        parts.push(`Files modified externally: ${result.conflictedFiles.join(', ')}`)
-      }
-
-      if (result.ansibleReport && !result.ansibleReport.ok) {
-        parts.push('Ansible failures:')
-        for (const r of result.ansibleReport.results) {
-          if (r.status === 'failed' || r.status === 'unreachable') {
-            parts.push(`  [${r.status}] ${r.name}: ${r.message}`)
-          }
-        }
-      }
-
-      if (result.error) parts.push(`Error: ${result.error}`)
-
-      return { result: null, error: parts.join('\n') }
+      return { result: null, error: formatRunPlanFailure(result) }
     }
 
     return {
@@ -97,4 +73,56 @@ export function createRunPlanHandler(
       },
     }
   }
+}
+
+export function formatRunPlanFailure(result: PlanRunResult): string {
+  // Format a clear error report for the model to reason about
+  const parts: string[] = [`Plan execution failed at phase: ${result.failedPhase}`]
+  let hasConcreteReason = false
+
+  if (result.dryApplyErrors?.length) {
+    hasConcreteReason = true
+    parts.push('Dry apply errors:')
+    for (const e of result.dryApplyErrors) {
+      parts.push(`  ${e.resource} / ${e.operation}: ${e.error}`)
+    }
+  }
+
+  if (result.conflictedFiles?.length) {
+    hasConcreteReason = true
+    parts.push(`Files modified externally: ${result.conflictedFiles.join(', ')}`)
+  }
+
+  if (result.ansibleReport && !result.ansibleReport.ok) {
+    parts.push('Ansible failures:')
+
+    let hasTaskFailures = false
+    for (const r of result.ansibleReport.results) {
+      if (r.status === 'failed' || r.status === 'unreachable') {
+        hasTaskFailures = true
+        hasConcreteReason = true
+        parts.push(`  [${r.status}] ${r.name}: ${r.message}`)
+      }
+    }
+
+    if (result.ansibleReport.error) {
+      hasConcreteReason = true
+      parts.push(`  Backend error: ${result.ansibleReport.error}`)
+
+    } else if (!hasTaskFailures) {
+      parts.push('  Backend error: unknown ansible failure')
+      hasConcreteReason = true
+    }
+  }
+
+  if (result.error) {
+    hasConcreteReason = true
+    parts.push(`Error: ${result.error}`)
+  }
+
+  if (!hasConcreteReason) {
+    parts.push('Error: unknown execution failure')
+  }
+
+  return parts.join('\n')
 }
