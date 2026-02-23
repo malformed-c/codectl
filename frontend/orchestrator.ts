@@ -320,7 +320,7 @@ export class Orchestrator {
     const toolsExecuted: TurnResult['toolsExecuted'] = []
 
     // Chat mode allows tool calls but caps at a small number of follow-through turns
-    // so the model can respond after executing a tool (e.g. tool_library → summarise).
+    // so the model can respond after executing a tool (e.g. tool_library -> summarise).
     // Agent/codeplan modes get the full autonomous turn budget.
     const maxTurns = this.mode.kind === 'chat'
       ? (this.config.chatToolTurns ?? 5)

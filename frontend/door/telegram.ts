@@ -122,7 +122,7 @@ function stripMarkdownToPlain(md: string): string {
     .replace(/^#{1,6}\s+/gm, '')
     // Block quote markers
     .replace(/^>\s?/gm, '')
-    // List markers → bullet
+    // List markers -> bullet
     .replace(/^(\s*)[-*+]\s+/gm, '$1• ')
     .replace(/^(\s*)\d+\.\s+/gm, '$1')
     // Literal two-char \n sequences the model sometimes emits
@@ -309,7 +309,7 @@ export class TelegramDoor {
               : JSON.stringify(result.result, null, 2)
 
           const preview = resultStr && resultStr.length > 300
-            ? resultStr.slice(0, 300) + '\n…'
+            ? resultStr.slice(0, 300) + '\n...'
             : resultStr
 
           const msg = preview

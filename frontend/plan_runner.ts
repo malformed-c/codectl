@@ -11,11 +11,11 @@
  *  Phase 2 --- DRY APPLY
  *    Apply all CodeEdit ops in-memory with Codeq. Collect every error across
  *    all resources before aborting --- gives the model a complete picture.
- *    If any errors → return error list, do not write.
+ *    If any errors -> return error list, do not write.
  *
  *  Phase 3 --- CONFLICT GUARD
  *    Hash affected files at plan-start (snapshotted before phase 1).
- *    Re-hash just before writing. Any change → abort with conflict report.
+ *    Re-hash just before writing. Any change -> abort with conflict report.
  *
  *  Phase 4 --- EXECUTE
  *    CodeEdit items: Codeq writes each file (already uses atomic rename).
