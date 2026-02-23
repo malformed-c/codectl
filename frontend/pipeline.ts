@@ -4,18 +4,30 @@ import type { RenderContext } from './round'
 export type RenderPass = (spans: AnnotatedText, ctx: RenderContext) => AnnotatedText
 
 // --- extractionPass ---
-// Spans tagged with meta.memoryKey: if the key still exists in memory,
-// replace the span matching text with "[Extracted to $key]".
-// If the key was deleted or overwritten, show the original text - always truthful.
+// Spans tagged with meta.memoryKey: look up the value stored at that key in memory,
+// then replace only the matching substring within the span's text.
+// This preserves any surrounding text in the span (e.g. punctuation, wrapping prose).
+// If the key is gone (overwritten/deleted), the original span is returned unchanged -
+// always truthful: what's not in memory is shown in full.
 
 export const extractionPass: RenderPass = (spans, ctx) =>
   spans.map(span => {
     const key = span.meta?.memoryKey
     if (!key) return span
 
-    return ctx.memory.has(key)
-      ? { ...span, text: `[Extracted to ${key}]` }
-      : span  // key gone; original content visible again
+    const value = ctx.memory.get(key)
+    if (value === undefined) return span  // key gone; original content visible again
+
+    // Replace all occurrences of the stored value within this span's text.
+    // A span might contain the extracted block more than once (unlikely but safe).
+    const marker = `[Extracted to ${key}]`
+    const replaced = span.text.replaceAll(value, marker)
+
+    // If the value wasn't found in the text (e.g. span was already elided),
+    // return as-is rather than corrupting the span.
+    if (replaced === span.text) return span
+
+    return { ...span, text: replaced }
   })
 
 // --- reasoningPass ---
