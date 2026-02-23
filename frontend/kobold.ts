@@ -136,6 +136,13 @@ export class KoboldAdapter {
 
   async *stream(messages: Message[]): AsyncGenerator<string> {
     const prompt = render(messages, this.config.template)
+
+    yield* this.streamRaw(prompt)
+  }
+
+  /** Stream from a pre-rendered prompt string. Bypasses render() so the
+   *  orchestrator can own rendering via renderHistory(). */
+  async *streamRaw(prompt: string): AsyncGenerator<string> {
     const body = this.buildPayload(prompt, true)
 
     const response = await fetch(`${this.server}/extra/generate/stream`, {
