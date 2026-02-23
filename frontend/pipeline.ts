@@ -145,11 +145,11 @@ function collapseValues(val: unknown): unknown {
 // BEFORE joinPass.
 //
 // Turn families:
-//   'reasoning' + 'model' → one modelTurn (think nested inside)
-//   'user'                → userTurn
-//   'tool_call'           → toolCall template (uses meta.calls for rich rendering)
-//   'tool_result'         → toolResult template (uses meta.results for rich rendering)
-//   'system' | 'error'   → system template (or plain prepend if template has none)
+//   'reasoning' + 'model' -> one modelTurn (think nested inside)
+//   'user'                -> userTurn
+//   'tool_call'           -> toolCall template (uses meta.calls for rich rendering)
+//   'tool_result'         -> toolResult template (uses meta.results for rich rendering)
+//   'system' | 'error'   -> system template (or plain prepend if template has none)
 
 type TurnFamily = 'model' | 'user' | 'tool_call' | 'tool_result' | 'system'
 
@@ -243,20 +243,38 @@ export function joinPass(spans: AnnotatedText): string {
 }
 
 // --- Pipeline builder ---
-// formatPass is optional and must come last (before joinPass).
-// Renderer passes template via RenderOptions; pipeline is built per-render.
+//
+// Two-stage pipeline:
+//
+//   COMPRESSION_PIPELINE (cacheable):
+//     reasoningPass + truncationPass only.
+//     Output is safe to cache: depends only on age, never on memory state.
+//     extractionPass is intentionally excluded - caching extracted text would
+//     destroy original span content, making key deletion/overwrite irrecoverable.
+//
+//   extractionPass (always fresh):
+//     Applied at read time after cache retrieval. Never stored in the cache.
+//     Operates on original span text so key changes are always reflected correctly.
+//
+//   formatPass (always fresh):
+//     Applied after extraction. Template-aware; not worth caching.
 
-export const BASE_PIPELINE: RenderPass[] = [
-  extractionPass,
+export const COMPRESSION_PIPELINE: RenderPass[] = [
   reasoningPass,
   truncationPass,
 ]
 
-export function buildPipeline(template: TextTemplate): RenderPass[] {
-  return [...BASE_PIPELINE, makeFormatPass(template)]
+/** Run only the compression passes. Output is safe to cache (age-keyed only). */
+export function runCompressionPipeline(spans: AnnotatedText, ctx: RenderContext): AnnotatedText {
+  return COMPRESSION_PIPELINE.reduce((s, pass) => pass(s, ctx), spans)
 }
 
-/** Run the pipeline. Returns AnnotatedText ready for joinPass. */
+/**
+ * Run the full pipeline: compression -> extraction -> format.
+ * Extraction and format are applied fresh - not cached.
+ */
 export function runPipeline(spans: AnnotatedText, template: TextTemplate, ctx: RenderContext): AnnotatedText {
-  return buildPipeline(template).reduce((s, pass) => pass(s, ctx), spans)
+  const compressed = runCompressionPipeline(spans, ctx)
+  const extracted  = extractionPass(compressed, ctx)
+  return makeFormatPass(template)(extracted, ctx)
 }

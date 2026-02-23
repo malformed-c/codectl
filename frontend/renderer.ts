@@ -2,8 +2,8 @@ import type { AnnotatedText } from './span'
 import { countSpanChars } from './span'
 import type { Round, History, RenderContext } from './round'
 import {
-  runPipeline, joinPass,
-  extractionPass, reasoningPass, truncationPass,
+  runCompressionPipeline, extractionPass, makeFormatPass,
+  reasoningPass, truncationPass, joinPass,
 } from './pipeline'
 import type { TextTemplate } from './template'
 
@@ -18,8 +18,9 @@ const AGE1_LIMIT = 0.85  // 50-85 % of budget -> age 1 (mid history)
 
 // --- VersionedMemory ---
 // Wraps Map<string, string> with a monotonic version counter.
-// The renderer uses the version to decide whether to re-run extractionPass
-// without invalidating the whole cache.
+// The version is used by CheckpointStore to detect when memory has changed
+// and a new checkpoint should be written. The renderer does NOT use the version
+// for cache invalidation - extractionPass always runs fresh over compressionOut.
 
 export class VersionedMemory {
   private readonly _map = new Map<string, string>()
@@ -68,12 +69,16 @@ export class VersionedMemory {
 
 type CacheEntry = {
   age: number
-  memoryVersion: number
 
-  /** Pipeline output (pre-joinPass). State-forwarding operates on this. */
-  pipelineOut: AnnotatedText
+  /**
+   * Output of compression passes only (reasoningPass + truncationPass).
+   * extractionPass is intentionally NOT applied here - caching extracted text
+   * would destroy original span content, making key deletion/overwrite irrecoverable.
+   * extractionPass is always applied fresh at read time over this stored output.
+   */
+  compressionOut: AnnotatedText
 
-  /** Cached char count of pipelineOut - used for age assignment in future renders. */
+  /** Cached char count of compressionOut - used for age assignment in future renders. */
   count: number
 }
 
@@ -94,35 +99,24 @@ export class RenderCache {
 }
 
 // --- State forwarding ---
-// Given cached pipeline output at fromAge, produce output for toAge without
-// calling round.spans() again. Applies only the incremental transforms.
+// Operates only on compressionOut - the pre-extraction cached output.
+// extractionPass is never applied here; it runs fresh at read time.
 //
 // Invariants:
 //   - reasoningPass is idempotent after age 0 (spans already removed)
 //   - truncationPass is monotone (only compresses further)
-//   - extractionPass is always re-run (cheap; handles memory key changes)
 
 function forwardOneStep(
   spans: AnnotatedText,
   fromAge: number,
   nextCtx: RenderContext,
 ): AnnotatedText {
-  let out = spans
-
   if (fromAge === 0) {
     // 0 -> 1: drop reasoning, apply age-1 truncation
-    out = reasoningPass(out, nextCtx)
-    out = truncationPass(out, nextCtx)
-
-  } else {
-    // 1 -> 2, 2 -> 3, ...: reasoning already gone; just tighten truncation
-    out = truncationPass(out, nextCtx)
+    return truncationPass(reasoningPass(spans, nextCtx), nextCtx)
   }
-
-  // Always re-apply extraction - cheap and handles key deletions/overwrites
-  out = extractionPass(out, nextCtx)
-
-  return out
+  // 1 -> 2, 2 -> 3, ...: reasoning already gone; just tighten truncation
+  return truncationPass(spans, nextCtx)
 }
 
 /**
@@ -148,62 +142,53 @@ function stateForward(
 /** Maximum age delta for which state-forwarding is used. Beyond this, full recompute. */
 const MAX_FORWARD_DELTA = 4
 
+/**
+ * Render one round to formatted AnnotatedText.
+ *
+ * Cache stores compressionOut (age-keyed, memory-agnostic).
+ * extractionPass and formatPass are always applied fresh at read time.
+ *
+ * Cache branches:
+ *   Hit (same age)        -> use cached compressionOut directly
+ *   Age increased (small) -> state-forward compressionOut, update cache
+ *   Miss / large delta    -> full recompute from round.spans()
+ *
+ * Memory changes never invalidate the cache - extractionPass always runs
+ * fresh over compressionOut, so key deletions/overwrites are always reflected.
+ */
 function renderRound(
   round: Round,
   template: TextTemplate,
   ctx: RenderContext,
   cache: RenderCache,
-  memVer: number,
 ): AnnotatedText {
   const cached = cache.get(round)
 
-  // -- Cache hit: same age, same memory --
-  if (cached && cached.age === ctx.age && cached.memoryVersion === memVer) {
-    return cached.pipelineOut
-  }
+  let compressionOut: AnnotatedText
 
-  // -- Memory changed, same age: re-run extractionPass only --
-  if (cached && cached.age === ctx.age && cached.memoryVersion !== memVer) {
-    const reExtracted = extractionPass(cached.pipelineOut, ctx)
-    cache.set(round, {
-      age: ctx.age,
-      memoryVersion: memVer,
-      pipelineOut: reExtracted,
-      count: countSpanChars(reExtracted),
-    })
+  if (cached && cached.age === ctx.age) {
+    // Cache hit: same age - use stored compressionOut as-is
+    compressionOut = cached.compressionOut
 
-    return reExtracted
-  }
-
-  // -- Age increased, memory unchanged: state-forward --
-  if (
+  } else if (
     cached &&
     ctx.age > cached.age &&
-    ctx.age <= cached.age + MAX_FORWARD_DELTA &&
-    cached.memoryVersion === memVer
+    ctx.age <= cached.age + MAX_FORWARD_DELTA
   ) {
-    const forwarded = stateForward(cached.pipelineOut, cached.age, ctx.age, ctx)
-    cache.set(round, {
-      age: ctx.age,
-      memoryVersion: memVer,
-      pipelineOut: forwarded,
-      count: countSpanChars(forwarded),
-    })
+    // Age increased by a small delta: state-forward the compressionOut
+    compressionOut = stateForward(cached.compressionOut, cached.age, ctx.age, ctx)
+    cache.set(round, { age: ctx.age, compressionOut, count: countSpanChars(compressionOut) })
 
-    return forwarded
+  } else {
+    // Full recompute: call round.spans() and run compression passes
+    const rawSpans = round.spans(ctx)
+    compressionOut = runCompressionPipeline(rawSpans, ctx)
+    cache.set(round, { age: ctx.age, compressionOut, count: countSpanChars(compressionOut) })
   }
 
-  // -- Full recompute --
-  const rawSpans = round.spans(ctx)
-  const pipelineOut = runPipeline(rawSpans, template, ctx)
-  cache.set(round, {
-    age: ctx.age,
-    memoryVersion: memVer,
-    pipelineOut,
-    count: countSpanChars(pipelineOut),
-  })
-
-  return pipelineOut
+  // extractionPass and formatPass always run fresh - never cached
+  const extracted = extractionPass(compressionOut, ctx)
+  return makeFormatPass(template)(extracted, ctx)
 }
 
 // --- Pass 2: budget-aware render ---
@@ -240,7 +225,6 @@ export function renderHistory(
 ): RenderResult {
   const { budget } = opts
   const cache = opts.cache ?? new RenderCache()
-  const memVer = memory.version
   const readMem = memory.asReadonly()
 
   // -- Step 1: Assign ages (newest -> oldest) ---
@@ -253,6 +237,7 @@ export function renderHistory(
     const round = history[i]!
 
     // Use cached count if available (reflects compressed size), else Pass 1 value
+    // Use cached compression size if available (smaller than raw), else Pass 1 raw count
     const roundChars = cache.get(round)?.count ?? round.count
 
     if (accumulated >= budget) {
@@ -283,7 +268,7 @@ export function renderHistory(
     const round = history[i]!
     const ctx: RenderContext = { age, memory: readMem, budget }
 
-    const pipelineOut = renderRound(round, template, ctx, cache, memVer)
+    const pipelineOut = renderRound(round, template, ctx, cache)
     const text = joinPass(pipelineOut)
     if (text) parts.push(text)
   }
