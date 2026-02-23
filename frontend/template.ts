@@ -291,8 +291,6 @@ export function renderStoredToolResults(results: StoredToolResult[], template: T
 export function render(messages: Message[], template: TextTemplate): string {
   const parts: string[] = []
 
-  if (template.bos) parts.push(template.bos)
-
   for (const msg of messages) {
     const part = match(msg)
       .with({ role: 'system' }, ({ content }) =>

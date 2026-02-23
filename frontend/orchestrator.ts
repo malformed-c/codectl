@@ -25,7 +25,6 @@ import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
 import { codePlanSchema, type CodePlan } from "./codeplan.schema"
 import { destr } from 'destr'
-import multiline from 'multiline-ts'
 import { Fsm } from './fsm'
 import { RenderCache, VersionedMemory, renderHistory } from './renderer'
 import { userSpan } from './span'
@@ -34,17 +33,14 @@ import { systemRound as makeSystemRound, type Round } from './round'
 
 // --- Types ---
 
-/**
- * chat     - plain conversation; no autonomous tool loop.
- * agent    - full tool loop; ejects back to chat after too many consecutive failures.
- * codeplan - conversational design loop for structured code-change plans (Ansible/Codeq).
- *            The model proposes a CodePlan JSON; the system validates it and replies with
- *            schema errors or a success confirmation.
- */
 export type Mode =
   | { kind: 'chat' }
   | { kind: 'agent'; gitRoot: string; consecutiveFailures: number }
-  | { kind: 'codeplan'; gitRoot: string; lastPlan?: CodePlan; validationErrors?: string[] }
+
+type PlanValidationState = {
+  lastPlan?: CodePlan
+  validationErrors: string[]
+}
 
 /** How many consecutive tool errors before the agent is ejected to chat mode. */
 const AGENT_MAX_CONSECUTIVE_FAILURES = 3
@@ -227,6 +223,7 @@ export class Orchestrator {
   private fsm = new Fsm()
   private _systemRound: Round = makeSystemRound('')
   private mode: Mode = { kind: 'chat' }
+  private planValidationState: PlanValidationState = { validationErrors: [] }
   private abortController: AbortController | null = null
 
   constructor(config: OrchestratorConfig) {
@@ -265,7 +262,7 @@ export class Orchestrator {
       this.registerTool(def, handler)
     }
 
-    // Codeplan validation tool (only meaningful in codeplan mode, but always registered)
+    // Plan validation tool
     this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
 
     // Codeplan execution tool
@@ -345,7 +342,7 @@ export class Orchestrator {
 
     // Chat mode allows tool calls but caps at a small number of follow-through turns.
     // so the model can respond after executing a tool (e.g. tool_library -> summarise).
-    // Agent/codeplan modes get the full autonomous turn budget.
+    // Agent mode gets the full autonomous turn budget.
     const maxTurns = this.mode.kind === 'chat'
       ? (this.config.chatToolTurns ?? 5)
       : (this.config.autonomousTurns ?? 16)
@@ -549,7 +546,7 @@ export class Orchestrator {
     enrichedSystem.count = enrichedSystem.spans({ age: 0, memory: new Map(), budget: Infinity })
       .reduce((n, s) => n + s.text.length, 0)
 
-    const history = [enrichedSystem, ...this.fsm.history]
+    const history = [enrichedSystem, ...this.fsm.getRenderableHistory()]
     const budget = this.config.contextBudget ?? 128_000
 
     const { text } = renderHistory(history, this.versionedMemory, this.profile, {
@@ -576,39 +573,18 @@ export class Orchestrator {
           goalPart
         )
       })
-      .with({ kind: 'codeplan' }, ({ gitRoot, lastPlan, validationErrors }) => {
-        const planStatus = lastPlan
-          ? (validationErrors?.length
-            ? `\nLast plan had ${validationErrors.length} error(s): ${validationErrors.join('; ')}`
-            : '\nLast plan was valid.')
-          : '\nNo plan submitted yet.'
-        return (
-          `\n\nYou are in CODEPLAN mode. Collaborate on a CodePlan JSON with the user. ` +
-          multiline`
-          import z from "zod"
-          const metaSchema = z.object({description: z.string(), /** Optional ordering hint - items run lowest-first */order: z.number().int().optional(), })
-          const functionEnsureSchema = z.discriminatedUnion("state", [z.object({name: z.string(), state: z.literal("present"), streamID: z.string(), }), z.object({name: z.string(), state: z.literal("absent"), }), ])
-          const resourceSchema = z.object({path: z.string(), ensure: z.object({imports: z.array(z.string()).optional(), functions: z.array(functionEnsureSchema).optional(), }), })
-          const codeEditSchema = z.object({apiVersion: z.literal("codectl/v1"), kind: z.literal("CodeEdit"), metadata: metaSchema, spec: z.object({resources: z.array(resourceSchema).min(1), }), })
-          /**
-           * A single Ansible task. 'module' is the fully-qualified module name
-           * (e.g. "ansible.builtin.apt", "community.general.pip_package_info").
-           * 'args' is passed verbatim as the module arguments.
-           */
-          const ansibleTaskSchema = z.object({name: z.string(), module: z.string(), args: z.record(z.string(), z.unknown()), /** Run only when this condition is truthy (passed as Ansible 'when') */when: z.string().optional(), /** Notify a handler by name */notify: z.string().optional(), })
-          const ansibleHandlerSchema = z.object({name: z.string(), module: z.string(), args: z.record(z.string(), z.unknown()), })
-          const ansibleSchema = z.object({apiVersion: z.literal("codectl/v1"), kind: z.literal("Ansible"), metadata: metaSchema, spec: z.object({hosts: z.string().default("localhost"), tasks: z.array(ansibleTaskSchema).min(1), handlers: z.array(ansibleHandlerSchema).optional(), }), })
-          const planItemSchema = z.discriminatedUnion("kind", [codeEditSchema, ansibleSchema, ])
-          export const codePlanSchema = z.object({codePlan: z.array(planItemSchema).min(1), })
-          export type CodePlan = z.infer<typeof codePlanSchema>` +
-          `Use 'validate_plan' to check the schema; iterate until valid. ` +
-          `Git root: ${gitRoot}${planStatus}`
-        )
-      })
       .exhaustive()
 
-    this._systemRound = makeSystemRound(base + modeContext)
-    this._systemRound.count = (base + modeContext).length
+    const planStatus = this.planValidationState.lastPlan
+      ? (this.planValidationState.validationErrors.length
+        ? `\nLast plan had ${this.planValidationState.validationErrors.length} error(s): ${this.planValidationState.validationErrors.join('; ')}`
+        : '\nLast plan was valid.')
+      : '\nNo plan submitted yet.'
+
+    const workflowContext = `\n\nCodePlan workflow:\nUse 'validate_plan' to check structured CodePlan JSON before running it.${planStatus}`
+
+    this._systemRound = makeSystemRound(base + modeContext + workflowContext)
+    this._systemRound.count = (base + modeContext + workflowContext).length
   }
 
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {
@@ -713,24 +689,10 @@ export class Orchestrator {
       return { result: { switched: 'agent', gitRoot } }
     }
 
-    if (targetMode === 'codeplan') {
-      const gitRoot = await findGitRoot(process.cwd())
-
-      if (!gitRoot) return { result: null, error: 'codeplan mode requires a git repository' }
-
-      this.mode = { kind: 'codeplan', gitRoot }
-      this.rebuildSystemMessage()
-      return { result: { switched: 'codeplan', gitRoot } }
-    }
-
     return { result: null, error: `Unknown mode: ${targetMode}` }
   }
 
   private async handleValidatePlan(args: Record<string, unknown>): Promise<ToolResult> {
-    if (this.mode.kind !== 'codeplan') {
-      return { result: null, error: 'validate_plan is only available in codeplan mode' }
-    }
-
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return { result: null, error: "'plan' argument is required" }
 
@@ -754,7 +716,7 @@ export class Orchestrator {
     try {
       const result = codePlanSchema.safeParse(normalized)
       if (result.success) {
-        this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), lastPlan: result.data, validationErrors: [] }
+        this.planValidationState = { ...this.planValidationState, lastPlan: result.data, validationErrors: [] }
         this.rebuildSystemMessage()
 
         return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
@@ -765,7 +727,7 @@ export class Orchestrator {
           ? issues.map((e: any) => `${(e.path ?? []).join('.') || '(root)'}: ${e.message}`)
           : [`Validation failed: ${JSON.stringify(result.error)}`]
 
-        this.mode = { ...(this.mode as Extract<Mode, { kind: 'codeplan' }>), validationErrors: errors }
+        this.planValidationState = { ...this.planValidationState, validationErrors: errors }
         this.rebuildSystemMessage()
 
         return { result: { valid: false, errors } }
@@ -785,8 +747,6 @@ export class Orchestrator {
       "  chat     - general conversation (single-turn)",
       "  agent    - autonomous tool loop; call 'done' when task is complete.",
       "             Ejected back to chat after 3 consecutive tool failures.",
-      "  codeplan - design a structured CodePlan JSON (Ansible-style).",
-      "             Use 'validate_plan' to check schema; iterate until valid.",
       "",
       "# HOW YOU SHOULD THINK AND ANSWER",
       "",
@@ -807,8 +767,7 @@ export const ValidatePlanTool: ToolDefinition = {
   name: 'validate_plan',
   description:
     'Validate a CodePlan JSON object against the schema. ' +
-    'Returns { valid: true } on success or { valid: false, errors } with schema violations. ' +
-    'Only available in codeplan mode.',
+    'Returns { valid: true } on success or { valid: false, errors } with schema violations.',
   parameters: {
     type: 'object',
     properties: {
@@ -854,7 +813,7 @@ if (import.meta.main) {
   consola.log('mode:', orchestrator.getMode())
 
   consola.log('\n=== mode switch ===')
-  const r2 = await orchestrator.complete('Switch to code/plan mode using tool calls.')
+  const r2 = await orchestrator.complete('Switch to agent mode using tool calls.')
   consola.log(r2.turn.content)
   consola.log('mode:', orchestrator.getMode())
   consola.log('tools executed:', r2.toolsExecuted)

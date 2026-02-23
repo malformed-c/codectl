@@ -134,6 +134,7 @@ async function main(): Promise<void> {
   if (door === 'telegram') {
     if (!telegramToken) {
       consola.error('TELEGRAM_BOT_TOKEN not set')
+
       process.exit(1)
     }
 

@@ -68,6 +68,45 @@ export class Fsm {
   /** Index of the first uncommitted round. For CheckpointStore.save(). */
   get cursor(): number { return this.history.length }
 
+  /**
+   * Returns the full history including pending rounds that are currently being built.
+   * Used by the orchestrator to render the current prompt.
+   */
+  getRenderableHistory(): Round[] {
+    const history = [...this.history]
+
+    switch (this.state.kind) {
+      case 'awaiting_model':
+        history.push(chatRound(this.state.userSpans, ''))
+
+        break
+
+      case 'awaiting_results':
+        if (this.state.userSpans.length > 0) {
+          history.push(chatRound(this.state.userSpans, ''))
+        }
+        history.push(...this.state.agentChildren)
+        history.push(toolRound(
+          this.state.pendingCalls,
+          [],
+          this.state.pendingThink,
+          this.state.pendingContent
+        ))
+
+        break
+
+      case 'in_agent':
+        if (this.state.userSpans.length > 0) {
+          history.push(chatRound(this.state.userSpans, ''))
+        }
+        history.push(...this.state.agentChildren)
+
+        break
+    }
+
+    return history
+  }
+
   // --- Events ---
 
   /**

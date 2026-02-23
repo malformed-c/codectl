@@ -262,8 +262,6 @@ export function renderHistory(
 
   const parts: string[] = []
 
-  if (template.bos) parts.push(template.bos)
-
   for (let i = 0; i < history.length; i++) {
     const age = ageMap[i]!
     if (age === -1) continue  // trimmed

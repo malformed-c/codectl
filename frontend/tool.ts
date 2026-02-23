@@ -475,14 +475,13 @@ export const ModeTool: ToolDefinition = {
   description:
     "Switch the current interaction mode. " +
     "Use 'agent' when you want autonomous tool-driven work. " +
-    "Use 'codeplan' when you want to design and validate a structured code change plan. " +
     "Use 'chat' for general conversation.",
   parameters: {
     type: "object",
     properties: {
       mode: {
         type: "string",
-        enum: ["chat", "agent", "codeplan"],
+        enum: ["chat", "agent"],
         description: "Target mode to switch to",
       },
       reason: {
@@ -556,10 +555,10 @@ if (import.meta.main) {
   consola.log(renderTools([ModeTool], "python"))
 
   consola.log("\n=== parseToolCalls ===")
-  const raw = JSON.stringify([{ name: "mode", arguments: { mode: "code/plan", reason: "user wants to edit files" } }])
+  const raw = JSON.stringify([{ name: "mode", arguments: { mode: "agent", reason: "user wants to edit files" } }])
   consola.log(parseToolCalls(raw))
 
   consola.log("\n=== renderToolResult ===")
-  consola.log(renderToolResult({ result: { switched: "code/plan" } }))
+  consola.log(renderToolResult({ result: { switched: "agent" } }))
   consola.log(renderToolResult({ result: null, error: "unknown mode" }))
 }
