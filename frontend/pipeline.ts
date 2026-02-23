@@ -275,6 +275,7 @@ export function runCompressionPipeline(spans: AnnotatedText, ctx: RenderContext)
  */
 export function runPipeline(spans: AnnotatedText, template: TextTemplate, ctx: RenderContext): AnnotatedText {
   const compressed = runCompressionPipeline(spans, ctx)
-  const extracted  = extractionPass(compressed, ctx)
+  const extracted = extractionPass(compressed, ctx)
+
   return makeFormatPass(template)(extracted, ctx)
 }

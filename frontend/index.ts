@@ -25,9 +25,9 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
   // Restore history if available
   const persisted = await historyStore.load(roomId)
   if (persisted) {
-    orchestrator.setHistory(persisted.history)
-
-    consola.info(`Restored ${persisted.history.length} messages from history`)
+    // TODO: restore via CheckpointStore.restoreLatest() once HistoryStore migration is done
+    // orchestrator.setHistory(persisted.history)
+    consola.info(`[history restore pending CheckpointStore migration] found ${persisted.history.length} messages`)
   }
 
   consola.info('codectl CLI ready. Type your message, Ctrl+C to exit.')
@@ -45,7 +45,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
     // Slash commands
     if (text === '/new') {
-      await historyStore.save(room.meta, orchestrator.getHistory())
+      await historyStore.save(room.meta, orchestrator.getHistory() as any)
 
       orchestrator.clearHistory()
 
@@ -87,24 +87,23 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
     }
 
     try {
-      const result = await orchestrator.chat(text, (intermediate) => {
-        if (intermediate.turn.think) {
-          consola.debug('[think]', intermediate.turn.think)
+      for await (const event of orchestrator.chat(text)) {
+        if (event.kind === 'turn') {
+          if (event.turn.think) consola.debug('[think]', event.turn.think)
+
+          if (event.turn.content) consola.log(event.turn.content)
+
+
+          for (const te of event.toolsExecuted) {
+            const args = JSON.stringify(te.call.arguments)
+            const res = te.result.error ? `Error: ${te.result.error}` : 'success'
+
+            consola.info(`  🛠️  ${te.call.name}(${args}) -> ${res}`)
+          }
         }
+      }
 
-        if (intermediate.turn.content) {
-          consola.log(intermediate.turn.content)
-        }
-
-        for (const te of intermediate.toolsExecuted) {
-          const args = JSON.stringify(te.call.arguments)
-          const res = te.result.error ? `Error: ${te.result.error}` : 'success'
-
-          consola.info(`  🛠️  ${te.call.name}(${args}) -> ${res}`)
-        }
-      })
-
-      await historyStore.save(room.meta, orchestrator.getHistory())
+      await historyStore.save(room.meta, orchestrator.getHistory() as any)
 
     } catch (err) {
       consola.error('Error:', err)
@@ -170,7 +169,7 @@ async function main(): Promise<void> {
     process.on('SIGINT', async () => {
       consola.info('Saving history...')
 
-      await historyStore.save({ id: 'cli-default', createdAt: new Date(), updatedAt: new Date() }, orchestrator.getHistory())
+      await historyStore.save({ id: 'cli-default', createdAt: new Date(), updatedAt: new Date() }, orchestrator.getHistory() as any)
 
       process.exit(0)
     })

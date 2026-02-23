@@ -37,7 +37,7 @@ export function createSubagentHandler(
     })
 
     try {
-      const result = await subagent.chat(goal)
+      const result = await subagent.complete(goal)
       return { result: { content: result.turn.content, toolsExecuted: result.toolsExecuted.length } }
 
     } catch (err) {

@@ -5,7 +5,7 @@ import { consola } from 'consola'
 import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
-import { Orchestrator, type OrchestratorConfig, type CallEvent } from '../orchestrator'
+import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
 import type { KoboldAdapter } from '../kobold'
 
 // --- Types ---
@@ -216,7 +216,7 @@ export class TelegramDoor {
 
       if (this.config.historyStore) {
         if (existing) {
-          await this.config.historyStore.archive(roomId, existing.meta, existing.orchestrator.getHistory())
+          await this.config.historyStore.archive(roomId, existing.meta, existing.orchestrator.getHistory() as any)
 
         } else {
           await this.config.historyStore.archive(roomId)
@@ -259,7 +259,8 @@ export class TelegramDoor {
       const persisted = await this.config.historyStore.load(room.meta.id)
 
       if (persisted) {
-        room.orchestrator.setHistory(persisted.history)
+        // TODO: restore via CheckpointStore once HistoryStore migration done
+        // room.orchestrator.setHistory(persisted.history)
         consola.debug(`Restored history for room ${room.meta.id} (${persisted.history.length} messages)`)
       }
     }
@@ -269,35 +270,36 @@ export class TelegramDoor {
     await ctx.replyWithChatAction('typing')
 
     try {
-      await room.orchestrator.chat(text, async (intermediate) => {
-        // Send model's text content (final response after all tools done)
-        const response = intermediate.turn.content
-        if (response) {
-          const chunks = splitMessage(response, this.config.maxMessageLength)
-          for (const chunk of chunks) {
-            try {
-              await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
+      for await (const event of room.orchestrator.chat(text)) {
+        if (event.kind === 'turn') {
+          // Send model's text content (final response after all tools done)
+          const response = event.turn.content
+          if (response) {
+            const chunks = splitMessage(response, this.config.maxMessageLength)
+            for (const chunk of chunks) {
+              try {
+                await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
 
-            } catch {
-              // HTML parse failed - fall back to stripped plain text so the
-              // user gets readable content instead of raw markdown.
-              await ctx.reply(stripMarkdownToPlain(chunk))
+              } catch {
+                // HTML parse failed - fall back to stripped plain text
+                await ctx.reply(stripMarkdownToPlain(chunk))
+              }
             }
           }
-        }
-      }, async ({ call, result, pending }: CallEvent) => {
-        if (pending) {
+
+        } else if (event.kind === 'call') {
           // Show call before it runs
-          const args = JSON.stringify(call.arguments)
+          const args = JSON.stringify(event.call.arguments)
           try {
-            await ctx.reply(`⏳ <code>${escapeHtml(call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
+            await ctx.reply(`⏳ <code>${escapeHtml(event.call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 
           } catch (err) {
             consola.warn('Failed to send call notification:', err)
           }
 
-        } else if (result) {
+        } else if (event.kind === 'call_result') {
           // Show result immediately after execution
+          const { call, result } = event
           const status = result.error
             ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
             : `✅ <b>${escapeHtml(call.name)}</b>`
@@ -323,13 +325,13 @@ export class TelegramDoor {
             consola.warn('Failed to send tool result:', err)
           }
         }
-      })
+      }
 
       touchRoom(room)
 
       // Persist after each turn
       if (this.config.historyStore) {
-        await this.config.historyStore.save(room.meta, room.orchestrator.getHistory())
+        await this.config.historyStore.save(room.meta, room.orchestrator.getHistory() as any)
       }
 
     } catch (err) {

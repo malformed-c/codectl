@@ -86,10 +86,23 @@ export type TurnResult = {
   toolsExecuted: Array<{ call: ToolCall; result: ToolResult }>
 }
 
-export type CallEvent = {
-  call: ToolCall
-  result?: ToolResult
-  pending?: boolean
+export type OrchestratorEvent =
+  | { kind: 'call'; call: ToolCall; pending: true }
+  | { kind: 'call_result'; call: ToolCall; result: ToolResult }
+  | { kind: 'turn'; turn: ParsedTurn; toolsExecuted: TurnResult['toolsExecuted'] }
+
+/**
+ * Drain an orchestrator generator to completion, ignoring intermediate events.
+ * Useful for headless callers (subagents, tests) that only need the final result.
+ */
+export async function toPromise(
+  gen: AsyncGenerator<OrchestratorEvent, TurnResult>,
+): Promise<TurnResult> {
+  let step: IteratorResult<OrchestratorEvent, TurnResult>
+
+  while (!(step = await gen.next()).done) { }
+
+  return step.value
 }
 
 // --- Built-in Tools ---
@@ -284,7 +297,7 @@ export class Orchestrator {
   getMemory(): VersionedMemory { return this.versionedMemory }
 
   clearHistory(): void {
-    this.fsm = new Fsm()   // old Round objects → cache entries GC'd automatically (WeakMap)
+    this.fsm = new Fsm()   // old Round objects -> cache entries GC'd automatically (WeakMap)
     this.rebuildSystemMessage()
   }
 
@@ -295,7 +308,7 @@ export class Orchestrator {
    * autonomous loop without a user turn. The model talks only with the system.
    * Automatically switches to agent mode if not already in it.
    */
-  async run(goal: string, onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
+  async *run(goal: string): AsyncGenerator<OrchestratorEvent, TurnResult> {
     if (this.mode.kind !== 'agent') {
       const gitRoot = await findGitRoot(process.cwd())
       this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
@@ -305,19 +318,27 @@ export class Orchestrator {
     this.fsm = new Fsm()
     this.rebuildSystemMessage(goal)
 
-    return this.runLoop(onTurn, onCall)
+    return yield* this.runLoop()
   }
 
-  async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
+  async *chat(userMessage: string): AsyncGenerator<OrchestratorEvent, TurnResult> {
     // Ensure system message exists
     if (this._systemRound.count === 0) this.rebuildSystemMessage()
 
     this.fsm.onUser([userSpan(userMessage)])
 
-    return this.runLoop(onTurn, onCall)
+    return yield* this.runLoop()
   }
 
-  private async runLoop(onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
+  /**
+   * Convenience wrapper: runs chat() to completion and returns the final TurnResult.
+   * Intermediate events are discarded. Use chat() directly when you need streaming.
+   */
+  async complete(userMessage: string): Promise<TurnResult> {
+    return toPromise(this.chat(userMessage))
+  }
+
+  private async *runLoop(): AsyncGenerator<OrchestratorEvent, TurnResult> {
     this.abortController = new AbortController()
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
@@ -362,8 +383,7 @@ export class Orchestrator {
       // Stop if no tools called - commit ChatRound via FSM
       if (!parsed.toolCalls?.length) {
         this.fsm.onModel(parsed.think, parsed.content, [])
-        if (onTurn) await onTurn({ turn: parsed, toolsExecuted: [] })
-
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
         break outerLoop
       }
 
@@ -393,10 +413,7 @@ export class Orchestrator {
 
           allCalls.push(...calls)
 
-          // Fire onCall immediately for each parsed call so the door can show it before execution
-          if (onCall) {
-            for (const call of calls) await onCall({ call, pending: true })
-          }
+          for (const call of calls) yield { kind: 'call', call, pending: true }
 
           // Store as structured calls - re-rendered to native format on send
           storedCalls.push(...calls.map(c => ({
@@ -437,9 +454,7 @@ export class Orchestrator {
           }
 
           const result = await this.executeToolCall(call)
-
-          // Fire onCall with result so door can update the message
-          if (onCall) await onCall({ call, result })
+          yield { kind: 'call_result', call, result }
 
           turnTools.push({ call, result })
           toolsExecuted.push({ call, result })
@@ -471,7 +486,7 @@ export class Orchestrator {
           this.fsm.onDone(doneResult)
         }
 
-        if (onTurn) await onTurn({ turn: parsed, toolsExecuted: turnTools })
+        yield { kind: 'turn', turn: parsed, toolsExecuted: turnTools }
       }
 
       if (loopShouldStop) break outerLoop
@@ -834,18 +849,18 @@ if (import.meta.main) {
   })
 
   consola.log('=== chat (no tools) ===')
-  const r1 = await orchestrator.chat('Hi. Say hello in one sentence.')
+  const r1 = await orchestrator.complete('Hi. Say hello in one sentence.')
   consola.log(r1.turn.content)
   consola.log('mode:', orchestrator.getMode())
 
   consola.log('\n=== mode switch ===')
-  const r2 = await orchestrator.chat('Switch to code/plan mode using tool calls.')
+  const r2 = await orchestrator.complete('Switch to code/plan mode using tool calls.')
   consola.log(r2.turn.content)
   consola.log('mode:', orchestrator.getMode())
   consola.log('tools executed:', r2.toolsExecuted)
 
   consola.log('\n=== tools list ===')
-  const r3 = await orchestrator.chat('List available tools.')
+  const r3 = await orchestrator.complete('List available tools.')
   consola.log(r3.turn.content)
   consola.log('mode:', orchestrator.getMode())
 }
