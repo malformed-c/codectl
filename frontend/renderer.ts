@@ -5,6 +5,7 @@ import {
   runPipeline, joinPass,
   extractionPass, reasoningPass, truncationPass,
 } from './pipeline'
+import type { TextTemplate } from './template'
 
 // --- Age thresholds ---
 // Fractions of total budget that define age zone boundaries.
@@ -149,6 +150,7 @@ const MAX_FORWARD_DELTA = 4
 
 function renderRound(
   round: Round,
+  template: TextTemplate,
   ctx: RenderContext,
   cache: RenderCache,
   memVer: number,
@@ -193,7 +195,7 @@ function renderRound(
 
   // -- Full recompute --
   const rawSpans = round.spans(ctx)
-  const pipelineOut = runPipeline(rawSpans, ctx)
+  const pipelineOut = runPipeline(rawSpans, template, ctx)
   cache.set(round, {
     age: ctx.age,
     memoryVersion: memVer,
@@ -233,6 +235,7 @@ export type RenderResult = {
 export function renderHistory(
   history: History,
   memory: VersionedMemory,
+  template: TextTemplate,
   opts: RenderOptions,
 ): RenderResult {
   const { budget } = opts
@@ -280,7 +283,7 @@ export function renderHistory(
     const round = history[i]!
     const ctx: RenderContext = { age, memory: readMem, budget }
 
-    const pipelineOut = renderRound(round, ctx, cache, memVer)
+    const pipelineOut = renderRound(round, template, ctx, cache, memVer)
     const text = joinPass(pipelineOut)
     if (text) parts.push(text)
   }

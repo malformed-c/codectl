@@ -1,3 +1,4 @@
+import consola from 'consola'
 import { render, renderFim, parse } from './template'
 import type { Message, TextTemplate, FimRequest, ParsedTurn } from './template'
 

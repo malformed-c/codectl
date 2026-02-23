@@ -257,6 +257,6 @@ export function buildPipeline(template: TextTemplate): RenderPass[] {
 }
 
 /** Run the pipeline. Returns AnnotatedText ready for joinPass. */
-export function runPipeline(spans: AnnotatedText, ctx: RenderContext, template: TextTemplate): AnnotatedText {
+export function runPipeline(spans: AnnotatedText, template: TextTemplate, ctx: RenderContext): AnnotatedText {
   return buildPipeline(template).reduce((s, pass) => pass(s, ctx), spans)
 }

@@ -5,6 +5,7 @@ import {
   systemSpan, errorSpan,
   countSpanChars,
 } from './span'
+import type { TextTemplate } from './template'
 import type { StoredToolCall, StoredToolResult } from './types'
 
 // --- RenderContext ---
