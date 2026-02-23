@@ -30,6 +30,7 @@ export class VersionedMemory {
 
   get(key: string): string | undefined { return this._map.get(key) }
   has(key: string): boolean { return this._map.has(key) }
+  keys(): IterableIterator<string> { return this._map.keys() }
   entries(): IterableIterator<[string, string]> { return this._map.entries() }
 
   set(key: string, value: string): void {
@@ -261,6 +262,8 @@ export function renderHistory(
 
   const parts: string[] = []
 
+  if (template.bos) parts.push(template.bos)
+
   for (let i = 0; i < history.length; i++) {
     const age = ageMap[i]!
     if (age === -1) continue  // trimmed
@@ -272,6 +275,9 @@ export function renderHistory(
     const text = joinPass(pipelineOut)
     if (text) parts.push(text)
   }
+
+  // Open the next model turn - model completes from here
+  parts.push(template.modelTurn[0])
 
   return {
     text: parts.join(''),

@@ -2,7 +2,8 @@ import { consola } from "consola"
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
-import type { Message, ParsedTurn, TextTemplate, StoredToolCall, StoredToolResult } from './template'
+import type { ParsedTurn, TextTemplate } from './template'
+import type { StoredToolCall, StoredToolResult } from './types'
 import {
   type ToolDefinition,
   type ToolCall,
@@ -25,6 +26,10 @@ import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
 import { codePlanSchema, type CodePlan } from "./codeplan.schema"
 import { destr } from 'destr'
 import multiline from 'multiline-ts'
+import { Fsm } from './fsm'
+import { RenderCache, VersionedMemory, renderHistory } from './renderer'
+import { userSpan } from './span'
+import { systemRound as makeSystemRound, type Round } from './round'
 
 
 // --- Types ---
@@ -71,6 +76,9 @@ export type OrchestratorConfig = {
 
   /** How many assistant think blocks to keep in history (oldest are stripped). Default: 2 */
   maxThinkHistory?: number
+
+  /** Character budget for renderHistory. Default: 128_000 (≈ 32K tokens). */
+  contextBudget?: number
 }
 
 export type TurnResult = {
@@ -198,11 +206,13 @@ export class Orchestrator {
   readonly config: OrchestratorConfig
   private readonly handlers = new Map<string, ToolHandler>()
   private readonly tools: ToolDefinition[] = []
-  private readonly memory = new Map<string, string>()
+  private readonly versionedMemory = new VersionedMemory()
   private readonly callIdCache = new Map<string, string>()
   private readonly shell = new PersistentShell()
+  private readonly renderCache = new RenderCache()
 
-  private history: Message[] = []
+  private fsm = new Fsm()
+  private _systemRound: Round = makeSystemRound('')
   private mode: Mode = { kind: 'chat' }
   private abortController: AbortController | null = null
 
@@ -221,7 +231,7 @@ export class Orchestrator {
     this.registerTool(LibraryTool, async () => ({
       result: renderTools(this.tools, this.config.toolFormat ?? 'json')
     }))
-    this.registerTool(MemoryTool, createMemoryHandler(this.memory))
+    this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
 
     // Register codeq tools
@@ -270,11 +280,11 @@ export class Orchestrator {
   }
 
   getMode(): Mode { return this.mode }
-  getHistory(): Message[] { return [...this.history] }
-  setHistory(history: Message[]): void { this.history = [...history] }
+  getHistory(): Round[] { return [...this.fsm.history] }
+  getMemory(): VersionedMemory { return this.versionedMemory }
 
   clearHistory(): void {
-    this.history = []
+    this.fsm = new Fsm()   // old Round objects → cache entries GC'd automatically (WeakMap)
     this.rebuildSystemMessage()
   }
 
@@ -291,25 +301,18 @@ export class Orchestrator {
       this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
     }
 
-    // Inject goal into system message so there's no user turn at all
-    this.history = []
-    const base = this.config.systemPrompt ?? this.defaultSystemPrompt()
-    const { gitRoot } = this.mode as Extract<Mode, { kind: 'agent' }>
-    this.history.push({
-      role: 'system',
-      content: `${base}\n\nYou are in AGENT mode. Use tools continuously to accomplish the goal below. ` +
-        `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}\n\n` +
-        `GOAL:\n${goal}`,
-    })
+    // Reset FSM, inject goal into system message - no user turn
+    this.fsm = new Fsm()
+    this.rebuildSystemMessage(goal)
 
     return this.runLoop(onTurn, onCall)
   }
 
   async chat(userMessage: string, onTurn?: (result: TurnResult) => void | Promise<void>, onCall?: (event: CallEvent) => void | Promise<void>): Promise<TurnResult> {
     // Ensure system message exists
-    if (this.history.length === 0) this.rebuildSystemMessage()
+    if (this._systemRound.count === 0) this.rebuildSystemMessage()
 
-    this.history.push({ role: 'user', content: userMessage })
+    this.fsm.onUser([userSpan(userMessage)])
 
     return this.runLoop(onTurn, onCall)
   }
@@ -319,7 +322,7 @@ export class Orchestrator {
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
 
-    // Chat mode allows tool calls but caps at a small number of follow-through turns
+    // Chat mode allows tool calls but caps at a small number of follow-through turns.
     // so the model can respond after executing a tool (e.g. tool_library -> summarise).
     // Agent/codeplan modes get the full autonomous turn budget.
     const maxTurns = this.mode.kind === 'chat'
@@ -328,49 +331,37 @@ export class Orchestrator {
 
     let finalTurn: ParsedTurn = { content: '' }
     let doneResult: string | undefined
+    let loopShouldStop = false
 
     // Label the loop so we can break from inside nested structures if needed
     outerLoop: for (let turn = 0; turn < maxTurns; turn++) {
       // Check abort signal
       if (this.abortController.signal.aborted) break
 
-      const messages = this.buildMessages()
-      const parsed = await this.adapter.generate(messages)
+      const prompt = this.buildPrompt()
+      const parsed = await this.adapter.generateRaw(prompt)
 
       finalTurn = parsed
 
       // Detect think-only output: model produced reasoning but no content and no tool calls.
-      // This usually means it forgot to close the think tag. Punish it with a correction.
+      // Punish with a system correction so it completes the turn.
       const isThinkOnly = parsed.think && !parsed.content && !parsed.toolCalls?.length
       if (isThinkOnly) {
         consola.warn('[think-only] model produced reasoning with no content/tools - injecting correction')
 
-        this.history.push({
-          role: 'assistant',
-          content: '',
-          think: parsed.think,
-        })
-
-        this.history.push({
-          role: 'system',
-          content: 'You forgot to close your reasoning tag or produce a response. Your reasoning tags are [THINK][/THINK]. ' +
-            'Please complete your response now with either a tool call or a final message.',
-        })
+        this.fsm.onModel(parsed.think, undefined, [])
+        this.fsm.onSystem(
+          'You forgot to close your reasoning tag or produce a response. ' +
+          'Your reasoning tags are [THINK][/THINK]. ' +
+          'Please complete your response now with either a tool call or a final message.'
+        )
 
         continue
       }
 
-      // Handle content + think
-      if (parsed.content || parsed.think) {
-        this.history.push({
-          role: 'assistant',
-          content: parsed.content,
-          ...(parsed.think ? { think: parsed.think } : {}),
-        })
-      }
-
-      // Stop if no tools called
+      // Stop if no tools called - commit ChatRound via FSM
       if (!parsed.toolCalls?.length) {
+        this.fsm.onModel(parsed.think, parsed.content, [])
         if (onTurn) await onTurn({ turn: parsed, toolsExecuted: [] })
 
         break outerLoop
@@ -385,15 +376,14 @@ export class Orchestrator {
         this.recordToolFailure()
       }
 
-      // Process tools
-      let loopShouldStop = false
-
-      consola.info('received tool calls:', parsed.toolCalls)
-
+      // Parse tool calls
+      loopShouldStop = false
       const turnTools: TurnResult['toolsExecuted'] = []
       const allCalls: ToolCall[] = []
       const storedCalls: StoredToolCall[] = []
       const immediateResults: StoredToolResult[] = []
+
+      consola.info('received tool calls:', parsed.toolCalls)
 
       for (const rawCall of parsed.toolCalls) {
         try {
@@ -405,9 +395,7 @@ export class Orchestrator {
 
           // Fire onCall immediately for each parsed call so the door can show it before execution
           if (onCall) {
-            for (const call of calls) {
-              await onCall({ call, pending: true })
-            }
+            for (const call of calls) await onCall({ call, pending: true })
           }
 
           // Store as structured calls - re-rendered to native format on send
@@ -428,7 +416,7 @@ export class Orchestrator {
         }
       }
 
-      // #23: Append malformed-token correction to tool results so model sees it
+      // #23: Prepend malformed-token correction to results
       if (parsed.malformed) {
         immediateResults.unshift({
           error: 'Malformed tool call: your response contained a closing tool token without the opening token. Always start tool calls with the opening token.',
@@ -436,11 +424,8 @@ export class Orchestrator {
       }
 
       if (storedCalls.length > 0 || immediateResults.length > 0) {
-        this.history.push({
-          role: 'tool_call',
-          content: parsed.toolCalls.join('\n'),
-          calls: storedCalls,
-        })
+        // Signal model turn with calls to FSM - opens ToolRound
+        this.fsm.onModel(parsed.think, parsed.content, storedCalls)
 
         const storedResults: StoredToolResult[] = [...immediateResults]
 
@@ -456,9 +441,8 @@ export class Orchestrator {
           // Fire onCall with result so door can update the message
           if (onCall) await onCall({ call, result })
 
-          const execution = { call, result }
-          turnTools.push(execution)
-          toolsExecuted.push(execution)
+          turnTools.push({ call, result })
+          toolsExecuted.push({ call, result })
 
           storedResults.push({
             callId: result.callId,
@@ -469,10 +453,9 @@ export class Orchestrator {
           // Track agent-mode failure ejection
           // #22: Count explicit errors AND null results (handler returned nothing useful) as failures.
           if (result.error || result.result === null) {
-            const wasAgent = this.mode.kind === 'agent'
             this.recordToolFailure()
 
-            if (wasAgent && this.wasEjected()) { loopShouldStop = true; break }
+            if (this.wasEjected()) { loopShouldStop = true; break }
 
           } else {
             this.resetToolFailures()
@@ -481,11 +464,12 @@ export class Orchestrator {
 
         consola.info('storing tool results in history:', this.shortenStoredResults(storedResults))
 
-        this.history.push({
-          role: 'tool_result',
-          content: '',
-          results: storedResults,
-        })
+        // Commit ToolRound - pairs with the onModel call above
+        this.fsm.onResults(storedResults)
+
+        if (loopShouldStop) {
+          this.fsm.onDone(doneResult)
+        }
 
         if (onTurn) await onTurn({ turn: parsed, toolsExecuted: turnTools })
       }
@@ -493,12 +477,16 @@ export class Orchestrator {
       if (loopShouldStop) break outerLoop
     }
 
+    if (!loopShouldStop) {
+      // Turn limit or abort - force-close any open agent run
+      this.fsm.onAbort()
+    }
+
     // If 'done' provided a specific result override, use it as final content
     if (doneResult !== undefined) {
       finalTurn = { ...finalTurn, content: doneResult }
     }
 
-    // TODO
     return { turn: finalTurn, toolsExecuted }
   }
 
@@ -530,151 +518,49 @@ export class Orchestrator {
 
   // --- Internals ---
 
-  private buildMessages(): Message[] {
-    // If no tools, just return history
-    if (this.tools.length === 0) return this.history
-
-    // CORE TOOLS that should always be in system prompt
+  /** Render the full history to a prompt string via renderHistory(). */
+  private buildPrompt(): string {
     const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
     const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
-
     const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
-    const [systemMsg, ...rest] = this.history
+    const toolsBlock = this.profile.availableTools
+      ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
+      : ''
 
-    // Think pushout: keep only the last N think blocks, strip the rest.
-    // Older reasoning is noise; retaining too many balloons the context window.
-    const maxThink = this.config.maxThinkHistory ?? 2
-    const assistantThinkIndices = rest
-      .map((m, i) => (m.role === 'assistant' && m.think ? i : -1))
-      .filter(i => i !== -1)
+    // System round is always the head of history; inject tool definitions into it
+    const systemContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
+      .map(s => s.text).join('')
+    const enrichedSystem = makeSystemRound(systemContent + (toolsBlock ? `\n\n${toolsBlock}` : ''))
+    enrichedSystem.count = enrichedSystem.spans({ age: 0, memory: new Map(), budget: Infinity })
+      .reduce((n, s) => n + s.text.length, 0)
 
-    const stripThinkBefore = assistantThinkIndices.length > maxThink
-      ? assistantThinkIndices[assistantThinkIndices.length - maxThink]!
-      : -1
+    const history = [enrichedSystem, ...this.fsm.history]
+    const budget = this.config.contextBudget ?? 128_000
 
-    // Gradual shortening of tool results
-    let userTurnIndex = 0
-    const processedHistory = rest.map((msg, idx) => {
-      if (msg.role === 'user') {
-        userTurnIndex++
-      }
-
-      if (msg.role === 'tool_result') {
-        // Find how many user turns are ahead of this message
-        let turnsAhead = 0
-        for (let i = idx + 1; i < rest.length; i++) {
-          if (rest[i]!.role === 'user') turnsAhead++
-        }
-
-        if (turnsAhead === 0) return msg // Age 0: full
-
-        // Age 1+: shorten via structured result field
-        if (msg.results) {
-          if (turnsAhead === 1) {
-            // Shorten long results; errors preserved fully
-            const totalLength = msg.results.reduce((acc, r) => {
-
-              // Errors always preserved at age 1
-              if (r.error) return acc
-
-              return acc + JSON.stringify(r.value ?? '').length
-            }, 0)
-
-            if (totalLength > 1000) {
-              const nonErrorCount = msg.results.filter(r => !r.error).length
-              const perItemLimit = Math.max(100, Math.floor(1000 / Math.max(1, nonErrorCount)))
-
-              const shortened = msg.results.map(r => {
-                if (r.error) return r // preserve errors
-
-                const serialized = typeof r.value === 'string' ? r.value : JSON.stringify(r.value)
-
-                if (serialized.length > perItemLimit) {
-                  consola.debug(`[shortening] age=1 truncating result from ${serialized.length} to ${perItemLimit} chars`)
-
-                  return { ...r, value: serialized.slice(0, perItemLimit) + '... (shortened)' }
-                }
-
-                return r
-              })
-
-              return { ...msg, results: shortened }
-            }
-
-            return msg
-          }
-
-          // Age 2+: minimal skeleton; keep error messages, collapse all other fields
-          consola.debug(`[shortening] age=${turnsAhead} collapsing ${msg.results.length} result(s)`)
-
-          return {
-            ...msg,
-            results: msg.results.map(r => {
-              if (r.error) return { error: r.error } // preserve errors
-
-              // Preserve the original tool fields, but collapse all non-error values
-              const collapsed: Record<string, unknown> = {}
-              for (const key of Object.keys(r)) {
-                if (key === "error") continue
-
-                collapsed[key] = "" // collapse all fields to empty string
-              }
-
-              return collapsed
-            }),
-          }
-        }
-
-        // Fallback: raw content shortening (legacy / parse-error entries)
-        if (turnsAhead === 1) {
-          if (msg.content.length > 1000) {
-            consola.debug(`[shortening] age=1 truncating raw content from ${msg.content.length} chars`)
-
-            return { ...msg, content: msg.content.slice(0, 1000) + '... (shortened)' }
-          }
-
-          return msg
-        }
-
-        consola.debug(`[shortening] age=${turnsAhead} collapsing raw content`)
-
-        return {
-          ...msg,
-          content: msg.content.includes('"error":')
-            ? '{ "error": "original error preserved, result omitted" }'
-            : ''  // collapse non-error content completely
-        }
-      }
-
-      // Strip old think blocks beyond the retention window
-      if (msg.role === 'assistant' && msg.think && idx < stripThinkBefore) {
-        consola.debug(`[think-pushout] stripping think from assistant turn at idx=${idx}`)
-
-        const { think: _, ...rest } = msg
-        return rest
-      }
-
-      return msg
+    const { text } = renderHistory(history, this.versionedMemory, this.profile, {
+      budget,
+      cache: this.renderCache,
     })
 
-    const enrichedSystem: Message = {
-      role: 'system',
-      // TODO refactor
-      content: `${systemMsg?.content ?? ''}\n\n${this.profile.availableTools![0]}${toolsContent}${this.profile.availableTools![1]}`,
-    }
-
-    return [enrichedSystem, ...processedHistory]
+    return text
   }
 
-  private rebuildSystemMessage(): void {
+  private rebuildSystemMessage(agentGoal?: string): void {
     const base = this.config.systemPrompt ?? this.defaultSystemPrompt()
 
     const modeContext = match(this.mode)
       .with({ kind: 'chat' }, () => '')
-      .with({ kind: 'agent' }, ({ gitRoot }) =>
-        `\n\nYou are in AGENT mode. Use tools continuously to accomplish the user's goal. ` +
-        `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}.`
-      )
+      .with({ kind: 'agent' }, ({ gitRoot }) => {
+        const goalPart = agentGoal
+          ? `\n\nGOAL:\n${agentGoal}`
+          : ''
+
+        return (
+          `\n\nYou are in AGENT mode. Use tools continuously to accomplish the user's goal. ` +
+          `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}.` +
+          goalPart
+        )
+      })
       .with({ kind: 'codeplan' }, ({ gitRoot, lastPlan, validationErrors }) => {
         const planStatus = lastPlan
           ? (validationErrors?.length
@@ -706,16 +592,8 @@ export class Orchestrator {
       })
       .exhaustive()
 
-    // Replace or insert system message
-    const sysMsg: Message = { role: 'system', content: base + modeContext }
-    const sysIdx = this.history.findIndex((m) => m.role === 'system')
-
-    if (sysIdx === -1) {
-      this.history.unshift(sysMsg)
-
-    } else {
-      this.history[sysIdx] = sysMsg
-    }
+    this._systemRound = makeSystemRound(base + modeContext)
+    this._systemRound.count = (base + modeContext).length
   }
 
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {
@@ -744,7 +622,7 @@ export class Orchestrator {
       if (typeof val === 'string' && val.includes('$')) {
         resolvedArgs[key] = val.replace(/\$\{([^}]+)\}|\$([\w]+)/g, (_match, braced, bare) => {
           const memKey = braced ?? bare
-          const memVal = this.memory.get(memKey)
+          const memVal = this.versionedMemory.get(memKey)
           if (memVal !== undefined) {
             consola.debug(`Memory interpolation: $${memKey} -> (value)`)
 
@@ -867,7 +745,7 @@ export class Orchestrator {
         return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
 
       } else {
-        const issues = result.error?.errors ?? result.error?.issues ?? []
+        const issues = result.error?.issues ?? []
         const errors: string[] = issues.length
           ? issues.map((e: any) => `${(e.path ?? []).join('.') || '(root)'}: ${e.message}`)
           : [`Validation failed: ${JSON.stringify(result.error)}`]

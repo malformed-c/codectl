@@ -89,6 +89,14 @@ export class KoboldAdapter {
     return parse(raw, this.config.template)
   }
 
+  /** Generate from a pre-rendered prompt string. Bypasses render() so the
+   *  orchestrator can own rendering via renderHistory(). */
+  async generateRaw(prompt: string): Promise<ParsedTurn> {
+    const raw = await this.complete(prompt)
+
+    return parse(raw, this.config.template)
+  }
+
   async generateFim(req: FimRequest): Promise<string> {
     const prompt = renderFim(req, this.config.template)
 

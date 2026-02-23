@@ -19,8 +19,15 @@ export const MemoryTool: ToolDefinition = {
   },
 }
 
+type MemoryStore = {
+  get(key: string): string | undefined
+  set(key: string, value: string): void
+  delete(key: string): boolean
+  keys(): IterableIterator<string>
+}
+
 // TODO ts-pattern
-export function createMemoryHandler(memory: Map<string, string>): ToolHandler {
+export function createMemoryHandler(memory: MemoryStore): ToolHandler {
   return async (args) => {
     const action = args.action as string
     const key = args.key as string | undefined
