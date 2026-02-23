@@ -186,13 +186,13 @@ export type ProfileName = keyof typeof Profiles
 const isPair = (v: unknown): v is TemplatePair =>
   Array.isArray(v) && v.length === 2
 
-function wrapPair([open, close]: TemplatePair, content: string): string {
+export function wrapContent([open, close]: TemplatePair, content: string): string {
   return `${open}${content}${close}`
 }
 
 /** Resolve toolResult/toolCall union to the TemplatePair used for wrapping */
-function resolveWrap(
-  token: TemplatePair | ToolCallsTemplate | ToolResultsTemplate | undefined,
+export function resolveWrap(
+  token: TextTemplate['toolCall'] | TextTemplate['toolResult'],
   fallback: TemplatePair
 ): TemplatePair {
   return match(token)
@@ -202,10 +202,6 @@ function resolveWrap(
 }
 
 // --- Renderer ---
-
-function wrap([open, close]: TemplatePair, content: string): string {
-  return `${open}${content}${close}`
-}
 
 /**
  * Render structured StoredToolCall[] back to the native content string
@@ -301,28 +297,28 @@ export function render(messages: Message[], template: TextTemplate): string {
     const part = match(msg)
       .with({ role: 'system' }, ({ content }) =>
         template.system
-          ? wrapPair(template.system, content)
+          ? wrapContent(template.system, content)
           // No system token - fold into first user turn by prepending
           // (handled below by annotating the next user message)
           : content + '\n\n'
       )
       .with({ role: 'user' }, ({ content }) =>
-        wrapPair(template.userTurn, content)
+        wrapContent(template.userTurn, content)
       )
       .with({ role: 'assistant' }, { role: 'model' }, (m) => {
         // Re-emit think block before content if the template supports it
         const thinkPart = (m.think && template.think)
-          ? wrapPair(template.think, m.think)
+          ? wrapContent(template.think, m.think)
           : ''
 
-        return wrapPair(template.modelTurn, thinkPart + m.content)
+        return wrapContent(template.modelTurn, thinkPart + m.content)
       })
       .with({ role: 'tool_result' }, (m) => {
         const inner = m.results
           ? renderStoredToolResults(m.results, template)
           : m.content
 
-        return wrapPair(resolveWrap(template.toolResult, template.userTurn), inner)
+        return wrapContent(resolveWrap(template.toolResult, template.userTurn), inner)
       })
       .with({ role: 'tool_call' }, (m) => {
         // Re-render structured calls to native format if present
@@ -330,7 +326,7 @@ export function render(messages: Message[], template: TextTemplate): string {
           ? renderToolCalls(m.calls, template)
           : m.content
 
-        return wrapPair(resolveWrap(template.toolCall, template.modelTurn), content)
+        return wrapContent(resolveWrap(template.toolCall, template.modelTurn), content)
       })
       .exhaustive()
 

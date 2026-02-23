@@ -1,7 +1,7 @@
 import type { AnnotatedText, Span, SpanKind } from './span'
 import type { RenderContext } from './round'
 import type { TextTemplate, ToolCallsTemplate, ToolResultsTemplate } from './template'
-import { renderToolCalls, renderStoredToolResults } from './template'
+import { renderToolCalls, renderStoredToolResults, wrapContent, resolveWrap } from './template'
 import type { StoredToolCall, StoredToolResult } from './types'
 
 export type RenderPass = (spans: AnnotatedText, ctx: RenderContext) => AnnotatedText
@@ -161,21 +161,6 @@ function toFamily(kind: SpanKind): TurnFamily {
   return kind as TurnFamily
 }
 
-function wrapTokens([open, close]: [string, string], content: string): string {
-  return `${open}${content}${close}`
-}
-
-function resolveWrap(
-  token: TextTemplate['toolCall'] | TextTemplate['toolResult'],
-  fallback: [string, string]
-): [string, string] {
-  if (!token) return fallback
-
-  if (Array.isArray(token)) return token as [string, string]
-
-  return (token as ToolCallsTemplate | ToolResultsTemplate).wrap as [string, string]
-}
-
 export function makeFormatPass(template: TextTemplate): RenderPass {
   return (spans, _ctx) => {
     if (spans.length === 0) return spans
@@ -200,7 +185,7 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
 
       if (family === 'user') {
         const text = group.map(s => s.text).join('')
-        out.push({ ...first, text: wrapTokens(template.userTurn, text) })
+        out.push({ ...first, text: wrapContent(template.userTurn, text) })
 
       } else if (family === 'model') {
         const reasoning = group.filter(s => s.kind === 'reasoning')
@@ -208,11 +193,11 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
 
         // Reasoning is nested inside modelTurn using the think template
         const thinkPart = reasoning.length > 0 && template.think
-          ? wrapTokens(template.think, reasoning.map(s => s.text).join(''))
+          ? wrapContent(template.think, reasoning.map(s => s.text).join(''))
           : reasoning.map(s => s.text).join('')  // no think token: inline
 
         const modelPart = model.map(s => s.text).join('')
-        out.push({ ...first, text: wrapTokens(template.modelTurn, thinkPart + modelPart) })
+        out.push({ ...first, text: wrapContent(template.modelTurn, thinkPart + modelPart) })
 
       } else if (family === 'tool_call') {
         // Use meta.calls for template-correct rendering (Mistral rich format, etc.)
@@ -222,7 +207,7 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
           : group.map(s => s.text).join('')
 
         const pair = resolveWrap(template.toolCall, template.modelTurn)
-        out.push({ ...first, text: wrapTokens(pair, inner) })
+        out.push({ ...first, text: wrapContent(pair, inner) })
 
       } else if (family === 'tool_result') {
         // Use meta.results for template-correct rendering (already truncated/skeletonized)
@@ -232,13 +217,13 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
           : group.map(s => s.text).join('')
 
         const pair = resolveWrap(template.toolResult, template.userTurn)
-        out.push({ ...first, text: wrapTokens(pair, inner) })
+        out.push({ ...first, text: wrapContent(pair, inner) })
 
       } else {
         // system / error
         const text = group.map(s => s.text).join('')
         const formatted = template.system
-          ? wrapTokens(template.system, text)
+          ? wrapContent(template.system, text)
           : text + '\n\n'  // no system token: prepend as plain text
 
         out.push({ ...first, text: formatted })
