@@ -1,6 +1,11 @@
+import type { StoredToolCall, StoredToolResult } from "./types"
+
 export type SpanKind =
+  | 'system'
   | 'reasoning'   // model think block content
-  | 'content'     // user/model prose
+  | 'model'       // model block content
+  | 'user'
+  | 'content'     // general prose
   | 'tool_call'   // tool invocation text
   | 'tool_result' // tool response text
   | 'error'       // error message
@@ -17,6 +22,8 @@ export type Span = {
     /** Cached char count. Populated by FSM during ingest. Stub for tokenizer. */
     count?: number
     roundId?: string
+    calls?: StoredToolCall[]
+    results?: StoredToolResult[]
   }
 }
 
@@ -39,17 +46,29 @@ export function textSpan(text: string): Span {
   return { kind: 'content', text }
 }
 
+export function systemSpan(text: string): Span {
+  return { kind: 'system', text }
+}
+
+export function modelSpan(text: string): Span {
+  return { kind: 'model', text }
+}
+
+export function userSpan(text: string): Span {
+  return { kind: 'user', text }
+}
+
 export function reasoningSpan(text: string): Span {
   return { kind: 'reasoning', text }
 }
 
-export function toolCallSpan(text: string): Span {
-  return { kind: 'tool_call', text }
+export function toolCallSpan(calls: StoredToolCall[], text: string, truncatable = true): Span {
+  return { kind: 'tool_call', text, meta: { calls, truncatable } }
 }
 
 /** truncatable=true: this result may be compressed by truncationPass at age 1+. */
-export function toolResultSpan(text: string, truncatable = true): Span {
-  return { kind: 'tool_result', text, meta: { truncatable } }
+export function toolResultSpan(results: StoredToolResult[], text: string, truncatable = true): Span {
+  return { kind: 'tool_result', text, meta: { results, truncatable } }
 }
 
 export function errorSpan(text: string): Span {

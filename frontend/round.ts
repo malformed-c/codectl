@@ -1,8 +1,11 @@
 import type { AnnotatedText, Span } from './span'
 import {
-  textSpan, reasoningSpan, toolCallSpan, toolResultSpan, errorSpan,
+  modelSpan, reasoningSpan,
+  toolCallSpan, toolResultSpan,
+  systemSpan, errorSpan,
   countSpanChars,
 } from './span'
+import type { StoredToolCall, StoredToolResult } from './types'
 
 // --- RenderContext ---
 
@@ -35,17 +38,10 @@ export interface Round {
 
 // --- Serialized AST types ---
 
-export type StoredCall = {
-  tool: string
-  callId?: string;
-  [key: string]: unknown
-}
-export type StoredResult = { callId?: string; error?: string; value?: unknown }
-
 export type SerializedRound =
   | { kind: 'chat'; id: string; user: Span[]; reasoning?: string; model: string }
   | { kind: 'agent'; id: string; rounds: SerializedRound[] }
-  | { kind: 'tool'; id: string; reasoning?: string; content?: string; calls: StoredCall[]; results: StoredResult[] }
+  | { kind: 'tool'; id: string; reasoning?: string; content?: string; calls: StoredToolCall[]; results: StoredToolResult[] }
   | { kind: 'system'; id: string; message: string }
   | { kind: 'error'; id: string; message: string; input?: string }
 
@@ -85,7 +81,7 @@ export function chatRound(
       if (reasoning) out.push(reasoningSpan(reasoning))
 
       // Model response
-      if (modelText) out.push(textSpan(modelText))
+      if (modelText) out.push(modelSpan(modelText))
 
       return out
     },
@@ -140,8 +136,8 @@ export function agentRound(children: Round[]): Round {
  * FSM enforces strict call->result pairing; malformed sequences become ErrorRounds.
  */
 export function toolRound(
-  calls: StoredCall[],
-  results: StoredResult[],
+  calls: StoredToolCall[],
+  results: StoredToolResult[],
   reasoning?: string,
   content?: string,
 ): Round {
@@ -176,10 +172,10 @@ export function toolRound(
       const out: AnnotatedText = []
 
       if (reasoning) out.push(reasoningSpan(reasoning))
-      if (content) out.push(textSpan(content))
+      if (content) out.push(modelSpan(content))
 
-      out.push(toolCallSpan(callText))
-      out.push(toolResultSpan(resultText, /* truncatable */ true))
+      out.push(toolCallSpan(calls, callText))
+      out.push(toolResultSpan(results, resultText))
 
       return out
     },
@@ -204,7 +200,7 @@ export function systemRound(message: string): Round {
       // age 2+: transient orchestrator state is irrelevant to deep memory
       if (ctx.age >= 2) return []
 
-      return [textSpan(message)]
+      return [systemSpan(message)]
     },
 
     serialize(): SerializedRound {

@@ -1,5 +1,8 @@
-import type { AnnotatedText } from './span'
+import type { AnnotatedText, Span, SpanKind } from './span'
 import type { RenderContext } from './round'
+import type { TextTemplate, ToolCallsTemplate, ToolResultsTemplate } from './template'
+import { renderToolCalls, renderStoredToolResults } from './template'
+import type { StoredToolCall, StoredToolResult } from './types'
 
 export type RenderPass = (spans: AnnotatedText, ctx: RenderContext) => AnnotatedText
 
@@ -23,7 +26,7 @@ export const extractionPass: RenderPass = (spans, ctx) =>
     const marker = `[Extracted to ${key}]`
     const replaced = span.text.replaceAll(value, marker)
 
-    // If the value wasn't found in the text (e.g. span was already elided),
+    // If the value wasn't found in the text (span already elided or key mismatch),
     // return as-is rather than corrupting the span.
     if (replaced === span.text) return span
 
@@ -38,46 +41,83 @@ export const reasoningPass: RenderPass = (spans, ctx) =>
   ctx.age === 0 ? spans : spans.filter(s => s.kind !== 'reasoning')
 
 // --- truncationPass ---
-// Operates on tool_result spans only.
-// age 0: full. If span has a memoryKey and that key exists, show "[Stored as $key]".
-// age 1: large results truncated; errors preserved in full.
-// age 2+: structural skeleton (keys present, values collapsed to '').
+// Operates on tool_result spans only, using meta.results (structured) when present.
+// Modifies both meta.results (for formatPass) and span.text (fallback).
+//
+// age 0: full. If span has a memoryKey and key exists, show "[Stored as $key]".
+// age 1: truncate large result values; errors always preserved in full.
+// age 2+: structural skeleton - keys present, values collapsed to ''.
 
 const AGE1_CHAR_THRESHOLD = 1000  // chars above which results are truncated at age 1
 
 export const truncationPass: RenderPass = (spans, ctx) =>
   spans.map(span => {
     if (span.kind !== 'tool_result') return span
-
     if (!span.meta?.truncatable) return span
 
-    // If this result was auto-stored to memory, show the reference marker
+    // If auto-stored to memory, show reference marker (formatPass will not re-render this)
     const storedKey = span.meta.memoryKey
     if (storedKey && ctx.memory.has(storedKey)) {
-      return { ...span, text: `[Stored as ${storedKey}]` }
+      return { ...span, text: `[Stored as ${storedKey}]`, meta: { ...span.meta, results: undefined } }
     }
 
     if (ctx.age === 0) return span  // full fidelity
 
-    const isError = span.text.startsWith('ERROR:')
+    const results = span.meta.results
+    const hasError = results?.some(r => r.error) ?? span.text.startsWith('ERROR:')
 
     if (ctx.age === 1) {
-      if (isError) return span  // errors always preserved at age 1
+      if (hasError) return span  // errors always preserved at age 1
 
-      if (span.text.length > AGE1_CHAR_THRESHOLD) {
-        return { ...span, text: span.text.slice(0, AGE1_CHAR_THRESHOLD) + '\n... (truncated)' }
+      if (results) {
+        const totalChars = results.reduce((acc, r) => acc + JSON.stringify(r.value ?? '').length, 0)
+
+        if (totalChars <= AGE1_CHAR_THRESHOLD) return span
+
+        const perItemLimit = Math.max(100, Math.floor(AGE1_CHAR_THRESHOLD / Math.max(1, results.length)))
+        const truncated = results.map(r => {
+          if (r.error) return r
+
+          const serialized = typeof r.value === 'string' ? r.value : JSON.stringify(r.value)
+          return serialized.length > perItemLimit
+            ? { ...r, value: serialized.slice(0, perItemLimit) + '... (truncated)' }
+            : r
+        })
+
+        return withResults(span, truncated)
       }
 
-      return span
+      // Fallback: raw text truncation (no structured meta)
+      return span.text.length > AGE1_CHAR_THRESHOLD
+        ? { ...span, text: span.text.slice(0, AGE1_CHAR_THRESHOLD) + '\n... (truncated)' }
+        : span
     }
 
     // age 2+: skeleton
-    if (isError) return span  // errors survive even at age 2
+    if (hasError) return span  // errors survive at age 2
 
-    return { ...span, text: trySkeletonize(span.text) }
+    if (results) {
+      const skeletonized = results.map(r =>
+        r.error ? r : { ...r, value: collapseValues(r.value) }
+      )
+      return withResults(span, skeletonized)
+    }
+
+    return { ...span, text: trySkeletonizeText(span.text) }
   })
 
-function trySkeletonize(text: string): string {
+/** Produce a new span with updated results[] and re-serialized text fallback. */
+function withResults(span: Span, results: StoredToolResult[]): Span {
+  const text = results.map(r =>
+    r.error
+      ? `ERROR: ${r.error}`
+      : (typeof r.value === 'string' ? r.value : JSON.stringify(r.value))
+  ).join('\n')
+
+  return { ...span, text, meta: { ...span.meta, results } }
+}
+
+function trySkeletonizeText(text: string): string {
   try {
     return JSON.stringify(collapseValues(JSON.parse(text)))
 
@@ -99,6 +139,116 @@ function collapseValues(val: unknown): unknown {
   return ''
 }
 
+// --- formatPass ---
+// Template-aware pass. Groups consecutive same-family spans and wraps each group
+// with the correct template tokens. Must run AFTER all compression passes and
+// BEFORE joinPass.
+//
+// Turn families:
+//   'reasoning' + 'model' → one modelTurn (think nested inside)
+//   'user'                → userTurn
+//   'tool_call'           → toolCall template (uses meta.calls for rich rendering)
+//   'tool_result'         → toolResult template (uses meta.results for rich rendering)
+//   'system' | 'error'   → system template (or plain prepend if template has none)
+
+type TurnFamily = 'model' | 'user' | 'tool_call' | 'tool_result' | 'system'
+
+function toFamily(kind: SpanKind): TurnFamily {
+  if (kind === 'reasoning') return 'model'
+
+  if (kind === 'system' || kind === 'error') return 'system'
+
+  return kind as TurnFamily
+}
+
+function wrapTokens([open, close]: [string, string], content: string): string {
+  return `${open}${content}${close}`
+}
+
+function resolveWrap(
+  token: TextTemplate['toolCall'] | TextTemplate['toolResult'],
+  fallback: [string, string]
+): [string, string] {
+  if (!token) return fallback
+
+  if (Array.isArray(token)) return token as [string, string]
+
+  return (token as ToolCallsTemplate | ToolResultsTemplate).wrap as [string, string]
+}
+
+export function makeFormatPass(template: TextTemplate): RenderPass {
+  return (spans, _ctx) => {
+    if (spans.length === 0) return spans
+
+    // Group consecutive spans by turn family
+    const groups: { family: TurnFamily; spans: Span[] }[] = []
+    for (const span of spans) {
+      const family = toFamily(span.kind)
+      const last = groups.at(-1)
+      if (last && last.family === family) {
+        last.spans.push(span)
+
+      } else {
+        groups.push({ family, spans: [span] })
+      }
+    }
+
+    const out: AnnotatedText = []
+
+    for (const { family, spans: group } of groups) {
+      const first = group[0]!
+
+      if (family === 'user') {
+        const text = group.map(s => s.text).join('')
+        out.push({ ...first, text: wrapTokens(template.userTurn, text) })
+
+      } else if (family === 'model') {
+        const reasoning = group.filter(s => s.kind === 'reasoning')
+        const model = group.filter(s => s.kind === 'model')
+
+        // Reasoning is nested inside modelTurn using the think template
+        const thinkPart = reasoning.length > 0 && template.think
+          ? wrapTokens(template.think, reasoning.map(s => s.text).join(''))
+          : reasoning.map(s => s.text).join('')  // no think token: inline
+
+        const modelPart = model.map(s => s.text).join('')
+        out.push({ ...first, text: wrapTokens(template.modelTurn, thinkPart + modelPart) })
+
+      } else if (family === 'tool_call') {
+        // Use meta.calls for template-correct rendering (Mistral rich format, etc.)
+        const calls = group.flatMap(s => s.meta?.calls ?? [])
+        const inner = calls.length
+          ? renderToolCalls(calls, template)
+          : group.map(s => s.text).join('')
+
+        const pair = resolveWrap(template.toolCall, template.modelTurn)
+        out.push({ ...first, text: wrapTokens(pair, inner) })
+
+      } else if (family === 'tool_result') {
+        // Use meta.results for template-correct rendering (already truncated/skeletonized)
+        const results = group.flatMap(s => s.meta?.results ?? [])
+        const inner = results.length
+          ? renderStoredToolResults(results, template)
+          : group.map(s => s.text).join('')
+
+        const pair = resolveWrap(template.toolResult, template.userTurn)
+        out.push({ ...first, text: wrapTokens(pair, inner) })
+
+      } else {
+        // system / error
+        const text = group.map(s => s.text).join('')
+        const formatted = template.system
+          ? wrapTokens(template.system, text)
+          : text + '\n\n'  // no system token: prepend as plain text
+
+        out.push({ ...first, text: formatted })
+      }
+    }
+
+    return out
+  }
+}
+
 // --- joinPass ---
 // Terminal pass. Collapses AnnotatedText to a plain string.
 // Only called at the very end of the pipeline - never mid-pass.
@@ -107,15 +257,21 @@ export function joinPass(spans: AnnotatedText): string {
   return spans.map(s => s.text).join('')
 }
 
-// --- Ordered pipeline (pre-join) ---
+// --- Pipeline builder ---
+// formatPass is optional and must come last (before joinPass).
+// Renderer passes template via RenderOptions; pipeline is built per-render.
 
-export const pipeline: RenderPass[] = [
+export const BASE_PIPELINE: RenderPass[] = [
   extractionPass,
   reasoningPass,
   truncationPass,
 ]
 
-/** Run all non-terminal passes. Returns AnnotatedText ready for joinPass. */
-export function runPipeline(spans: AnnotatedText, ctx: RenderContext): AnnotatedText {
-  return pipeline.reduce((s, pass) => pass(s, ctx), spans)
+export function buildPipeline(template: TextTemplate): RenderPass[] {
+  return [...BASE_PIPELINE, makeFormatPass(template)]
+}
+
+/** Run the pipeline. Returns AnnotatedText ready for joinPass. */
+export function runPipeline(spans: AnnotatedText, ctx: RenderContext, template: TextTemplate): AnnotatedText {
+  return buildPipeline(template).reduce((s, pass) => pass(s, ctx), spans)
 }
