@@ -557,7 +557,7 @@ export class Orchestrator {
     // System round is always the head of history; inject tool definitions into it
     const systemContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
       .map(s => s.text).join('')
-    const enrichedSystem = makeSystemRound(systemContent + (toolsBlock ? `\n\n${toolsBlock}` : ''))
+    const enrichedSystem = makeSystemRound(systemContent + (toolsBlock ? `${toolsBlock}` : ''))
     enrichedSystem.count = enrichedSystem.spans({ age: 0, memory: new Map(), budget: Infinity })
       .reduce((n, s) => n + s.text.length, 0)
 
