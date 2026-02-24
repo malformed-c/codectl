@@ -3,6 +3,7 @@ import { hydrate } from "@grammyjs/hydrate"
 import type { HydrateFlavor } from "@grammyjs/hydrate"
 import { consola } from 'consola'
 import { marked } from 'marked'
+import { join } from 'path'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
@@ -14,6 +15,8 @@ export type TelegramDoorConfig = {
   token: string
   adapter: KoboldAdapter
   historyStore?: HistoryStore
+  /** Root directory for per-chat checkpoints (room key is appended). */
+  checkpointRoot?: string
   /** Extra orchestrator config per room (adapter is injected, do not set here) */
   orchestratorConfig?: Omit<OrchestratorConfig, 'adapter'>
   /** Max message length before splitting (Telegram text limit: 4096, with media: 1024) */
@@ -39,8 +42,14 @@ function splitMessage(text: string, maxLen = 4096): string[] {
   return chunks
 }
 
-function roomIdForChat(chatId: number): string {
+export function roomIdForChat(chatId: number): string {
   return `telegram-${chatId}`
+}
+
+export function checkpointDirForChat(checkpointRoot: string | undefined, chatId: number): string | undefined {
+  if (!checkpointRoot) return undefined
+
+  return join(checkpointRoot, roomIdForChat(chatId))
 }
 
 /**
@@ -339,11 +348,12 @@ export class TelegramDoor {
 
   private getOrCreateRoom(chatId: number): ReturnType<RoomRegistry['getOrCreate']> {
     const roomId = roomIdForChat(chatId)
+    const checkpointDir = checkpointDirForChat(this.config.checkpointRoot, chatId)
 
     return this.registry.getOrCreate(roomId, () =>
       createRoom(
         roomId,
-        new Orchestrator({ ...this.config.orchestratorConfig, adapter: this.config.adapter }),
+        new Orchestrator({ ...this.config.orchestratorConfig, checkpointDir, adapter: this.config.adapter }),
         `telegram:${chatId}`
       )
     )

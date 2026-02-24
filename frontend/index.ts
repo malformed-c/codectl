@@ -138,6 +138,7 @@ async function main(): Promise<void> {
       token: telegramToken,
       adapter,
       historyStore,
+      checkpointRoot: config.checkpoint_root,
       orchestratorConfig: {
         toolFormat: (config.tool_format ?? 'json') as any,
         autonomousTurns: 16,
