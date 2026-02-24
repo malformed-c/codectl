@@ -20,8 +20,10 @@ export const MemoryTool: ToolDefinition = {
 }
 
 type MemoryStore = {
-  get(key: string): string | undefined
   set(key: string, value: string): void
+  get(key: string): string | undefined
+  append(key: string, value: string): boolean
+  list(): string[]
   delete(key: string): boolean
   keys(): IterableIterator<string>
 }

@@ -231,31 +231,32 @@ export function renderHistory(
   // -- Step 1: Assign ages (newest -> oldest) ---
 
   const ageMap = new Array<number>(history.length).fill(0)
-  let accumulated = 0
+  let rawAccumulated = 0       // Used for stable aging
+  let actualAccumulated = 0    // Used for hard budget trimming
   let trimmedRounds = 0
 
   for (let i = history.length - 1; i >= 0; i--) {
     const round = history[i]!
+    const rawChars = round.count
+    const actualChars = cache.get(round)?.count ?? rawChars
 
-    // Use cached count if available (reflects compressed size), else Pass 1 value
-    // Use cached compression size if available (smaller than raw), else Pass 1 raw count
-    const roundChars = cache.get(round)?.count ?? round.count
-
-    if (accumulated >= budget) {
-      ageMap[i] = -1  // beyond budget: trim
+    // Hard trim is based on the actual (compressed) chars sent to the LLM
+    if (actualAccumulated >= budget) {
+      ageMap[i] = -1
       trimmedRounds++
-      // Still accumulate to report accurate trimmedRounds
-      accumulated += roundChars
+      actualAccumulated += actualChars
 
       continue
     }
 
-    const fraction = accumulated / budget
+    // Aging is based on raw conversation distance to prevent cache flapping
+    const fraction = rawAccumulated / budget
     ageMap[i] =
       fraction < AGE0_LIMIT ? 0 :
         fraction < AGE1_LIMIT ? 1 : 2
 
-    accumulated += roundChars
+    rawAccumulated += rawChars
+    actualAccumulated += actualChars
   }
 
   // -- Step 2: Render (oldest -> newest) ---

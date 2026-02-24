@@ -285,6 +285,7 @@ export class Orchestrator {
 
   registerTool(def: ToolDefinition, handler: ToolHandler): void {
     if (this.handlers.has(def.name)) return
+
     this.tools.push(def)
     this.handlers.set(def.name, handler)
   }
@@ -308,6 +309,7 @@ export class Orchestrator {
   async *run(goal: string): AsyncGenerator<OrchestratorEvent, TurnResult> {
     if (this.mode.kind !== 'agent') {
       const gitRoot = await findGitRoot(process.cwd())
+
       this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
     }
 
@@ -357,6 +359,7 @@ export class Orchestrator {
       if (this.abortController.signal.aborted) break
 
       const prompt = this.buildPrompt()
+
       const parsed = await this.adapter.generateRaw(prompt)
 
       finalTurn = parsed
@@ -380,7 +383,9 @@ export class Orchestrator {
       // Stop if no tools called - commit ChatRound via FSM
       if (!parsed.toolCalls?.length) {
         this.fsm.onModel(parsed.think, parsed.content, [])
+
         yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+
         break outerLoop
       }
 
@@ -388,8 +393,9 @@ export class Orchestrator {
       // Auto-normalize already happened in parse(); now log + count as failure so the
       // model receives an inline correction in the tool_result.
       if (parsed.malformed) {
-        consola.warn('Malformed tool call: closing token found without opening token. Auto-normalized.')
+        consola.warn('Malformed tool call: closing token found without opening token.')
 
+        this.fsm.onError('Malformed tool call: your response contained a closing tool token without the opening token. Always start tool calls with the opening token.')
         this.recordToolFailure()
       }
 
@@ -400,48 +406,45 @@ export class Orchestrator {
       const storedCalls: StoredToolCall[] = []
       const immediateResults: StoredToolResult[] = []
 
-      consola.info('received tool calls:', parsed.toolCalls)
+      if (parsed.toolCalls?.length) {
+        consola.info('received tool calls:', parsed.toolCalls)
 
-      for (const rawCall of parsed.toolCalls) {
-        try {
-          const calls = parseToolCalls(rawCall)
+        for (const rawCall of parsed.toolCalls) {
+          try {
+            const calls = parseToolCalls(rawCall)
 
-          consola.info('parsed tool calls:', calls)
+            consola.info('parsed tool calls:', calls)
 
-          allCalls.push(...calls)
+            allCalls.push(...calls)
 
-          for (const call of calls) yield { kind: 'call', call, pending: true }
+            for (const call of calls) yield { kind: 'call', call, pending: true }
 
-          // Store as structured calls - re-rendered to native format on send
-          storedCalls.push(...calls.map(c => ({
-            tool: c.name,
-            ...(c.callId ? { callId: c.callId } : {}),
-            ...c.arguments,
-          })))
+            storedCalls.push(...calls.map(c => ({
+              tool: c.name,
+              ...(c.callId ? { callId: c.callId } : {}),
+              ...c.arguments,
+            })))
 
-        } catch (err) {
-          consola.error('failed to parse tool call:', err)
+          } catch (err) {
+            consola.error('failed to parse tool call:', err)
 
-          immediateResults.push({ error: `Failed to parse tool call: ${err}` })
-          const wasAgent = this.mode.kind === 'agent'
-          this.recordToolFailure()
+            // Push a dummy call so the FSM arrays remain perfectly aligned (1:1)
+            storedCalls.push({ tool: 'malformed_call', raw: rawCall })
+            immediateResults.push({ error: `Failed to parse tool call: ${err}` })
 
-          if (wasAgent && this.wasEjected()) break
+            const wasAgent = this.mode.kind === 'agent'
+            this.recordToolFailure()
+
+            if (wasAgent && this.wasEjected()) break
+          }
         }
       }
 
-      // #23: Prepend malformed-token correction to results
-      if (parsed.malformed) {
-        immediateResults.unshift({
-          error: 'Malformed tool call: your response contained a closing tool token without the opening token. Always start tool calls with the opening token.',
-        })
-      }
-
-      if (storedCalls.length > 0 || immediateResults.length > 0) {
+      if (storedCalls.length > 0) {
         // Signal model turn with calls to FSM - opens ToolRound
         this.fsm.onModel(parsed.think, parsed.content, storedCalls)
 
-        const storedResults: StoredToolResult[] = [...immediateResults]
+        const storedResults: StoredToolResult[] = []
 
         for (const call of allCalls) {
           // Detect special control flow tools
@@ -451,6 +454,7 @@ export class Orchestrator {
           }
 
           const result = await this.executeToolCall(call)
+
           yield { kind: 'call_result', call, result }
 
           turnTools.push({ call, result })
@@ -474,16 +478,27 @@ export class Orchestrator {
           }
         }
 
-        consola.info('storing tool results in history:', this.shortenStoredResults(storedResults))
+        // Combine immediate parse errors with executed tool results to match storedCalls length
+        const allResults = [...storedResults, ...immediateResults]
+
+        consola.info('storing tool results in history:', this.shortenStoredResults(allResults))
 
         // Commit ToolRound - pairs with the onModel call above
-        this.fsm.onResults(storedResults)
+        this.fsm.onResults(allResults)
 
         if (loopShouldStop) {
           this.fsm.onDone(doneResult)
         }
 
         yield { kind: 'turn', turn: parsed, toolsExecuted: turnTools }
+
+      } else if (parsed.toolCalls?.length > 0 && !parsed.malformed) {
+        // Failsafe: if we had raw toolCalls but storedCalls is 0, FSM must not be locked.
+        this.fsm.onModel(parsed.think, parsed.content, [])
+
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+
+        break outerLoop
       }
 
       if (loopShouldStop) break outerLoop

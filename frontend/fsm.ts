@@ -85,13 +85,15 @@ export class Fsm {
         if (this.state.userSpans.length > 0) {
           history.push(chatRound(this.state.userSpans, ''))
         }
-        history.push(...this.state.agentChildren)
-        history.push(toolRound(
-          this.state.pendingCalls,
-          [],
-          this.state.pendingThink,
-          this.state.pendingContent
-        ))
+        history.push(agentRound([
+          ...this.state.agentChildren,
+          toolRound(
+            this.state.pendingCalls,
+            [],
+            this.state.pendingThink,
+            this.state.pendingContent
+          )
+        ]))
 
         break
 
@@ -99,7 +101,7 @@ export class Fsm {
         if (this.state.userSpans.length > 0) {
           history.push(chatRound(this.state.userSpans, ''))
         }
-        history.push(...this.state.agentChildren)
+        history.push(agentRound(this.state.agentChildren))
 
         break
     }
@@ -114,10 +116,22 @@ export class Fsm {
    * For headless run() with no user turn, skip this and go straight to onModel.
    */
   onUser(userSpans: Span[]): void {
+    if (this.state.kind === 'awaiting_model') {
+      // Already waiting for a response to a previous message.
+      // Append the new message to the existing one.
+      if (userSpans.length > 0) {
+        this.state.userSpans.push({ kind: 'content', text: '\n\n' })
+        this.state.userSpans.push(...userSpans)
+      }
+
+      return
+    }
+
     if (this.state.kind !== 'idle') {
-      // Unexpected user turn - previous session wasn't closed cleanly.
+      // Unexpected user turn (e.g. interruption during agent run).
       // Force-close any open agent run then accept the user message.
       consola.warn(`[FSM] onUser in state=${this.state.kind}, force-closing`)
+
       this._forceClose()
     }
 
@@ -144,10 +158,15 @@ export class Fsm {
           return
         }
 
+        // Commit the user turn immediately so it precedes the AgentRound in history
+        if (this.state.userSpans.length > 0) {
+          this._commit(chatRound(this.state.userSpans, ''))
+        }
+
         // Has calls: open an AgentRound, transition to awaiting_results.
         this.state = {
           kind: 'awaiting_results',
-          userSpans: this.state.userSpans,
+          userSpans: [], // Consumed by the commit above
           agentChildren: [],
           pendingCalls: calls,
           pendingThink: think,
@@ -163,6 +182,8 @@ export class Fsm {
           // Text-only: model is done. Close the AgentRound, commit ChatRound.
           const agent = agentRound(this.state.agentChildren)
           this._commit(agent)
+
+          // Since userSpans is now [], this accurately commits just the model's final response
           const chat = chatRound(this.state.userSpans, content ?? '', think)
           this._commit(chat)
           this.state = { kind: 'idle' }
@@ -305,12 +326,7 @@ export class Fsm {
    */
   onDone(result?: string): void {
     if (this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results') {
-      const children =
-        this.state.kind === 'in_agent'
-          ? this.state.agentChildren
-          : this.state.agentChildren
-
-      const agent = agentRound(children)
+      const agent = agentRound(this.state.agentChildren)
       this._commit(agent)
 
       // Emit ChatRound with done result as model response
@@ -349,21 +365,16 @@ export class Fsm {
     if (this.state.kind === 'idle') return
 
     if (this.state.kind === 'awaiting_model') {
-      // User message with no model response - discard
-      consola.warn('[FSM] force-close: discarding buffered user message with no model response')
+      // User message with no model response - commit as chat round with empty model text
+      this._commit(chatRound(this.state.userSpans, ''))
       this.state = { kind: 'idle' }
 
       return
     }
 
     // Close any open agent run
-    const children =
-      this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results'
-        ? this.state.agentChildren
-        : []
-
-    if (children.length > 0) {
-      const agent = agentRound(children)
+    if (this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results') {
+      const agent = agentRound(this.state.agentChildren)
       this._commit(agent)
     }
 
