@@ -304,7 +304,7 @@ export function render(messages: Message[], template: TextTemplate): string {
           ? wrapContent(template.system, content)
           // No system token - fold into first user turn by prepending
           // (handled below by annotating the next user message)
-          : content + '\n\n'
+          : content + '\n'
       )
       .with({ role: 'user' }, ({ content }) =>
         wrapContent(template.userTurn, content)

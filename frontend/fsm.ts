@@ -120,7 +120,7 @@ export class Fsm {
       // Already waiting for a response to a previous message.
       // Append the new message to the existing one.
       if (userSpans.length > 0) {
-        this.state.userSpans.push({ kind: 'content', text: '\n\n' })
+        this.state.userSpans.push({ kind: 'content', text: '\n' })
         this.state.userSpans.push(...userSpans)
       }
 

@@ -633,7 +633,7 @@ export class Orchestrator {
 
     const sysContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
       .map(s => s.text).join('')
-    const fullContent = sysContent + (toolsBlock ? `\n\n${toolsBlock}` : '')
+    const fullContent = sysContent + (toolsBlock ? `${toolsBlock}` : '')
 
     this._enrichedSystemRound = makeSystemRound(fullContent)
     this._enrichedSystemRound.count = fullContent.length
