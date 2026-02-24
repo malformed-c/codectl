@@ -281,7 +281,6 @@ export class KoboldAdapter {
       use_world_info: false,
       streaming,
       num_ctx: cfg.numCtx ?? 1024,
-      num_predict: cfg.numPredict ?? 512,
       temperature: cfg.temperature ?? 0.7,
       top_p: cfg.topP ?? 0.95,
       top_k: cfg.topK,
