@@ -240,11 +240,11 @@ export class Orchestrator {
     this.checkpointStore = config.checkpointDir ? new CheckpointStore(config.checkpointDir) : null
 
     // --- Built-in tools ---
-    this.registerTool(ModeTool,     async (args) => this.handleModeSwitch(args.mode as string))
-    this.registerTool(DoneTool,     async ()     => ({ result: { accepted: true } }))
-    this.registerTool(ContinueTool, async ()     => ({ result: { continuing: true } }))
-    this.registerTool(LibraryTool,  async ()     => ({ result: renderTools(this.tools, this.config.toolFormat ?? 'json') }))
-    this.registerTool(MemoryTool,   createMemoryHandler(this.versionedMemory))
+    this.registerTool(ModeTool, async (args) => this.handleModeSwitch(args.mode as string))
+    this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
+    this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
+    this.registerTool(LibraryTool, async () => ({ result: renderTools(this.tools, this.config.toolFormat ?? 'json') }))
+    this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
     this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
     this.registerTool(RunPlanTool, createRunPlanHandler(
@@ -317,6 +317,7 @@ export class Orchestrator {
     this.fsm.hydrate(session.history)
 
     // Restore memory
+    this.versionedMemory.clear()
     for (const [k, v] of session.memory.entries()) {
       this.versionedMemory.set(k, v)
     }

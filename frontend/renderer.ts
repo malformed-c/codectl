@@ -54,6 +54,13 @@ export class VersionedMemory {
     return deleted
   }
 
+  clear(): void {
+    if (this._map.size === 0) return
+
+    this._map.clear()
+    this._version++
+  }
+
   asReadonly(): ReadonlyMap<string, string> {
     return this._map
   }
