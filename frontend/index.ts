@@ -121,8 +121,6 @@ async function main(): Promise<void> {
   const adapter = new KoboldAdapter({
     apiServer: process.env.BASE_URL ?? config.api_server,
     template: Profiles.mistral, // TODO load from model yaml
-    temperature: 0.7,
-    numPredict: 512,
   })
 
   // Check what doors to run based on env
