@@ -244,20 +244,29 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
   const tr = template.toolResult
   const isRich = tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich
 
-  // Serialize result - wrapped in { result: ... } or { error: ... } for model clarity.
-  // This matches previous renderToolResult behavior.
-  const body = JSON.stringify({
-    ...(stored.callId && !isRich ? { callId: stored.callId } : {}),
-    ...(stored.error ? { error: stored.error } : { result: stored.value }),
-  }, null, 2)
+  if (stored.error) {
+    const body = JSON.stringify({ error: stored.error }, null, 2)
+    if (isRich) {
+      const rich = (tr as ToolResultsTemplate).rich!
+      return `${rich.callId}${stored.callId ?? ''}${rich.content}${body}`
+    }
+
+    return body
+  }
+
+  // String values: output verbatim to avoid double-escaping newlines.
+  // Non-string values: wrap in { result: ... } for model clarity.
+  const isString = typeof stored.value === 'string'
+  const inner = isString
+    ? (stored.value as string)
+    : JSON.stringify({ result: stored.value }, null, 2)
 
   if (isRich) {
     const rich = (tr as ToolResultsTemplate).rich!
-
-    return `${rich.callId}${stored.callId ?? ''}${rich.content}${body}`
+    return `${rich.callId}${stored.callId ?? ''}${rich.content}${inner}`
   }
 
-  return body
+  return inner
 }
 
 /**
@@ -271,12 +280,9 @@ export function renderStoredToolResults(results: StoredToolResult[], template: T
     return results.map(r => renderStoredToolResult(r, template)).join('\n')
   }
 
-  // Simple pair format - if multiple results, wrap them in a JSON array
+  // Simple pair format - if multiple results, join rendered individual results
   if (results.length > 1) {
-    return JSON.stringify(results.map(r => ({
-      ...(r.callId ? { callId: r.callId } : {}),
-      ...(r.error ? { error: r.error } : { result: r.value })
-    })), null, 2)
+    return results.map(r => renderStoredToolResult(r, template)).join('\n---\n')
   }
 
   // Single result - backward compatible with single-object JSON

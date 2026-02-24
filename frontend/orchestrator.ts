@@ -23,6 +23,7 @@ import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
+import { TransformTools, createTransformHandlers } from "./tools/transform"
 import { codePlanSchema, type CodePlan } from "./codeplan.schema"
 import { destr } from 'destr'
 import { Fsm } from './fsm'
@@ -239,24 +240,18 @@ export class Orchestrator {
     this.checkpointStore = config.checkpointDir ? new CheckpointStore(config.checkpointDir) : null
 
     // --- Built-in tools ---
-    this.registerTool(ModeTool, async (args) => this.handleModeSwitch(args.mode as string))
-    this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
-    this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
-    this.registerTool(LibraryTool, async () => ({ result: renderTools(this.tools, this.config.toolFormat ?? 'json') }))
-    this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
+    this.registerTool(ModeTool,     async (args) => this.handleModeSwitch(args.mode as string))
+    this.registerTool(DoneTool,     async ()     => ({ result: { accepted: true } }))
+    this.registerTool(ContinueTool, async ()     => ({ result: { continuing: true } }))
+    this.registerTool(LibraryTool,  async ()     => ({ result: renderTools(this.tools, this.config.toolFormat ?? 'json') }))
+    this.registerTool(MemoryTool,   createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
-
-    // Plan validation tool
     this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
-
-    // Codeplan execution tool
     this.registerTool(RunPlanTool, createRunPlanHandler(
       () => this.mode.kind !== 'chat' ? this.mode.gitRoot : '',
       () => this.config.backendDir ?? join(dirname(process.cwd()), 'backend'),
       this.adapter,
     ))
-
-    // Register subagent tool
     this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
 
     // --- Tool-set registrations (def + handler paired by name) ---
@@ -264,6 +259,7 @@ export class Orchestrator {
       this.mode.kind !== 'chat' ? this.mode.gitRoot : ''
     ))
     this.registerToolSet(ExecTools, createExecHandlers(this.shell))
+    this.registerToolSet(TransformTools, createTransformHandlers())
 
     // --- User-supplied tools (definitions only; handlers registered by caller) ---
     for (const tool of config.tools ?? []) {
@@ -488,6 +484,11 @@ export class Orchestrator {
         // Signal model turn with calls to FSM - opens ToolRound
         this.fsm.onModel(parsed.think, parsed.content, storedCalls)
 
+        // Yield model text FIRST so the UI can display it before tool notifications.
+        // toolsExecuted is empty here; callers that need full results use call_result events
+        // or the TurnResult returned from the generator.
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+
         const storedResults: StoredToolResult[] = []
 
         for (const call of allCalls) {
@@ -535,8 +536,6 @@ export class Orchestrator {
         }
 
         void this._saveCheckpoint()
-
-        yield { kind: 'turn', turn: parsed, toolsExecuted: turnTools }
 
       } else if (parsed.toolCalls?.length > 0 && !parsed.malformed) {
         // Failsafe: if we had raw toolCalls but storedCalls is 0, FSM must not be locked.
@@ -632,10 +631,9 @@ export class Orchestrator {
       ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
       : ''
 
-    // System round is always the head of history; inject tool definitions into it
-    const systemContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
+    const sysContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
       .map(s => s.text).join('')
-    const fullContent = systemContent + (toolsBlock ? `\n\n${toolsBlock}` : '')
+    const fullContent = sysContent + (toolsBlock ? `\n\n${toolsBlock}` : '')
 
     this._enrichedSystemRound = makeSystemRound(fullContent)
     this._enrichedSystemRound.count = fullContent.length

@@ -178,9 +178,34 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
       }
     }
 
+    // Some templates place tool calls inside assistant output (same role turn),
+    // e.g. Mistral rich format. Merge adjacent model + tool_call groups so they
+    // are rendered in one assistant wrapper and token order remains stable.
+    const assistantInlineToolCalls = Boolean(
+      template.toolCall
+      && !Array.isArray(template.toolCall)
+      && template.toolCall.wrap[1] === ''
+    )
+
+    const mergedGroups: { family: TurnFamily; spans: Span[] }[] = []
+    for (const group of groups) {
+      const prev = mergedGroups.at(-1)
+      if (
+        assistantInlineToolCalls
+        && prev
+        && prev.family === 'model'
+        && group.family === 'tool_call'
+      ) {
+        prev.spans.push(...group.spans)
+
+      } else {
+        mergedGroups.push({ family: group.family, spans: [...group.spans] })
+      }
+    }
+
     const out: AnnotatedText = []
 
-    for (const { family, spans: group } of groups) {
+    for (const { family, spans: group } of mergedGroups) {
       const first = group[0]!
 
       if (family === 'user') {
@@ -190,6 +215,7 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
       } else if (family === 'model') {
         const reasoning = group.filter(s => s.kind === 'reasoning')
         const model = group.filter(s => s.kind === 'model')
+        const toolCallSpans = group.filter(s => s.kind === 'tool_call')
 
         // Reasoning is nested inside modelTurn using the think template
         const thinkPart = reasoning.length > 0 && template.think
@@ -197,7 +223,14 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
           : reasoning.map(s => s.text).join('')  // no think token: inline
 
         const modelPart = model.map(s => s.text).join('')
-        out.push({ ...first, text: wrapContent(template.modelTurn, thinkPart + modelPart) })
+        const toolCalls = toolCallSpans.flatMap(s => s.meta?.calls ?? [])
+        const toolCallPart = toolCallSpans.length > 0
+          ? wrapContent(resolveWrap(template.toolCall, template.modelTurn), toolCalls.length
+            ? renderToolCalls(toolCalls, template)
+            : toolCallSpans.map(s => s.text).join(''))
+          : ''
+
+        out.push({ ...first, text: wrapContent(template.modelTurn, thinkPart + modelPart + toolCallPart) })
 
       } else if (family === 'tool_call') {
         // Use meta.calls for template-correct rendering (Mistral rich format, etc.)
