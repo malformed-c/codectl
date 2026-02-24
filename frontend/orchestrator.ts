@@ -28,6 +28,7 @@ import { codePlanSchema, type CodePlan } from "./codeplan.schema"
 import { destr } from 'destr'
 import { Fsm } from './fsm'
 import { RenderCache, VersionedMemory, renderHistory } from './renderer'
+import { joinWithBoundaryNormalization } from './pipeline'
 import { userSpan } from './span'
 import { systemRound as makeSystemRound, type Round } from './round'
 import { CheckpointStore, restoreLatest, type RestoredSession } from './checkpoint'
@@ -634,7 +635,7 @@ export class Orchestrator {
 
     const sysContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
       .map(s => s.text).join('')
-    const fullContent = sysContent + (toolsBlock ? `${toolsBlock}` : '')
+    const fullContent = joinWithBoundaryNormalization([sysContent, toolsBlock])
 
     this._enrichedSystemRound = makeSystemRound(fullContent)
     this._enrichedSystemRound.count = fullContent.length

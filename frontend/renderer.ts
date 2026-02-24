@@ -3,7 +3,7 @@ import { countSpanChars } from './span'
 import type { Round, History, RenderContext } from './round'
 import {
   runCompressionPipeline, extractionPass, makeFormatPass,
-  reasoningPass, truncationPass, joinPass,
+  reasoningPass, truncationPass, joinPass, joinWithBoundaryNormalization,
 } from './pipeline'
 import type { TextTemplate } from './template'
 
@@ -295,7 +295,7 @@ export function renderHistory(
   parts.push(template.modelTurn[0])
 
   return {
-    text: parts.join(''),
+    text: joinWithBoundaryNormalization(parts),
     trimmedRounds,
     ageMap,
   }

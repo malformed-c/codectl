@@ -272,7 +272,52 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
 // Only called at the very end of the pipeline - never mid-pass.
 
 export function joinPass(spans: AnnotatedText): string {
-  return spans.map(s => s.text).join('')
+  return joinWithBoundaryNormalization(spans.map(s => s.text))
+}
+
+/**
+ * Join pre-rendered parts while collapsing only duplicated newline runs at part boundaries.
+ *
+ * This is intentionally boundary-scoped (never global whitespace collapse) so content
+ * inside parts (e.g. code blocks, JSON, tool payloads) is preserved byte-for-byte.
+ */
+export function joinWithBoundaryNormalization(parts: string[]): string {
+  if (parts.length === 0) return ''
+
+  let out = parts[0]!
+  for (let i = 1; i < parts.length; i++) {
+    out = joinBoundary(out, parts[i]!)
+  }
+
+  return out
+}
+
+function joinBoundary(left: string, right: string): string {
+  if (!left || !right) return left + right
+
+  const trailing = countTrailingNewlines(left)
+  const leading = countLeadingNewlines(right)
+
+  if (trailing === 0 || leading === 0) return left + right
+
+  // Keep the stronger side's newline run and remove only boundary overlap.
+  const keep = Math.max(trailing, leading)
+
+  return `${left.slice(0, left.length - trailing)}${'\n'.repeat(keep)}${right.slice(leading)}`
+}
+
+function countTrailingNewlines(text: string): number {
+  let i = text.length - 1
+  while (i >= 0 && text[i] === '\n') i--
+
+  return text.length - 1 - i
+}
+
+function countLeadingNewlines(text: string): number {
+  let i = 0
+  while (i < text.length && text[i] === '\n') i++
+
+  return i
 }
 
 // --- Pipeline builder ---
