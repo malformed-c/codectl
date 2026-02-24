@@ -50,11 +50,9 @@ export function createMemoryHandler(memory: MemoryStore): ToolHandler {
       case 'append':
         if (!key) return { result: null, error: 'Key is required for append action' }
 
-        const existing = memory.get(key) ?? ''
-        const updated = existing + (content ?? '')
-        memory.set(key, updated)
+        memory.append(key, content ?? '')
 
-        return { result: { success: true, key, totalLength: updated.length } }
+        return { result: { success: true, key, totalLength: (memory.get(key) ?? '').length } }
 
       case 'list':
         return { result: { keys: Array.from(memory.keys()) } }

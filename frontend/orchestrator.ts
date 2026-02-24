@@ -226,6 +226,7 @@ export class Orchestrator {
 
   private fsm = new Fsm()
   private _systemRound: Round = makeSystemRound('')
+  private _enrichedSystemRound: Round = makeSystemRound('')  // cached: _systemRound + tools block
   private mode: Mode = { kind: 'chat' }
   private planValidationState: PlanValidationState = { validationErrors: [] }
   private abortController: AbortController | null = null
@@ -237,36 +238,13 @@ export class Orchestrator {
     this.profile = config.adapter.config.template
     this.checkpointStore = config.checkpointDir ? new CheckpointStore(config.checkpointDir) : null
 
-    // TODO Refactor to tool/registerBuiltin()
-    // Register built-ins
-    this.registerTool(ModeTool, async (args) =>
-      this.handleModeSwitch(args.mode as string)
-    )
+    // --- Built-in tools ---
+    this.registerTool(ModeTool, async (args) => this.handleModeSwitch(args.mode as string))
     this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
     this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
-    this.registerTool(LibraryTool, async () => ({
-      result: renderTools(this.tools, this.config.toolFormat ?? 'json')
-    }))
+    this.registerTool(LibraryTool, async () => ({ result: renderTools(this.tools, this.config.toolFormat ?? 'json') }))
     this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
-
-    // Register codeq tools
-    const codeqHandlers = createCodeqHandlers(() => {
-      const m = this.mode
-      return m.kind !== 'chat' ? m.gitRoot : ''
-    })
-
-    for (const [name, handler] of Object.entries(codeqHandlers)) {
-      const def = CodeqTools.find(t => t.name === name)!
-      this.registerTool(def, handler)
-    }
-
-    // Register exec tools (shared persistent shell)
-    const execHandlers = createExecHandlers(this.shell)
-    for (const [name, handler] of Object.entries(execHandlers)) {
-      const def = ExecTools.find(t => t.name === name)!
-      this.registerTool(def, handler)
-    }
 
     // Plan validation tool
     this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
@@ -281,7 +259,13 @@ export class Orchestrator {
     // Register subagent tool
     this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
 
-    // Register user tools
+    // --- Tool-set registrations (def + handler paired by name) ---
+    this.registerToolSet(CodeqTools, createCodeqHandlers(() =>
+      this.mode.kind !== 'chat' ? this.mode.gitRoot : ''
+    ))
+    this.registerToolSet(ExecTools, createExecHandlers(this.shell))
+
+    // --- User-supplied tools (definitions only; handlers registered by caller) ---
     for (const tool of config.tools ?? []) {
       this.tools.push(tool)
     }
@@ -294,6 +278,20 @@ export class Orchestrator {
 
     this.tools.push(def)
     this.handlers.set(def.name, handler)
+  }
+
+  /**
+   * Register a set of tools from a definition array + handler map (keyed by name).
+   * Silently skips names already registered.
+   */
+  registerToolSet(defs: ToolDefinition[], handlers: Record<string, ToolHandler>): void {
+    for (const [name, handler] of Object.entries(handlers)) {
+      const def = defs.find(d => d.name === name)
+
+      if (!def) { consola.warn(`[registerToolSet] no definition found for handler "${name}"`); continue }
+
+      this.registerTool(def, handler)
+    }
   }
 
   getMode(): Mode { return this.mode }
@@ -318,11 +316,9 @@ export class Orchestrator {
     const session = await restoreLatest(this.checkpointStore)
     if (!session) return null
 
-    // Re-populate FSM history from restored rounds
+    // Re-populate FSM history from deserialized rounds
     this.fsm = new Fsm()
-    for (const round of session.history) {
-      this.fsm.history.push(round)
-    }
+    this.fsm.hydrate(session.history)
 
     // Restore memory
     for (const [k, v] of session.memory.entries()) {
@@ -611,6 +607,24 @@ export class Orchestrator {
 
   /** Render the full history to a prompt string via renderHistory(). */
   private buildPrompt(): string {
+    const history = [this._enrichedSystemRound, ...this.fsm.getRenderableHistory()]
+    const budget = this.config.contextBudget ?? 128_000
+
+    const { text } = renderHistory(history, this.versionedMemory, this.profile, {
+      budget,
+      cache: this.renderCache,
+    })
+
+    return text
+  }
+
+  /**
+   * Rebuild the cached enriched system round (base content + tool definitions).
+   * Called from rebuildSystemMessage after updating _systemRound.
+   * Keeps the same Round object identity if content hasn't changed to preserve
+   * the WeakMap cache entry in RenderCache.
+   */
+  private _rebuildEnrichedSystem(): void {
     const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
     const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
     const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
@@ -621,19 +635,10 @@ export class Orchestrator {
     // System round is always the head of history; inject tool definitions into it
     const systemContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
       .map(s => s.text).join('')
-    const enrichedSystem = makeSystemRound(systemContent + (toolsBlock ? `${toolsBlock}` : ''))
-    enrichedSystem.count = enrichedSystem.spans({ age: 0, memory: new Map(), budget: Infinity })
-      .reduce((n, s) => n + s.text.length, 0)
+    const fullContent = systemContent + (toolsBlock ? `\n\n${toolsBlock}` : '')
 
-    const history = [enrichedSystem, ...this.fsm.getRenderableHistory()]
-    const budget = this.config.contextBudget ?? 128_000
-
-    const { text } = renderHistory(history, this.versionedMemory, this.profile, {
-      budget,
-      cache: this.renderCache,
-    })
-
-    return text
+    this._enrichedSystemRound = makeSystemRound(fullContent)
+    this._enrichedSystemRound.count = fullContent.length
   }
 
   private rebuildSystemMessage(agentGoal?: string): void {
@@ -664,6 +669,7 @@ export class Orchestrator {
 
     this._systemRound = makeSystemRound(base + modeContext + workflowContext)
     this._systemRound.count = (base + modeContext + workflowContext).length
+    this._rebuildEnrichedSystem()
   }
 
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {

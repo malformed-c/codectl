@@ -276,47 +276,14 @@ export class Fsm {
    * Emits an ErrorRound into the current agent run so the model sees the mistake.
    */
   onError(message: string, input?: string): void {
-    const err = errorRound(message, input)
-
-    if (this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results') {
-      const children =
-        this.state.kind === 'in_agent'
-          ? this.state.agentChildren
-          : this.state.agentChildren  // same field in both
-
-      this.state = {
-        ...this.state,
-        agentChildren: [...children, err],
-      } as typeof this.state
-
-      return
-    }
-
-    // Outside an agent run: commit as a standalone system-level error
-    this._commit(err)
+    this._appendOrCommit(errorRound(message, input))
   }
 
   /**
    * Orchestrator injected a system message (think-only correction, mode switch, etc).
    */
   onSystem(message: string): void {
-    const sys = systemRound(message)
-
-    if (this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results') {
-      const children =
-        this.state.kind === 'in_agent'
-          ? this.state.agentChildren
-          : this.state.agentChildren
-
-      this.state = {
-        ...this.state,
-        agentChildren: [...children, sys],
-      } as typeof this.state
-
-      return
-    }
-
-    this._commit(sys)
+    this._appendOrCommit(systemRound(message))
   }
 
   /**
@@ -361,6 +328,33 @@ export class Fsm {
     consola.debug(`[FSM] committed ${round.id} - history.length=${this.history.length}`)
   }
 
+  /**
+   * Append a round to the current in-agent children, or commit it directly
+   * if we're outside an agent run. Used by onError and onSystem.
+   */
+  private _appendOrCommit(round: Round): void {
+    if (this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results') {
+      this.state = {
+        ...this.state,
+        agentChildren: [...this.state.agentChildren, round],
+      } as typeof this.state
+
+      return
+    }
+    this._commit(round)
+  }
+
+  /**
+   * Hydrate history from deserialized rounds (e.g. checkpoint restore).
+   * Bypasses the normal event flow - rounds are stamped and appended directly.
+   * FSM stays in idle after hydration; the session is treated as fully committed.
+   */
+  hydrate(rounds: Round[]): void {
+    for (const round of rounds) {
+      this._commit(round)
+    }
+  }
+
   private _forceClose(): void {
     if (this.state.kind === 'idle') return
 
@@ -368,12 +362,22 @@ export class Fsm {
       // User message with no model response - commit as chat round with empty model text
       this._commit(chatRound(this.state.userSpans, ''))
       this.state = { kind: 'idle' }
+      return
+    }
+
+    if (this.state.kind === 'awaiting_results') {
+      // Calls were dispatched but results never arrived - leave a trace for the model
+      const abort = errorRound(
+        `Agent aborted: ${this.state.pendingCalls.length} tool call(s) were dispatched but results never arrived.`
+      )
+      const agent = agentRound([...this.state.agentChildren, abort])
+      this._commit(agent)
+      this.state = { kind: 'idle' }
 
       return
     }
 
-    // Close any open agent run
-    if (this.state.kind === 'in_agent' || this.state.kind === 'awaiting_results') {
+    if (this.state.kind === 'in_agent') {
       const agent = agentRound(this.state.agentChildren)
       this._commit(agent)
     }
