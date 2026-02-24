@@ -1,37 +1,77 @@
 import { describe, expect, test } from 'bun:test'
 import { KoboldAdapter } from '../kobold'
-import { Orchestrator } from '../orchestrator'
+import { Orchestrator, toPromise } from '../orchestrator'
 import { Profiles } from '../template'
+import type { ParsedTurn } from '../template'
 
 class HistoryAdapter extends KoboldAdapter {
-  constructor() {
+  private index = 0
+
+  constructor(private readonly turns: ParsedTurn[]) {
     super({ apiServer: 'http://localhost', template: Profiles.mistral })
   }
 
-  override async generate(messages: any) {
-    const last = messages[messages.length - 1]
-
-    if (last.role === 'tool_result') {
-      return { content: 'done' }
-    }
-
-    return {
-      toolCalls: ['bash[ARGS]{}\nw[ARGS]{}\nid[ARGS]{}'],
-    }
+  override async generateRaw(_prompt: string): Promise<ParsedTurn> {
+    const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]!
+    this.index++
+    return turn
   }
 }
 
-describe('tool_call history', () => {
-  test('stores parsed tool calls as structured json', async () => {
-    const orch = new Orchestrator({ adapter: new HistoryAdapter() })
-    await orch.chat('run commands')
+describe('tool_call history (Round-based)', () => {
+  test('stores parsed tool calls in ToolRound after agent run', async () => {
+    const orch = new Orchestrator({
+      adapter: new HistoryAdapter([
+        // Turn 1: model emits 3 tool calls
+        { content: '', toolCalls: ['bash[ARGS]{}\nw[ARGS]{}\nid[ARGS]{}'] },
 
-    const toolCall = orch.getHistory().find((m) => m.role === 'tool_call')
-    expect(toolCall).toBeTruthy()
+        // Turn 2: text-only response closes the agent run
+        { content: 'done' },
+      ]),
+    })
 
-    expect(toolCall!.calls).toHaveLength(3)
-    expect(toolCall!.calls![0]).toEqual({ tool: 'bash' })
-    expect(toolCall!.calls![1]).toEqual({ tool: 'w' })
-    expect(toolCall!.calls![2]).toEqual({ tool: 'id' })
+    await toPromise(orch.chat('run commands'))
+
+    const history = orch.getHistory()
+
+    // History should be: AgentRound (containing ToolRound) + ChatRound
+    expect(history.length).toBeGreaterThanOrEqual(1)
+
+    // Serialize to inspect internal structure
+    const serialized = history.map(r => r.serialize())
+
+    // Find the tool round inside the agent round
+    const agentRound = serialized.find(r => r.kind === 'agent')
+    expect(agentRound).toBeTruthy()
+
+    if (agentRound?.kind === 'agent') {
+      const toolRound = agentRound.rounds.find(r => r.kind === 'tool')
+      expect(toolRound).toBeTruthy()
+
+      if (toolRound?.kind === 'tool') {
+        expect(toolRound.calls).toHaveLength(3)
+        expect(toolRound.calls[0]).toMatchObject({ tool: 'bash' })
+        expect(toolRound.calls[1]).toMatchObject({ tool: 'w' })
+        expect(toolRound.calls[2]).toMatchObject({ tool: 'id' })
+      }
+    }
+  })
+
+  test('chat round captures user and model text', async () => {
+    const orch = new Orchestrator({
+      adapter: new HistoryAdapter([
+        { content: 'Hello back!' },
+      ]),
+    })
+
+    await toPromise(orch.chat('Hello'))
+
+    const serialized = orch.getHistory().map(r => r.serialize())
+    const chatRound = serialized.find(r => r.kind === 'chat')
+
+    expect(chatRound).toBeTruthy()
+    if (chatRound?.kind === 'chat') {
+      expect(chatRound.model).toBe('Hello back!')
+    }
   })
 })

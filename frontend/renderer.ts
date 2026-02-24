@@ -32,6 +32,15 @@ export class VersionedMemory {
   has(key: string): boolean { return this._map.has(key) }
   keys(): IterableIterator<string> { return this._map.keys() }
   entries(): IterableIterator<[string, string]> { return this._map.entries() }
+  list(): string[] { return Array.from(this._map.keys()) }
+
+  append(key: string, value: string): boolean {
+    const existing = this._map.get(key) ?? ''
+    this._map.set(key, existing + value)
+    this._version++
+
+    return true
+  }
 
   set(key: string, value: string): void {
     this._map.set(key, value)

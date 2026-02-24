@@ -29,6 +29,7 @@ import { Fsm } from './fsm'
 import { RenderCache, VersionedMemory, renderHistory } from './renderer'
 import { userSpan } from './span'
 import { systemRound as makeSystemRound, type Round } from './round'
+import { CheckpointStore, restoreLatest, type RestoredSession } from './checkpoint'
 
 
 // --- Types ---
@@ -75,6 +76,9 @@ export type OrchestratorConfig = {
 
   /** Character budget for renderHistory. Default: 128_000 (≈ 32K tokens). */
   contextBudget?: number
+
+  /** Directory to write checkpoints. If omitted, checkpointing is disabled. */
+  checkpointDir?: string
 }
 
 export type TurnResult = {
@@ -225,11 +229,13 @@ export class Orchestrator {
   private mode: Mode = { kind: 'chat' }
   private planValidationState: PlanValidationState = { validationErrors: [] }
   private abortController: AbortController | null = null
+  private readonly checkpointStore: CheckpointStore | null
 
   constructor(config: OrchestratorConfig) {
     this.adapter = config.adapter
     this.config = config
     this.profile = config.adapter.config.template
+    this.checkpointStore = config.checkpointDir ? new CheckpointStore(config.checkpointDir) : null
 
     // TODO Refactor to tool/registerBuiltin()
     // Register built-ins
@@ -300,6 +306,47 @@ export class Orchestrator {
   }
 
   abort(): void { this.abortController?.abort() }
+
+  /**
+   * Restore session state from the latest checkpoint.
+   * Replaces FSM history and versioned memory with persisted state.
+   * Returns the restored session or null if no checkpoint exists.
+   */
+  async restoreCheckpoint(): Promise<RestoredSession | null> {
+    if (!this.checkpointStore) return null
+
+    const session = await restoreLatest(this.checkpointStore)
+    if (!session) return null
+
+    // Re-populate FSM history from restored rounds
+    this.fsm = new Fsm()
+    for (const round of session.history) {
+      this.fsm.history.push(round)
+    }
+
+    // Restore memory
+    for (const [k, v] of session.memory.entries()) {
+      this.versionedMemory.set(k, v)
+    }
+
+    // Restore mode
+    if (session.modeKind === 'agent' && this.mode.kind !== 'agent') {
+      const gitRoot = await findGitRoot(process.cwd())
+
+      this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
+    }
+
+    this.rebuildSystemMessage()
+
+    consola.info(`[checkpoint] restored ${session.history.length} rounds`)
+
+    return session
+  }
+
+  /** Manually trigger a checkpoint save (e.g. on graceful shutdown). */
+  async saveCheckpoint(): Promise<void> {
+    await this._saveCheckpoint()
+  }
 
   /**
    * Headless agent run: injects the goal into the system prompt and starts the
@@ -383,6 +430,7 @@ export class Orchestrator {
       // Stop if no tools called - commit ChatRound via FSM
       if (!parsed.toolCalls?.length) {
         this.fsm.onModel(parsed.think, parsed.content, [])
+        void this._saveCheckpoint()
 
         yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
 
@@ -490,6 +538,8 @@ export class Orchestrator {
           this.fsm.onDone(doneResult)
         }
 
+        void this._saveCheckpoint()
+
         yield { kind: 'turn', turn: parsed, toolsExecuted: turnTools }
 
       } else if (parsed.toolCalls?.length > 0 && !parsed.malformed) {
@@ -515,6 +565,20 @@ export class Orchestrator {
     }
 
     return { turn: finalTurn, toolsExecuted }
+  }
+
+  /** Save a checkpoint if a store is configured. Fire-and-forget safe (awaited internally). */
+  private async _saveCheckpoint(): Promise<void> {
+    if (!this.checkpointStore) return
+
+    const modeKind = this.mode.kind === 'agent' ? 'agent' : 'chat'
+
+    await this.checkpointStore.save(
+      this.fsm.history,
+      this.versionedMemory,
+      modeKind,
+      this.fsm.cursor,
+    )
   }
 
   /** Called after a tool error in agent mode; ejects to chat if threshold hit. */

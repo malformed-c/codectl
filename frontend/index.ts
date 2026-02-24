@@ -22,12 +22,10 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
   const roomId = 'cli-default'
   const room = createRoom(roomId, orchestrator, 'cli')
 
-  // Restore history if available
-  const persisted = await historyStore.load(roomId)
-  if (persisted) {
-    // TODO: restore via CheckpointStore.restoreLatest() once HistoryStore migration is done
-    // orchestrator.setHistory(persisted.history)
-    consola.info(`[history restore pending CheckpointStore migration] found ${persisted.history.length} messages`)
+  // Restore from checkpoint if available
+  const restored = await orchestrator.restoreCheckpoint()
+  if (restored) {
+    consola.info(`[checkpoint] restored ${restored.history.length} rounds`)
   }
 
   consola.info('codectl CLI ready. Type your message, Ctrl+C to exit.')
@@ -45,7 +43,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
     // Slash commands
     if (text === '/new') {
-      await historyStore.save(room.meta, orchestrator.getHistory() as any)
+      await orchestrator.saveCheckpoint()
 
       orchestrator.clearHistory()
 
@@ -103,7 +101,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
         }
       }
 
-      await historyStore.save(room.meta, orchestrator.getHistory() as any)
+      // Checkpoints are saved automatically after each committed round in runLoop
 
     } catch (err) {
       consola.error('Error:', err)
@@ -170,7 +168,7 @@ async function main(): Promise<void> {
     process.on('SIGINT', async () => {
       consola.info('Saving history...')
 
-      await historyStore.save({ id: 'cli-default', createdAt: new Date(), updatedAt: new Date() }, orchestrator.getHistory() as any)
+      await orchestrator.saveCheckpoint()
 
       process.exit(0)
     })

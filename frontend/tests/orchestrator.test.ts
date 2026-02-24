@@ -12,8 +12,9 @@ class ScriptedAdapter extends KoboldAdapter {
   }
 
   override async generateRaw(_prompt: string): Promise<ParsedTurn> {
-    const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]
+    const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]!
     this.index += 1
+
     return turn
   }
 }

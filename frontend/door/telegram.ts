@@ -254,14 +254,11 @@ export class TelegramDoor {
 
     consola.trace('Handle TG message')
 
-    // Restore persisted history if orchestrator is fresh
-    if (room.orchestrator.getHistory().length === 0 && this.config.historyStore) {
-      const persisted = await this.config.historyStore.load(room.meta.id)
-
-      if (persisted) {
-        // TODO: restore via CheckpointStore once HistoryStore migration done
-        // room.orchestrator.setHistory(persisted.history)
-        consola.debug(`Restored history for room ${room.meta.id} (${persisted.history.length} messages)`)
+    // Restore from checkpoint if orchestrator is fresh
+    if (room.orchestrator.getHistory().length === 0) {
+      const restored = await room.orchestrator.restoreCheckpoint()
+      if (restored) {
+        consola.debug(`[checkpoint] restored ${restored.history.length} rounds for room ${room.meta.id}`)
       }
     }
 
@@ -329,10 +326,7 @@ export class TelegramDoor {
 
       touchRoom(room)
 
-      // Persist after each turn
-      if (this.config.historyStore) {
-        await this.config.historyStore.save(room.meta, room.orchestrator.getHistory() as any)
-      }
+      // Checkpoints are saved automatically after each committed round in runLoop
 
     } catch (err) {
       consola.error('Error handling Telegram message:', err)
