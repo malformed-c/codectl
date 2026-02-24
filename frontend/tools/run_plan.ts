@@ -74,7 +74,8 @@ export function createRunPlanHandler(
     const gitRoot = getGitRoot()
     const backendDir = getBackendDir()
 
-    if (!gitRoot) return { result: null, error: 'run_plan requires a git root (switch to codeplan mode first)' }
+    // TODO make a git root tool
+    if (!gitRoot) return { result: null, error: 'run_plan requires a git root (switch to agent mode first)' }
 
     const result = await runPlan(plan, { adapter, gitRoot, backendDir })
 
