@@ -92,6 +92,7 @@ export type Config = {
   api_server: string
   api_type: string
   history_path: string
+  checkpoint_path?: string
   default_model: string
   available_models: string[]
   tool_format?: string
@@ -187,7 +188,12 @@ const isPair = (v: unknown): v is TemplatePair =>
   Array.isArray(v) && v.length === 2
 
 export function wrapContent([open, close]: TemplatePair, content: string): string {
-  return `${open}${content}${close}`
+  // Normalize newline boundaries between open/content and content/close
+  // to prevent double-\n when both sides already carry a newline.
+  let middle = content
+  if (open.endsWith('\n') && middle.startsWith('\n')) middle = middle.slice(1)
+  if (close.startsWith('\n') && middle.endsWith('\n')) middle = middle.slice(0, -1)
+  return `${open}${middle}${close}`
 }
 
 /** Resolve toolResult/toolCall union to the TemplatePair used for wrapping */
@@ -245,7 +251,7 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
   const isRich = tr && !Array.isArray(tr) && (tr as ToolResultsTemplate).rich
 
   if (stored.error) {
-    const body = JSON.stringify({ error: stored.error }, null, 2)
+    const body = JSON.stringify({ error: stored.error })
     if (isRich) {
       const rich = (tr as ToolResultsTemplate).rich!
       return `${rich.callId}${stored.callId ?? ''}${rich.content}${body}`
@@ -259,7 +265,7 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
   const isString = typeof stored.value === 'string'
   const inner = isString
     ? (stored.value as string)
-    : JSON.stringify({ result: stored.value }, null, 2)
+    : JSON.stringify({ result: stored.value })
 
   if (isRich) {
     const rich = (tr as ToolResultsTemplate).rich!
@@ -359,14 +365,28 @@ export function renderFim(req: FimRequest, template: TextTemplate): string | nul
 
 /**
  * Extract content between open/close tokens. Returns null if not found.
+ * For think blocks (where nesting/orphans are common), uses best-effort strategy:
+ *   - Close at the NEXT opening tag if no proper close found first
+ *   - Orphan close (close without open) is silently ignored
  */
-function extractBetween(text: string, [open, close]: TemplatePair): string | null {
+function extractBetween(text: string, [open, close]: TemplatePair, bestEffort = false): string | null {
   const start = text.indexOf(open)
 
   if (start === -1) return null
 
   const contentStart = start + open.length
   if (!close) return text.slice(contentStart).trim()
+
+  // Best-effort: close at the earlier of [/THINK] or the next [THINK]
+  if (bestEffort) {
+    const nextOpen = text.indexOf(open, contentStart)
+    const closeIdx = text.indexOf(close, contentStart)
+
+    const end = [nextOpen, closeIdx].filter(i => i !== -1).sort((a, b) => a - b)[0]
+    if (end === undefined) return text.slice(contentStart).trim()
+
+      return text.slice(contentStart, end).trim()
+  }
 
   const end = text.indexOf(close, contentStart)
   if (end === -1) return text.slice(contentStart).trim()
@@ -416,8 +436,9 @@ function extractAll(text: string, [open, close]: TemplatePair): string[] {
 
 /**
  * Remove all occurrences of a tagged block from text.
+ * bestEffort: also strips orphan close tags and treats next open as close boundary.
  */
-function stripTag(text: string, [open, close]: TemplatePair): string {
+function stripTag(text: string, [open, close]: TemplatePair, bestEffort = false): string {
   // If no closing tag, we assume the tag consumes the rest of the string
   if (!close) {
     const start = text.indexOf(open)
@@ -428,19 +449,46 @@ function stripTag(text: string, [open, close]: TemplatePair): string {
   }
 
   let result = text
+
+  // Best-effort: strip orphan close tags first
+  if (bestEffort && !result.includes(open)) {
+    result = result.replaceAll(close, '')
+  }
+
   while (true) {
     const start = result.indexOf(open)
     if (start === -1) break
 
-    const end = result.indexOf(close, start + open.length)
-    if (end === -1) {
+    const contentStart = start + open.length
+
+    // Best-effort: close at whichever comes first - proper close or next open
+    let end: number
+    if (bestEffort) {
+      const nextOpen = result.indexOf(open, contentStart)
+      const closeIdx = result.indexOf(close, contentStart)
+      const candidates = [nextOpen, closeIdx].filter(i => i !== -1).sort((a, b) => a - b)
+      if (candidates.length === 0) {
+        result = result.slice(0, start)
+
+        break
+      }
+
+      end = candidates[0]!
+      const closeToken = result[end] === close[0] && result.slice(end, end + close.length) === close ? close : ''
+      result = result.slice(0, start) + result.slice(end + closeToken.length)
+
+      continue
+    }
+
+    const end2 = result.indexOf(close, start + open.length)
+    if (end2 === -1) {
       // If we found an open tag but no close tag, strip everything after it
       result = result.slice(0, start)
 
       break
     }
 
-    result = result.slice(0, start) + result.slice(end + close.length)
+    result = result.slice(0, start) + result.slice(end2 + close.length)
   }
 
   return result
@@ -474,12 +522,12 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
 
   const result: ParsedTurn = { content: '' }
 
-  // Extract think block
+  // Extract think block (best-effort: handles orphan close, nesting, etc.)
   if (template.think) {
-    const think = extractBetween(text, template.think)
+    const think = extractBetween(text, template.think, true)
     if (think !== null) {
       result.think = think
-      text = stripTag(text, template.think)
+      text = stripTag(text, template.think, true)
     }
   }
 

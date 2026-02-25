@@ -1,24 +1,51 @@
 import type { ToolDefinition } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 
+// --- Shared memory interface (subset of VersionedMemory) ---
+
+export interface MemoryAccess {
+  get(key: string): string | undefined
+  set(key: string, value: string): void
+  has(key: string): boolean
+}
+
+// --- Helpers ---
+
+/** Resolve a value source: inline text, or a memory key reference. */
+function resolveSource(
+  text: string | undefined,
+  key: string | undefined,
+  memory: MemoryAccess,
+): { value: string } | { error: string } {
+  if (key) {
+    const val = memory.get(key)
+    if (val === undefined) return { error: `Memory key '${key}' not found` }
+    return { value: val }
+  }
+  if (text !== undefined) return { value: text }
+  return { error: "Provide either 'text' or 'key' (memory key)" }
+}
+
 // --- extract tool ---
-// Pull a value out of structured or unstructured text.
-// Avoids needing bash+jq or regex shell escaping for common patterns.
 
 export const ExtractTool: ToolDefinition = {
   name: 'extract',
-  description: 'Extract a value from text using a dot-path (JSON), regex, or line range. Useful for pulling fields out of tool output without shelling out to jq or awk.',
+  description:
+    'Extract a value from text or a memory key using a dot-path (JSON), regex, or line range. ' +
+    'Optionally save the result to a memory key with save_to.',
   parameters: {
     type: 'object',
     properties: {
-      text: { type: 'string', description: 'The input text to extract from.' },
+      text: { type: 'string', description: 'Inline input text to extract from.' },
+      key: { type: 'string', description: 'Memory key to read input from (alternative to text).' },
       method: { type: 'string', enum: ['json', 'regex', 'lines'], description: 'Extraction strategy.' },
       path: { type: 'string', description: 'For json: dot-notation path, e.g. "a.b.0.c".' },
       pattern: { type: 'string', description: 'For regex: JS regex string. First capture group (or full match) returned.' },
       from: { type: 'number', description: 'For lines: 1-indexed start line (inclusive).' },
       to: { type: 'number', description: 'For lines: 1-indexed end line (inclusive, default = same as from).' },
+      save_to: { type: 'string', description: 'If set, store extracted value in this memory key.' },
     },
-    required: ['text', 'method'],
+    required: ['method'],
   },
   returns: {
     type: 'object',
@@ -28,10 +55,20 @@ export const ExtractTool: ToolDefinition = {
   },
 }
 
-export function createExtractHandler(): ToolHandler {
+export function createExtractHandler(memory: MemoryAccess): ToolHandler {
   return async (args) => {
-    const text = args.text as string
     const method = args.method as string
+    const saveTo = args.save_to as string | undefined
+
+    const src = resolveSource(
+      args.text as string | undefined,
+      args.key as string | undefined,
+      memory,
+    )
+    if ('error' in src) return { result: null, error: src.error }
+    const text = src.value
+
+    let extracted: string | null = null
 
     if (method === 'json') {
       const path = args.path as string | undefined
@@ -42,20 +79,18 @@ export function createExtractHandler(): ToolHandler {
       catch { return { result: null, error: 'Input is not valid JSON' } }
 
       let cur: unknown = parsed
-      for (const key of path.split('.')) {
+      for (const k of path.split('.')) {
         if (cur === null || typeof cur !== 'object') {
-          return { result: null, error: `Path segment '${key}' not reachable` }
+          return { result: null, error: `Path segment '${k}' not reachable` }
         }
 
-        cur = (cur as Record<string, unknown>)[key]
-        if (cur === undefined) return { result: null, error: `Key '${key}' not found` }
+        cur = (cur as Record<string, unknown>)[k]
+        if (cur === undefined) return { result: null, error: `Key '${k}' not found` }
       }
 
-      const value = typeof cur === 'string' ? cur : JSON.stringify(cur, null, 2)
-      return { result: value }
-    }
+      extracted = typeof cur === 'string' ? cur : JSON.stringify(cur)
 
-    if (method === 'regex') {
+    } else if (method === 'regex') {
       const pattern = args.pattern as string | undefined
       if (!pattern) return { result: null, error: "'pattern' required for regex extraction" }
 
@@ -65,21 +100,23 @@ export function createExtractHandler(): ToolHandler {
 
       const m = re.exec(text)
       if (!m) return { result: null, error: 'Pattern did not match' }
+      extracted = m[1] ?? m[0]
 
-      return { result: m[1] ?? m[0] }
-    }
-
-    if (method === 'lines') {
+    } else if (method === 'lines') {
       const lines = text.split('\n')
       const from = Math.max(1, (args.from as number | undefined) ?? 1)
       const to = Math.max(from, (args.to as number | undefined) ?? from)
+      extracted = lines.slice(from - 1, to).join('\n')
 
-      const slice = lines.slice(from - 1, to)
-
-      return { result: slice.join('\n') }
+    } else {
+      return { result: null, error: `Unknown method '${method}'. Use json, regex, or lines.` }
     }
 
-    return { result: null, error: `Unknown method '${method}'. Use json, regex, or lines.` }
+    if (saveTo && extracted !== null) {
+      memory.set(saveTo, extracted)
+    }
+
+    return { result: extracted }
   }
 }
 
@@ -88,27 +125,47 @@ export function createExtractHandler(): ToolHandler {
 
 export const JsonTool: ToolDefinition = {
   name: 'json',
-  description: 'Parse, query, or pretty-print JSON. Use get for dot-notation field access, keys for inspecting object structure, set for in-place updates, pretty for formatting.',
+  description:
+    'Parse, query, or mutate JSON. Source is inline text or a memory key. ' +
+    'Mutations (set, append, delete) write result back to the same memory key.',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['get', 'keys', 'set', 'pretty'], description: 'Operation to perform.' },
-      text: { type: 'string', description: 'JSON string to operate on.' },
-      path: { type: 'string', description: 'Dot-notation path for get/set, e.g. "response.items.0.name".' },
-      value: { type: 'string', description: 'For set: the new value (parsed as JSON if valid, otherwise treated as string).' },
+      action: {
+        type: 'string',
+        enum: ['get', 'keys', 'set', 'append', 'delete', 'pretty'],
+        description: 'Operation to perform.',
+      },
+      text: { type: 'string', description: 'Inline JSON string to operate on.' },
+      key: { type: 'string', description: 'Memory key to read (and write back) JSON from.' },
+      path: { type: 'string', description: 'Dot-notation path for get/set/delete, e.g. "response.items.0.name".' },
+      value: { type: 'string', description: 'For set/append: new value (parsed as JSON if valid, else string).' },
     },
-    required: ['action', 'text'],
+    required: ['action'],
   },
 }
 
-export function createJsonHandler(): ToolHandler {
+export function createJsonHandler(memory: MemoryAccess): ToolHandler {
   return async (args) => {
     const action = args.action as string
-    const text = args.text as string
+    const memKey = args.key as string | undefined
+
+    const src = resolveSource(
+      args.text as string | undefined,
+      memKey,
+      memory,
+    )
+    if ('error' in src) return { result: null, error: src.error }
 
     let parsed: unknown
-    try { parsed = JSON.parse(text) }
+    try { parsed = JSON.parse(src.value) }
     catch { return { result: null, error: 'Input is not valid JSON' } }
+
+    const persist = (root: unknown) => {
+      const out = JSON.stringify(root)
+      if (memKey) memory.set(memKey, out)
+      return { result: out }
+    }
 
     if (action === 'pretty') {
       return { result: JSON.stringify(parsed, null, 2) }
@@ -127,16 +184,16 @@ export function createJsonHandler(): ToolHandler {
       if (!path) return { result: null, error: "'path' required for get" }
 
       let cur: unknown = parsed
-      for (const key of path.split('.')) {
+      for (const k of path.split('.')) {
         if (cur === null || typeof cur !== 'object') {
-          return { result: null, error: `Cannot traverse into '${key}'` }
+          return { result: null, error: `Cannot traverse into '${k}'` }
         }
 
-        cur = (cur as Record<string, unknown>)[key]
-        if (cur === undefined) return { result: null, error: `Key '${key}' not found` }
+        cur = (cur as Record<string, unknown>)[k]
+        if (cur === undefined) return { result: null, error: `Key '${k}' not found` }
       }
 
-      return { result: typeof cur === 'string' ? cur : JSON.stringify(cur, null, 2) }
+      return { result: typeof cur === 'string' ? cur : JSON.stringify(cur) }
     }
 
     if (action === 'set') {
@@ -148,7 +205,6 @@ export function createJsonHandler(): ToolHandler {
       let newVal: unknown
       try { newVal = JSON.parse(val) } catch { newVal = val }
 
-      // Deep clone to avoid mutation
       const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
       const keys = path.split('.')
       let cur: Record<string, unknown> = root
@@ -158,8 +214,60 @@ export function createJsonHandler(): ToolHandler {
         cur = cur[k] as Record<string, unknown>
       }
       cur[keys[keys.length - 1]!] = newVal
+      return persist(root)
+    }
 
-      return { result: JSON.stringify(root, null, 2) }
+    if (action === 'append') {
+      const path = args.path as string | undefined
+      const val = args.value as string | undefined
+      if (!path) return { result: null, error: "'path' required for append" }
+      if (val === undefined) return { result: null, error: "'value' required for append" }
+
+      let newVal: unknown
+      try { newVal = JSON.parse(val) } catch { newVal = val }
+
+      const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
+      const keys = path.split('.')
+      let cur: Record<string, unknown> = root
+      for (let i = 0; i < keys.length - 1; i++) {
+        const k = keys[i]!
+        if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {}
+        cur = cur[k] as Record<string, unknown>
+      }
+
+      const lastKey = keys[keys.length - 1]!
+      const existing = cur[lastKey]
+      if (Array.isArray(existing)) {
+        existing.push(newVal)
+
+      } else if (typeof existing === 'string' && typeof newVal === 'string') {
+        cur[lastKey] = existing + newVal
+
+      } else {
+        cur[lastKey] = newVal
+      }
+
+      return persist(root)
+    }
+
+    if (action === 'delete') {
+      const path = args.path as string | undefined
+      if (!path) return { result: null, error: "'path' required for delete" }
+
+      const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
+      const keys = path.split('.')
+      let cur: Record<string, unknown> = root
+      for (let i = 0; i < keys.length - 1; i++) {
+        const k = keys[i]!
+        if (typeof cur[k] !== 'object' || cur[k] === null) {
+          return { result: null, error: `Path '${path}' does not exist` }
+        }
+
+        cur = cur[k] as Record<string, unknown>
+      }
+      delete cur[keys[keys.length - 1]!]
+
+      return persist(root)
     }
 
     return { result: null, error: `Unknown action '${action}'` }
@@ -167,60 +275,93 @@ export function createJsonHandler(): ToolHandler {
 }
 
 // --- instantiate tool ---
-// Fill a template string with named placeholders.
-// The model can compose prompts, file paths, or code fragments without needing
-// string manipulation in bash.
+// Instantiate a named JSON template into memory, or fill {{placeholder}} strings.
 
-export const InstantiateTool: ToolDefinition = {
-  name: 'instantiate',
-  description: 'Fill a template string containing {{name}} placeholders with provided values. Returns the rendered string. Useful for constructing file contents, prompts, or paths.',
-  parameters: {
-    type: 'object',
-    properties: {
-      template: { type: 'string', description: 'Template string with {{variable}} placeholders.' },
-      vars: {
-        type: 'object',
-        description: 'Object mapping placeholder names to their replacement values.',
-        properties: {},
-      },
-    },
-    required: ['template', 'vars'],
+const BUILTIN_TEMPLATES: Record<string, unknown> = {
+  codeplan: {
+    meta: { description: '', order: 0 },
+    tasks: [],
   },
 }
 
-export function createInstantiateHandler(): ToolHandler {
+export const InstantiateTool: ToolDefinition = {
+  name: 'instantiate',
+  description:
+    'Instantiate a built-in JSON template (e.g. codeplan) into a memory key, or fill a ' +
+    '{{placeholder}} template string and optionally save to memory. ' +
+    'Built-in templates: codeplan.',
+  parameters: {
+    type: 'object',
+    properties: {
+      template_name: {
+        type: 'string',
+        enum: ['codeplan'],
+        description: 'Name of a built-in JSON template to instantiate.',
+      },
+      template: {
+        type: 'string',
+        description: 'Template string with {{variable}} placeholders (alternative to template_name).',
+      },
+      vars: {
+        type: 'object',
+        description: 'Values for {{placeholder}} substitution.',
+        properties: {},
+      },
+      save_to: {
+        type: 'string',
+        description: 'Memory key to store the result in.',
+      },
+    },
+    required: [],
+  },
+}
+
+export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
   return async (args) => {
-    const template = args.template as string
+    const templateName = args.template_name as string | undefined
+    const templateStr = args.template as string | undefined
+    const saveTo = args.save_to as string | undefined
     const vars = args.vars as Record<string, string> | undefined
 
-    if (!vars || typeof vars !== 'object') {
-      return { result: null, error: "'vars' must be an object" }
-    }
+    let rendered: string
 
-    const rendered = template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => {
-      if (Object.prototype.hasOwnProperty.call(vars, name)) {
-        return String(vars[name])
+    if (templateName) {
+      const tpl = BUILTIN_TEMPLATES[templateName]
+      if (!tpl) return { result: null, error: `Unknown template '${templateName}'` }
+
+      rendered = JSON.stringify(tpl, null, 2)
+
+    } else if (templateStr !== undefined) {
+      if (!vars || typeof vars !== 'object') {
+        return { result: null, error: "'vars' must be an object when using template string" }
+      }
+      rendered = templateStr.replace(/\{\{(\w+)\}\}/g, (_, name: string) =>
+        Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : `{{${name}}}`
+      )
+      const remaining = [...rendered.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1])
+      if (remaining.length) {
+        return { result: null, error: `Unfilled placeholders: ${remaining.join(', ')}` }
       }
 
-      return `{{${name}}}`  // leave unknown placeholders intact
-    })
-
-    // Report any unfilled placeholders as a warning in the result
-    const remaining = [...rendered.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1])
-
-    return {
-      result: rendered,
-      ...(remaining.length ? { error: `Unfilled placeholders: ${remaining.join(', ')}` } : {}),
+    } else {
+      return { result: null, error: "Provide either 'template_name' or 'template'" }
     }
+
+    if (saveTo) {
+      memory.set(saveTo, rendered)
+      return { result: { saved_to: saveTo } }
+    }
+
+    return { result: rendered }
   }
 }
 
 export const TransformTools: ToolDefinition[] = [ExtractTool, JsonTool, InstantiateTool]
 
-export function createTransformHandlers(): Record<string, ToolHandler> {
+export function createTransformHandlers(memory: MemoryAccess): Record<string, ToolHandler> {
   return {
-    extract: createExtractHandler(),
-    json: createJsonHandler(),
-    instantiate: createInstantiateHandler(),
+    extract: createExtractHandler(memory),
+    json: createJsonHandler(memory),
+    instantiate: createInstantiateHandler(memory),
   }
 }

@@ -3,7 +3,6 @@ import { hydrate } from "@grammyjs/hydrate"
 import type { HydrateFlavor } from "@grammyjs/hydrate"
 import { consola } from 'consola'
 import { marked } from 'marked'
-import { join } from 'path'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { HistoryStore } from '../history.ts'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
@@ -15,8 +14,8 @@ export type TelegramDoorConfig = {
   token: string
   adapter: KoboldAdapter
   historyStore?: HistoryStore
-  /** Root directory for per-chat checkpoints (room key is appended). */
-  checkpointRoot?: string
+  /** Base directory for per-room checkpoints. Each room gets its own subdirectory. */
+  checkpointDir?: string
   /** Extra orchestrator config per room (adapter is injected, do not set here) */
   orchestratorConfig?: Omit<OrchestratorConfig, 'adapter'>
   /** Max message length before splitting (Telegram text limit: 4096, with media: 1024) */
@@ -42,14 +41,8 @@ function splitMessage(text: string, maxLen = 4096): string[] {
   return chunks
 }
 
-export function roomIdForChat(chatId: number): string {
+function roomIdForChat(chatId: number): string {
   return `telegram-${chatId}`
-}
-
-export function checkpointDirForChat(checkpointRoot: string | undefined, chatId: number): string | undefined {
-  if (!checkpointRoot) return undefined
-
-  return join(checkpointRoot, roomIdForChat(chatId))
 }
 
 /**
@@ -223,16 +216,10 @@ export class TelegramDoor {
       const roomId = roomIdForChat(ctx.chat.id)
       const existing = this.registry.get(roomId)
 
-      if (this.config.historyStore) {
-        if (existing) {
-          await this.config.historyStore.archive(roomId, existing.meta, existing.orchestrator.getHistory() as any)
-
-        } else {
-          await this.config.historyStore.archive(roomId)
-        }
-      }
-
       if (existing) {
+        // Save a checkpoint before clearing so the session is recoverable
+        await existing.orchestrator.saveCheckpoint()
+
         existing.orchestrator.clearHistory()
         touchRoom(existing)
       }
@@ -348,14 +335,21 @@ export class TelegramDoor {
 
   private getOrCreateRoom(chatId: number): ReturnType<RoomRegistry['getOrCreate']> {
     const roomId = roomIdForChat(chatId)
-    const checkpointDir = checkpointDirForChat(this.config.checkpointRoot, chatId)
 
-    return this.registry.getOrCreate(roomId, () =>
-      createRoom(
+    return this.registry.getOrCreate(roomId, () => {
+      const checkpointDir = this.config.checkpointDir
+        ? `${this.config.checkpointDir}/${roomId}`
+        : undefined
+
+      return createRoom(
         roomId,
-        new Orchestrator({ ...this.config.orchestratorConfig, checkpointDir, adapter: this.config.adapter }),
+        new Orchestrator({
+          ...this.config.orchestratorConfig,
+          adapter: this.config.adapter,
+          ...(checkpointDir ? { checkpointDir } : {}),
+        }),
         `telegram:${chatId}`
       )
-    )
+    })
   }
 }

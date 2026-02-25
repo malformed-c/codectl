@@ -143,10 +143,15 @@ export const DoneTool: ToolDefinition = {
 
 export const LibraryTool: ToolDefinition = {
   name: 'tool_library',
-  description: 'List all available tools and their documentation. Use this to explore what you can do.',
+  description: 'List available tools and their documentation. Use this to explore what you can do.',
   parameters: {
     type: 'object',
-    properties: {},
+    properties: {
+      prefix: {
+        type: 'string',
+        description: 'Optional prefix to filter tools by name.',
+      },
+    },
     required: [],
   },
 }
@@ -244,7 +249,14 @@ export class Orchestrator {
     this.registerTool(ModeTool, async (args) => this.handleModeSwitch(args.mode as string))
     this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
     this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
-    this.registerTool(LibraryTool, async () => ({ result: renderTools(this.tools, this.config.toolFormat ?? 'json') }))
+    this.registerTool(LibraryTool, async (args) => {
+      const prefix = args.prefix as string | undefined
+      const tools = prefix
+        ? this.tools.filter(t => t.name.startsWith(prefix))
+        : this.tools
+
+      return { result: renderTools(tools, this.config.toolFormat ?? 'json') }
+    })
     this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
     this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
@@ -260,7 +272,7 @@ export class Orchestrator {
       this.mode.kind !== 'chat' ? this.mode.gitRoot : ''
     ))
     this.registerToolSet(ExecTools, createExecHandlers(this.shell))
-    this.registerToolSet(TransformTools, createTransformHandlers())
+    this.registerToolSet(TransformTools, createTransformHandlers(this.versionedMemory))
 
     // --- User-supplied tools (definitions only; handlers registered by caller) ---
     for (const tool of config.tools ?? []) {

@@ -138,7 +138,7 @@ async function main(): Promise<void> {
       token: telegramToken,
       adapter,
       historyStore,
-      checkpointRoot: config.checkpoint_root,
+      checkpointDir: config.checkpoint_path ?? './checkpoints',
       orchestratorConfig: {
         toolFormat: (config.tool_format ?? 'json') as any,
         autonomousTurns: 16,
@@ -162,6 +162,7 @@ async function main(): Promise<void> {
       adapter,
       toolFormat: (config.tool_format ?? 'json') as any,
       autonomousTurns: 16,
+      checkpointDir: config.checkpoint_path ? `${config.checkpoint_path}/cli-default` : undefined,
     })
 
     process.on('SIGINT', async () => {
