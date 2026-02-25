@@ -1,7 +1,8 @@
 import type { ToolDefinition } from '../tool'
 import type { ToolHandler } from '../orchestrator'
+import type { SerializedRound } from '../round'
 
-// --- Shared memory interface (subset of VersionedMemory) ---
+// --- Interfaces ---
 
 export interface MemoryAccess {
   get(key: string): string | undefined
@@ -9,21 +10,70 @@ export interface MemoryAccess {
   has(key: string): boolean
 }
 
+export interface HistoryAccess {
+  /** Return all committed serialized rounds, newest last. */
+  getCommitted(): SerializedRound[]
+}
+
 // --- Helpers ---
 
-/** Resolve a value source: inline text, or a memory key reference. */
+/** Resolve input text from inline text, memory key, or turn offset. */
 function resolveSource(
   text: string | undefined,
   key: string | undefined,
+  turn: number | undefined,
   memory: MemoryAccess,
+  history: HistoryAccess,
 ): { value: string } | { error: string } {
+  if (turn !== undefined) {
+    const content = getUserTurnText(history.getCommitted(), turn)
+    if (content === undefined) return { error: `No user turn at offset ${turn}` }
+    return { value: content }
+  }
+
   if (key) {
     const val = memory.get(key)
     if (val === undefined) return { error: `Memory key '${key}' not found` }
     return { value: val }
   }
+
   if (text !== undefined) return { value: text }
-  return { error: "Provide either 'text' or 'key' (memory key)" }
+  return { error: "Provide 'text', 'key' (memory key), or 'turn' (user message offset)" }
+}
+
+/**
+ * Walk committed history newest-to-oldest and return the text of the Nth
+ * user turn (offset 0 = latest, 1 = second-latest, etc.).
+ * Only top-level ChatRounds are counted.
+ */
+function getUserTurnText(rounds: SerializedRound[], offset: number): string | undefined {
+  let found = 0
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    const r = rounds[i]!
+    if (r.kind === 'chat') {
+      if (found === offset) {
+        return r.user.map(s => s.text).join('')
+      }
+
+      found++
+    }
+  }
+  return undefined
+}
+
+/**
+ * Extract all fenced code blocks from text.
+ * Returns array of { lang, code } objects.
+ */
+function extractCodeBlocks(text: string): Array<{ lang: string; code: string }> {
+  const blocks: Array<{ lang: string; code: string }> = []
+  const re = /```([^\n]*)\n([\s\S]*?)```/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    blocks.push({ lang: (m[1] ?? '').trim(), code: (m[2] ?? '').trimEnd() })
+  }
+
+  return blocks
 }
 
 // --- extract tool ---
@@ -31,39 +81,53 @@ function resolveSource(
 export const ExtractTool: ToolDefinition = {
   name: 'extract',
   description:
-    'Extract a value from text or a memory key using a dot-path (JSON), regex, or line range. ' +
-    'Optionally save the result to a memory key with save_to.',
+    'Extract a value from text, a memory key, or a user message turn. ' +
+    'Methods: json (dot-path), regex, lines, codeblocks. ' +
+    'Source: inline text, key (memory), or turn (user message offset - 0 = latest). ' +
+    'Optionally save result to memory with save_to.',
   parameters: {
     type: 'object',
     properties: {
-      text: { type: 'string', description: 'Inline input text to extract from.' },
-      key: { type: 'string', description: 'Memory key to read input from (alternative to text).' },
-      method: { type: 'string', enum: ['json', 'regex', 'lines'], description: 'Extraction strategy.' },
+      text: { type: 'string', description: 'Inline input text.' },
+      key: { type: 'string', description: 'Memory key to read from.' },
+      turn: { type: 'number', description: 'User message offset (0 = latest, 1 = second-latest, ...). Default: 0 when method is codeblocks and no other source given.' },
+      method: { type: 'string', enum: ['json', 'regex', 'lines', 'codeblocks'], description: 'Extraction strategy.' },
       path: { type: 'string', description: 'For json: dot-notation path, e.g. "a.b.0.c".' },
       pattern: { type: 'string', description: 'For regex: JS regex string. First capture group (or full match) returned.' },
       from: { type: 'number', description: 'For lines: 1-indexed start line (inclusive).' },
       to: { type: 'number', description: 'For lines: 1-indexed end line (inclusive, default = same as from).' },
-      save_to: { type: 'string', description: 'If set, store extracted value in this memory key.' },
+      index: { type: 'number', description: 'For codeblocks: return only this block (0-indexed). Omit to return all blocks as JSON.' },
+      lang: { type: 'string', description: 'For codeblocks: filter by language tag (e.g. "python", "json").' },
+      save_to: { type: 'string', description: 'Store result in this memory key.' },
     },
     required: ['method'],
   },
   returns: {
     type: 'object',
     properties: {
-      value: { type: 'string', description: 'The extracted value as a string.' },
+      value: { type: 'string', description: 'The extracted value (or JSON array for codeblocks without index).' },
     },
   },
 }
 
-export function createExtractHandler(memory: MemoryAccess): ToolHandler {
+export function createExtractHandler(memory: MemoryAccess, history: HistoryAccess): ToolHandler {
   return async (args) => {
     const method = args.method as string
     const saveTo = args.save_to as string | undefined
 
+    // codeblocks defaults to turn:0 if no other source specified
+    const turnArg = args.turn as number | undefined
+    const effectiveTurn =
+      method === 'codeblocks' && turnArg === undefined && !args.text && !args.key
+        ? 0
+        : turnArg
+
     const src = resolveSource(
       args.text as string | undefined,
       args.key as string | undefined,
+      effectiveTurn,
       memory,
+      history,
     )
     if ('error' in src) return { result: null, error: src.error }
     const text = src.value
@@ -95,7 +159,7 @@ export function createExtractHandler(memory: MemoryAccess): ToolHandler {
       if (!pattern) return { result: null, error: "'pattern' required for regex extraction" }
 
       let re: RegExp
-      try { re = new RegExp(pattern) }
+      try { re = new RegExp(pattern, 's') }
       catch (e) { return { result: null, error: `Invalid regex: ${e}` } }
 
       const m = re.exec(text)
@@ -108,8 +172,28 @@ export function createExtractHandler(memory: MemoryAccess): ToolHandler {
       const to = Math.max(from, (args.to as number | undefined) ?? from)
       extracted = lines.slice(from - 1, to).join('\n')
 
+    } else if (method === 'codeblocks') {
+      let blocks = extractCodeBlocks(text)
+
+      // Filter by language if specified
+      const langFilter = args.lang as string | undefined
+      if (langFilter) {
+        blocks = blocks.filter(b => b.lang === langFilter || b.lang.startsWith(langFilter + ' '))
+      }
+
+      const indexArg = args.index as number | undefined
+      if (indexArg !== undefined) {
+        const block = blocks[indexArg]
+        if (!block) return { result: null, error: `No code block at index ${indexArg} (found ${blocks.length})` }
+        extracted = block.code
+
+      } else {
+        // Return all as JSON array
+        extracted = JSON.stringify(blocks)
+      }
+
     } else {
-      return { result: null, error: `Unknown method '${method}'. Use json, regex, or lines.` }
+      return { result: null, error: `Unknown method '${method}'. Use json, regex, lines, or codeblocks.` }
     }
 
     if (saveTo && extracted !== null) {
@@ -150,11 +234,13 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
     const action = args.action as string
     const memKey = args.key as string | undefined
 
-    const src = resolveSource(
-      args.text as string | undefined,
-      memKey,
-      memory,
-    )
+    const src =
+      memKey
+        ? (() => { const v = memory.get(memKey); return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found` } })()
+        : args.text !== undefined
+          ? { value: args.text as string }
+          : { error: "Provide 'text' or 'key'" }
+
     if ('error' in src) return { result: null, error: src.error }
 
     let parsed: unknown
@@ -163,13 +249,13 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     const persist = (root: unknown) => {
       const out = JSON.stringify(root)
+
       if (memKey) memory.set(memKey, out)
+
       return { result: out }
     }
 
-    if (action === 'pretty') {
-      return { result: JSON.stringify(parsed, null, 2) }
-    }
+    if (action === 'pretty') return { result: JSON.stringify(parsed, null, 2) }
 
     if (action === 'keys') {
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -185,9 +271,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
       let cur: unknown = parsed
       for (const k of path.split('.')) {
-        if (cur === null || typeof cur !== 'object') {
-          return { result: null, error: `Cannot traverse into '${k}'` }
-        }
+        if (cur === null || typeof cur !== 'object') return { result: null, error: `Cannot traverse into '${k}'` }
 
         cur = (cur as Record<string, unknown>)[k]
         if (cur === undefined) return { result: null, error: `Key '${k}' not found` }
@@ -196,35 +280,9 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       return { result: typeof cur === 'string' ? cur : JSON.stringify(cur) }
     }
 
-    if (action === 'set') {
+    if (action === 'set' || action === 'append' || action === 'delete') {
       const path = args.path as string | undefined
-      const val = args.value as string | undefined
-      if (!path) return { result: null, error: "'path' required for set" }
-      if (val === undefined) return { result: null, error: "'value' required for set" }
-
-      let newVal: unknown
-      try { newVal = JSON.parse(val) } catch { newVal = val }
-
-      const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
-      const keys = path.split('.')
-      let cur: Record<string, unknown> = root
-      for (let i = 0; i < keys.length - 1; i++) {
-        const k = keys[i]!
-        if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {}
-        cur = cur[k] as Record<string, unknown>
-      }
-      cur[keys[keys.length - 1]!] = newVal
-      return persist(root)
-    }
-
-    if (action === 'append') {
-      const path = args.path as string | undefined
-      const val = args.value as string | undefined
-      if (!path) return { result: null, error: "'path' required for append" }
-      if (val === undefined) return { result: null, error: "'value' required for append" }
-
-      let newVal: unknown
-      try { newVal = JSON.parse(val) } catch { newVal = val }
+      if (!path) return { result: null, error: `'path' required for ${action}` }
 
       const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
       const keys = path.split('.')
@@ -236,36 +294,33 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       }
 
       const lastKey = keys[keys.length - 1]!
-      const existing = cur[lastKey]
-      if (Array.isArray(existing)) {
-        existing.push(newVal)
 
-      } else if (typeof existing === 'string' && typeof newVal === 'string') {
-        cur[lastKey] = existing + newVal
+      if (action === 'delete') {
+        delete cur[lastKey]
+
+        return persist(root)
+      }
+
+      const val = args.value as string | undefined
+      if (val === undefined) return { result: null, error: `'value' required for ${action}` }
+      let newVal: unknown
+      try { newVal = JSON.parse(val) } catch { newVal = val }
+
+      if (action === 'append') {
+        const existing = cur[lastKey]
+        if (Array.isArray(existing)) {
+          existing.push(newVal)
+
+        } else if (typeof existing === 'string' && typeof newVal === 'string') {
+          cur[lastKey] = existing + newVal
+
+        } else {
+          cur[lastKey] = newVal
+        }
 
       } else {
         cur[lastKey] = newVal
       }
-
-      return persist(root)
-    }
-
-    if (action === 'delete') {
-      const path = args.path as string | undefined
-      if (!path) return { result: null, error: "'path' required for delete" }
-
-      const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
-      const keys = path.split('.')
-      let cur: Record<string, unknown> = root
-      for (let i = 0; i < keys.length - 1; i++) {
-        const k = keys[i]!
-        if (typeof cur[k] !== 'object' || cur[k] === null) {
-          return { result: null, error: `Path '${path}' does not exist` }
-        }
-
-        cur = cur[k] as Record<string, unknown>
-      }
-      delete cur[keys[keys.length - 1]!]
 
       return persist(root)
     }
@@ -275,7 +330,6 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 }
 
 // --- instantiate tool ---
-// Instantiate a named JSON template into memory, or fill {{placeholder}} strings.
 
 const BUILTIN_TEMPLATES: Record<string, unknown> = {
   codeplan: {
@@ -287,30 +341,26 @@ const BUILTIN_TEMPLATES: Record<string, unknown> = {
 export const InstantiateTool: ToolDefinition = {
   name: 'instantiate',
   description:
-    'Instantiate a built-in JSON template (e.g. codeplan) into a memory key, or fill a ' +
-    '{{placeholder}} template string and optionally save to memory. ' +
-    'Built-in templates: codeplan.',
+    'Instantiate a built-in JSON template (e.g. codeplan) or fill a {{placeholder}} template string. ' +
+    'Use save_to to store directly into memory. Built-in templates: codeplan.',
   parameters: {
     type: 'object',
     properties: {
       template_name: {
         type: 'string',
         enum: ['codeplan'],
-        description: 'Name of a built-in JSON template to instantiate.',
+        description: 'Built-in JSON template to instantiate.',
       },
       template: {
         type: 'string',
-        description: 'Template string with {{variable}} placeholders (alternative to template_name).',
+        description: 'Template string with {{variable}} placeholders.',
       },
       vars: {
         type: 'object',
         description: 'Values for {{placeholder}} substitution.',
         properties: {},
       },
-      save_to: {
-        type: 'string',
-        description: 'Memory key to store the result in.',
-      },
+      save_to: { type: 'string', description: 'Memory key to store the result in.' },
     },
     required: [],
   },
@@ -328,13 +378,13 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
     if (templateName) {
       const tpl = BUILTIN_TEMPLATES[templateName]
       if (!tpl) return { result: null, error: `Unknown template '${templateName}'` }
-
       rendered = JSON.stringify(tpl, null, 2)
 
     } else if (templateStr !== undefined) {
       if (!vars || typeof vars !== 'object') {
         return { result: null, error: "'vars' must be an object when using template string" }
       }
+
       rendered = templateStr.replace(/\{\{(\w+)\}\}/g, (_, name: string) =>
         Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : `{{${name}}}`
       )
@@ -358,9 +408,9 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
 
 export const TransformTools: ToolDefinition[] = [ExtractTool, JsonTool, InstantiateTool]
 
-export function createTransformHandlers(memory: MemoryAccess): Record<string, ToolHandler> {
+export function createTransformHandlers(memory: MemoryAccess, history: HistoryAccess): Record<string, ToolHandler> {
   return {
-    extract: createExtractHandler(memory),
+    extract: createExtractHandler(memory, history),
     json: createJsonHandler(memory),
     instantiate: createInstantiateHandler(memory),
   }
