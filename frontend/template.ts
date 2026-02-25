@@ -364,29 +364,59 @@ export function renderFim(req: FimRequest, template: TextTemplate): string | nul
 // --- Parser ---
 
 /**
- * Extract content between open/close tokens. Returns null if not found.
- * For think blocks (where nesting/orphans are common), uses best-effort strategy:
- *   - Close at the NEXT opening tag if no proper close found first
- *   - Orphan close (close without open) is silently ignored
+ * Try to autofix a malformed open/close pair in text.
+ *
+ * Missing open (close present, open absent):
+ *   Scan from message start to the first close. If there are no other tag
+ *   tokens in that region it's safe to prepend the open at position 0.
+ *
+ * Missing close (open present, close absent):
+ *   Scan from message start to the first open. If there are no other tag
+ *   tokens before it (open is the first tag in the message) it's safe to
+ *   append the close at the end.
+ *
+ * Returns the (possibly patched) text and whether a fix was applied.
  */
-function extractBetween(text: string, [open, close]: TemplatePair, bestEffort = false): string | null {
-  const start = text.indexOf(open)
+function autofixPair(text: string, [open, close]: TemplatePair): { text: string; fixed: boolean } {
+  if (!close) return { text, fixed: false }
 
+  const hasOpen  = text.includes(open)
+  const hasClose = text.includes(close)
+
+  if (hasOpen && hasClose) return { text, fixed: false }  // normal, nothing to do
+  if (!hasOpen && !hasClose) return { text, fixed: false } // no tags at all
+
+  if (!hasOpen && hasClose) {
+    // Missing open: check region [0, firstClose) for any tag tokens
+    const firstClose = text.indexOf(close)
+    const region = text.slice(0, firstClose)
+    if (!region.includes(open) && !region.includes(close)) {
+      return { text: open + text, fixed: true }
+    }
+  }
+
+  if (hasOpen && !hasClose) {
+    // Missing close: check region [0, firstOpen) for any tag tokens
+    const firstOpen = text.indexOf(open)
+    const region = text.slice(0, firstOpen)
+    if (!region.includes(open) && !region.includes(close)) {
+      return { text: text + close, fixed: true }
+    }
+  }
+
+  return { text, fixed: false }
+}
+
+/**
+ * Extract content between open/close tokens. Returns null if not found.
+ * Unclosed open tags: content runs to end of string.
+ */
+function extractBetween(text: string, [open, close]: TemplatePair): string | null {
+  const start = text.indexOf(open)
   if (start === -1) return null
 
   const contentStart = start + open.length
   if (!close) return text.slice(contentStart).trim()
-
-  // Best-effort: close at the earlier of [/THINK] or the next [THINK]
-  if (bestEffort) {
-    const nextOpen = text.indexOf(open, contentStart)
-    const closeIdx = text.indexOf(close, contentStart)
-
-    const end = [nextOpen, closeIdx].filter(i => i !== -1).sort((a, b) => a - b)[0]
-    if (end === undefined) return text.slice(contentStart).trim()
-
-      return text.slice(contentStart, end).trim()
-  }
 
   const end = text.indexOf(close, contentStart)
   if (end === -1) return text.slice(contentStart).trim()
@@ -436,10 +466,9 @@ function extractAll(text: string, [open, close]: TemplatePair): string[] {
 
 /**
  * Remove all occurrences of a tagged block from text.
- * bestEffort: also strips orphan close tags and treats next open as close boundary.
+ * Unclosed open tags strip to end of string.
  */
-function stripTag(text: string, [open, close]: TemplatePair, bestEffort = false): string {
-  // If no closing tag, we assume the tag consumes the rest of the string
+function stripTag(text: string, [open, close]: TemplatePair): string {
   if (!close) {
     const start = text.indexOf(open)
 
@@ -449,46 +478,18 @@ function stripTag(text: string, [open, close]: TemplatePair, bestEffort = false)
   }
 
   let result = text
-
-  // Best-effort: strip orphan close tags first
-  if (bestEffort && !result.includes(open)) {
-    result = result.replaceAll(close, '')
-  }
-
   while (true) {
     const start = result.indexOf(open)
     if (start === -1) break
 
-    const contentStart = start + open.length
-
-    // Best-effort: close at whichever comes first - proper close or next open
-    let end: number
-    if (bestEffort) {
-      const nextOpen = result.indexOf(open, contentStart)
-      const closeIdx = result.indexOf(close, contentStart)
-      const candidates = [nextOpen, closeIdx].filter(i => i !== -1).sort((a, b) => a - b)
-      if (candidates.length === 0) {
-        result = result.slice(0, start)
-
-        break
-      }
-
-      end = candidates[0]!
-      const closeToken = result[end] === close[0] && result.slice(end, end + close.length) === close ? close : ''
-      result = result.slice(0, start) + result.slice(end + closeToken.length)
-
-      continue
-    }
-
-    const end2 = result.indexOf(close, start + open.length)
-    if (end2 === -1) {
-      // If we found an open tag but no close tag, strip everything after it
+    const end = result.indexOf(close, start + open.length)
+    if (end === -1) {
       result = result.slice(0, start)
 
       break
     }
 
-    result = result.slice(0, start) + result.slice(end2 + close.length)
+    result = result.slice(0, start) + result.slice(end + close.length)
   }
 
   return result
@@ -522,27 +523,26 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
 
   const result: ParsedTurn = { content: '' }
 
-  // Extract think block (best-effort: handles orphan close, nesting, etc.)
+  // Extract think block - autofix missing open/close before parsing
   if (template.think) {
-    const think = extractBetween(text, template.think, true)
+    const { text: fixed, fixed: thinkFixed } = autofixPair(text, template.think)
+    if (thinkFixed) result.malformed = true
+    text = fixed
+
+    const think = extractBetween(text, template.think)
     if (think !== null) {
       result.think = think
-      text = stripTag(text, template.think, true)
+      text = stripTag(text, template.think)
     }
   }
 
-  // Extract tool calls - resolve to wrap pair regardless of rich/simple
+  // Extract tool calls - autofix missing open/close before parsing
   if (template.toolCall) {
     const pair = resolveWrap(template.toolCall, template.modelTurn)
-    const [open, close] = pair
 
-    // #23: Detect orphan close token (close present but open absent).
-    // Auto-normalize by prepending the open token so extractAll can parse it.
-    // Mark as malformed so the orchestrator can inject a correction.
-    if (close && text.includes(close) && !text.includes(open)) {
-      text = open + text
-      result.malformed = true
-    }
+    const { text: fixed, fixed: callFixed } = autofixPair(text, pair)
+    if (callFixed) result.malformed = true
+    text = fixed
 
     const calls = extractAll(text, pair)
     if (calls.length > 0) {
