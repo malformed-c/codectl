@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { mkdirSync } from "node:fs"
 import { rename } from "node:fs/promises"
 import { match } from "ts-pattern"
+import consola from "consola"
 
 // --- Types ---
 
