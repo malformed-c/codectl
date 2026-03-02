@@ -273,6 +273,14 @@ export class TelegramDoor {
 
     consola.trace('Handle TG message')
 
+    // If the model is waiting on an ask, route the reply to it instead of
+    // starting a new chat. The in-progress generator will resume automatically.
+    if (room.orchestrator.hasPendingAsk()) {
+      consola.debug(`[ask] routing user reply to pending ask for room ${room.meta.id}`)
+      room.orchestrator.resolveAsk(text)
+      return
+    }
+
     // Restore from checkpoint if orchestrator is fresh
     if (room.orchestrator.getHistory().length === 0) {
       const restored = await room.orchestrator.restoreCheckpoint()
@@ -305,6 +313,22 @@ export class TelegramDoor {
           }
 
         } else if (event.kind === 'call') {
+          // ask: send the question directly as a prompt, not a tool-call notification
+          if (event.call.name === 'ask') {
+            const question = event.call.arguments.question as string
+            try {
+              await ctx.reply(`❓ ${markdownToTelegramHTML(question)}`, { parse_mode: 'HTML' })
+
+            } catch {
+              await ctx.reply(`❓ ${stripMarkdownToPlain(question)}`)
+            }
+
+            continue
+          }
+
+          // message: will be surfaced via call_result below, skip the pending notification
+          if (event.call.name === 'message') continue
+
           // Show call before it runs
           const args = JSON.stringify(event.call.arguments)
           try {
@@ -315,6 +339,24 @@ export class TelegramDoor {
           }
 
         } else if (event.kind === 'call_result') {
+          // message: render content directly, not as a tool result
+          if (event.call.name === 'message') {
+            const content = event.call.arguments.content as string
+            const chunks = splitMessage(content, this.config.maxMessageLength)
+            for (const chunk of chunks) {
+              try {
+                await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
+
+              } catch {
+                await ctx.reply(stripMarkdownToPlain(chunk))
+              }
+            }
+
+            continue
+          }
+
+          // ask: show confirmation that the answer was received (quiet, no noise)
+          if (event.call.name === 'ask') continue
           // Show result immediately after execution
           const { call, result } = event
           const status = result.error

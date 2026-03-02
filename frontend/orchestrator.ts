@@ -21,6 +21,7 @@ import { CodeqTools, createCodeqHandlers } from "./tools/codeq"
 import { ExecTools, createExecHandlers, PersistentShell } from "./tools/exec"
 import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
+import { AskTool, MessageTool, AskChannel, createAskHandler, createMessageHandler } from "./tools/ask"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
 import { ValidatePlanTool, createValidatePlanHandler } from "./tools/validate_plan"
@@ -240,6 +241,7 @@ export class Orchestrator {
   private planValidationState: PlanValidationState = { validationErrors: [] }
   private abortController: AbortController | null = null
   private readonly checkpointStore: CheckpointStore | null
+  private readonly askChannel = new AskChannel()
 
   constructor(config: OrchestratorConfig) {
     this.adapter = config.adapter
@@ -268,6 +270,8 @@ export class Orchestrator {
     })
     this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
+    this.registerTool(AskTool, createAskHandler(this.askChannel))
+    this.registerTool(MessageTool, createMessageHandler())
     this.registerTool(ValidatePlanTool, createValidatePlanHandler((lastPlan, errors) => {
       // Update plan validation state and rebuild the system prompt so the model always
       // sees the latest validation status in its context (last plan valid/invalid + errors).
@@ -323,12 +327,26 @@ export class Orchestrator {
   getHistory(): Round[] { return [...this.fsm.history] }
   getMemory(): VersionedMemory { return this.versionedMemory }
 
+  /** True when the model has called `ask` and is waiting for a user reply. */
+  hasPendingAsk(): boolean { return this.askChannel.hasPending }
+
+  /** The question the model is waiting on, if any. */
+  getPendingQuestion(): string | undefined { return this.askChannel.pendingQuestion }
+
+  /**
+   * Resolve a pending `ask` call with the user's answer.
+   * Returns true if there was a pending ask, false if there wasn't one.
+   * When true, the answer is injected as the tool result and the agent loop resumes.
+   */
+  resolveAsk(answer: string): boolean { return this.askChannel.resolveAsk(answer) }
+
   /**
    * Full session reset: clears FSM history, memory, and mode back to chat.
    * Saves an empty checkpoint so the next restoreCheckpoint() call finds nothing.
    * This is the correct way to start a new conversation (replaces the old clearHistory()).
    */
   async resetSession(): Promise<void> {
+    this.askChannel.abort('Session was reset.')
     this.fsm = new Fsm()
     this.versionedMemory.clear()
     this.mode = { kind: 'chat' }
@@ -338,7 +356,10 @@ export class Orchestrator {
     await this._saveCheckpoint()
   }
 
-  abort(): void { this.abortController?.abort() }
+  abort(): void {
+    this.abortController?.abort()
+    this.askChannel.abort('Orchestrator was aborted.')
+  }
 
   /**
    * Restore session state from the latest checkpoint.
@@ -664,7 +685,7 @@ export class Orchestrator {
    * the WeakMap cache entry in RenderCache.
    */
   private _rebuildEnrichedSystem(): void {
-    const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
+    const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory', 'ask', 'message']
     const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
     const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
     const toolsBlock = this.profile.availableTools
