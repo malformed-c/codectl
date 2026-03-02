@@ -52,12 +52,13 @@ describe('round serialize / fromJSON', () => {
 
   test('agentRound nests children correctly and round-trips', () => {
     const tool = toolRound([{ tool: 'bash', command: 'ls' }], [{ value: 'ok' }])
-    const agent = agentRound([tool])
+    const agent = agentRound([], [tool])
     const s = agent.serialize()
     expect(s.kind).toBe('agent')
     if (s.kind !== 'agent') return
     expect(s.rounds).toHaveLength(1)
     expect(s.rounds[0]!.kind).toBe('tool')
+    expect(s.trigger).toHaveLength(0)
 
     const s2 = fromJSON(s).serialize()
     if (s2.kind === 'agent') expect(s2.rounds[0]!.kind).toBe('tool')
@@ -115,7 +116,7 @@ describe('round spans - age behavior', () => {
     const children = Array.from({ length: 4 }, (_, i) =>
       toolRound([{ tool: 'bash', command: `cmd${i}` }], [{ value: `r${i}` }])
     )
-    const agent = agentRound(children)
+    const agent = agentRound([], children)
     const spans = agent.spans(ctx0)
     const toolCallSpans = spans.filter(s => s.kind === 'tool_call')
     expect(toolCallSpans).toHaveLength(4)
@@ -125,20 +126,25 @@ describe('round spans - age behavior', () => {
     const children = Array.from({ length: 5 }, (_, i) =>
       toolRound([{ tool: 'bash', command: `cmd${i}` }], [{ value: `r${i}` }])
     )
-    const agent = agentRound(children)
+    const agent = agentRound([], children)
     const spans = agent.spans(ctx1)
     const toolCallSpans = spans.filter(s => s.kind === 'tool_call')
     expect(toolCallSpans).toHaveLength(3)
   })
 
-  test('agentRound age 2: includes only last child', () => {
+  test('agentRound age 2: collapses children, only response survives', () => {
     const children = Array.from({ length: 4 }, (_, i) =>
       toolRound([{ tool: 'bash', command: `cmd${i}` }], [{ value: `r${i}` }])
     )
-    const agent = agentRound(children)
+    const agent = agentRound([], children, 'final answer')
     const spans = agent.spans(ctx2)
+    // No tool calls at age 2 - entire loop collapsed
     const toolCallSpans = spans.filter(s => s.kind === 'tool_call')
-    expect(toolCallSpans).toHaveLength(1)
+    expect(toolCallSpans).toHaveLength(0)
+    // Response still present
+    const modelSpans = spans.filter(s => s.kind === 'model')
+    expect(modelSpans).toHaveLength(1)
+    expect(modelSpans[0]!.text).toBe('final answer')
   })
 })
 

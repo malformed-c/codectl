@@ -6,7 +6,7 @@ import { fromJSON } from '../round'
 function u(text: string) { return [userSpan(text)] }
 
 describe('FSM - chat flow', () => {
-  test('idle -> awaiting_model -> idle (text-only response)', () => {
+  test('idle -> chat -> idle (text-only response)', () => {
     const fsm = new Fsm()
     expect(fsm.history).toHaveLength(0)
 
@@ -50,35 +50,46 @@ describe('FSM - chat flow', () => {
 })
 
 describe('FSM - agent flow', () => {
-  test('tool call creates agent round with tool round inside', () => {
+  test('tool call produces single AgentRound (no separate user ChatRound)', () => {
     const fsm = new Fsm()
     fsm.onUser(u('do stuff'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
     fsm.onResults([{ value: { stdout: 'file.txt' } }])
     fsm.onModel(undefined, 'Done!', [])
 
-    // history: ChatRound(user) + AgentRound + ChatRound(done)
-    expect(fsm.history).toHaveLength(3)
-    const agent = fsm.history[1]!.serialize()
-    expect(agent.kind).toBe('agent')
-    if (agent.kind === 'agent') {
-      expect(agent.rounds).toHaveLength(1)
-      expect(agent.rounds[0]!.kind).toBe('tool')
-    }
-  })
-
-  test('agent round commits user turn as separate chat round first', () => {
-    const fsm = new Fsm()
-    fsm.onUser(u('user message'))
-    fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
-
-    // user chat round committed immediately when agent opens
+    // Single AgentRound - trigger + children + response all inside
+    expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
-    expect(s.kind).toBe('chat')
-    if (s.kind === 'chat') expect(s.model).toBe('')
+    expect(s.kind).toBe('agent')
   })
 
-  test('multiple tool rounds accumulate in same agent', () => {
+  test('AgentRound owns the triggering user message', () => {
+    const fsm = new Fsm()
+    fsm.onUser(u('do stuff'))
+    fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
+    fsm.onResults([{ value: 'ok' }])
+    fsm.onModel(undefined, 'Done!', [])
+
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.trigger[0]!.text).toBe('do stuff')
+    expect(s.response).toBe('Done!')
+  })
+
+  test('AgentRound contains tool rounds as children', () => {
+    const fsm = new Fsm()
+    fsm.onUser(u('task'))
+    fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
+    fsm.onResults([{ value: 'file.txt' }])
+    fsm.onModel(undefined, 'Done!', [])
+
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.rounds).toHaveLength(1)
+    expect(s.rounds[0]!.kind).toBe('tool')
+  })
+
+  test('multiple tool rounds accumulate as children in same AgentRound', () => {
     const fsm = new Fsm()
     fsm.onUser(u('task'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'a' }])
@@ -87,23 +98,42 @@ describe('FSM - agent flow', () => {
     fsm.onResults([{ value: 'result_b' }])
     fsm.onModel(undefined, 'Complete', [])
 
-    const agent = fsm.history[1]!.serialize()
-    if (agent.kind !== 'agent') throw new Error('not agent')
-    expect(agent.rounds).toHaveLength(2)
-    expect(agent.rounds.every(r => r.kind === 'tool')).toBe(true)
+    expect(fsm.history).toHaveLength(1)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.rounds).toHaveLength(2)
+    expect(s.rounds.every(r => r.kind === 'tool')).toBe(true)
   })
 
-  test('onDone closes agent and emits chat round with result', () => {
+  test('onDone closes agent with result in response field', () => {
     const fsm = new Fsm()
     fsm.onUser(u('task'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
     fsm.onResults([{ value: 'ok' }])
     fsm.onDone('task complete')
 
-    expect(fsm.history).toHaveLength(3) // chat(user), agent, chat(done)
-    const last = fsm.history[2]!.serialize()
-    if (last.kind !== 'chat') throw new Error('not chat')
-    expect(last.model).toBe('task complete')
+    expect(fsm.history).toHaveLength(1)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.response).toBe('task complete')
+  })
+
+  test('user message is never orphaned - no empty ChatRound emitted on tool call', () => {
+    const fsm = new Fsm()
+    fsm.onUser(u('important question'))
+    fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
+
+    // No rounds committed yet - user message is in-flight with the agent state
+    expect(fsm.history).toHaveLength(0)
+
+    fsm.onResults([{ value: 'ok' }])
+    fsm.onModel(undefined, 'Answer', [])
+
+    // One AgentRound, trigger has the user message
+    expect(fsm.history).toHaveLength(1)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.trigger[0]!.text).toBe('important question')
   })
 })
 
@@ -116,9 +146,9 @@ describe('FSM - error handling', () => {
     fsm.onError('Something went wrong', 'bad input')
     fsm.onModel(undefined, 'Done', [])
 
-    const agent = fsm.history[1]!.serialize()
-    if (agent.kind !== 'agent') throw new Error('not agent')
-    const err = agent.rounds.find(r => r.kind === 'error')
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    const err = s.rounds.find(r => r.kind === 'error')
     expect(err).toBeTruthy()
     if (err?.kind === 'error') {
       expect(err.message).toBe('Something went wrong')
@@ -126,18 +156,18 @@ describe('FSM - error handling', () => {
     }
   })
 
-  test('model turn before results produces FSM violation ErrorRound', () => {
+  test('onModel while results pending produces FSM violation ErrorRound', () => {
     const fsm = new Fsm()
     fsm.onUser(u('task'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
-    // FSM violation: second onModel before results
+    // FSM violation: second onModel before results arrive
     fsm.onModel(undefined, 'unexpected', [])
     fsm.onResults([{ value: 'ok' }])
     fsm.onModel(undefined, 'Done', [])
 
-    const agent = fsm.history[1]!.serialize()
-    if (agent.kind !== 'agent') throw new Error('not agent')
-    expect(agent.rounds.some(r => r.kind === 'error')).toBe(true)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.rounds.some(r => r.kind === 'error')).toBe(true)
   })
 
   test('onSystem inside agent adds SystemRound to children', () => {
@@ -148,9 +178,9 @@ describe('FSM - error handling', () => {
     fsm.onSystem('Mode switched')
     fsm.onModel(undefined, 'Done', [])
 
-    const agent = fsm.history[1]!.serialize()
-    if (agent.kind !== 'agent') throw new Error('not agent')
-    expect(agent.rounds.some(r => r.kind === 'system')).toBe(true)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.rounds.some(r => r.kind === 'system')).toBe(true)
   })
 
   test('onError outside agent commits ErrorRound to main history', () => {
@@ -165,7 +195,7 @@ describe('FSM - error handling', () => {
 })
 
 describe('FSM - abort / force-close', () => {
-  test('onAbort in awaiting_model commits empty chat round', () => {
+  test('onAbort in chat state commits empty chat round', () => {
     const fsm = new Fsm()
     fsm.onUser(u('message'))
     fsm.onAbort()
@@ -176,41 +206,40 @@ describe('FSM - abort / force-close', () => {
     if (s.kind === 'chat') expect(s.model).toBe('')
   })
 
-  test('onAbort in awaiting_results leaves abort error in agent', () => {
+  test('onAbort with pending calls leaves abort error in agent children', () => {
     const fsm = new Fsm()
     fsm.onUser(u('task'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
     // results never arrive
     fsm.onAbort()
 
-    const agent = fsm.history.find(r => r.serialize().kind === 'agent')
-    expect(agent).toBeTruthy()
-    const s = agent!.serialize()
-    if (s.kind === 'agent') {
-      expect(s.rounds.some(r => r.kind === 'error')).toBe(true)
-    }
+    expect(fsm.history).toHaveLength(1)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.rounds.some(r => r.kind === 'error')).toBe(true)
+    // trigger is preserved even on abort
+    expect(s.trigger[0]!.text).toBe('task')
   })
 
-  test('onAbort in in_agent commits accumulated tool rounds', () => {
+  test('onAbort in agent (no pending) commits accumulated tool rounds', () => {
     const fsm = new Fsm()
     fsm.onUser(u('task'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
     fsm.onResults([{ value: 'ok' }])
-    // in_agent now - abort without final model response
+    // in agent with no pending - abort without final model response
     fsm.onAbort()
 
-    const agent = fsm.history.find(r => r.serialize().kind === 'agent')
-    expect(agent).toBeTruthy()
-    const s = agent!.serialize()
-    if (s.kind === 'agent') {
-      expect(s.rounds).toHaveLength(1)
-      expect(s.rounds[0]!.kind).toBe('tool')
-    }
+    expect(fsm.history).toHaveLength(1)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.rounds).toHaveLength(1)
+    expect(s.rounds[0]!.kind).toBe('tool')
+    expect(s.trigger[0]!.text).toBe('task')
   })
 
   test('onAbort in idle is a no-op', () => {
     const fsm = new Fsm()
-    fsm.onAbort() // should not throw
+    fsm.onAbort()
     expect(fsm.history).toHaveLength(0)
   })
 })
@@ -229,18 +258,21 @@ describe('FSM - headless run (no user turn)', () => {
     }
   })
 
-  test('tool call from idle opens agent with empty userSpans', () => {
+  test('tool call from idle opens agent with empty trigger', () => {
     const fsm = new Fsm()
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
     fsm.onResults([{ value: 'ok' }])
     fsm.onModel(undefined, 'Done', [])
 
-    expect(fsm.history.some(r => r.serialize().kind === 'agent')).toBe(true)
+    expect(fsm.history).toHaveLength(1)
+    const s = fsm.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.trigger).toHaveLength(0)
   })
 })
 
 describe('FSM - getRenderableHistory', () => {
-  test('includes pending user turn in awaiting_model state (not committed yet)', () => {
+  test('includes pending user turn in chat state (not committed yet)', () => {
     const fsm = new Fsm()
     fsm.onUser(u('pending'))
 
@@ -251,7 +283,7 @@ describe('FSM - getRenderableHistory', () => {
     expect(fsm.history).toHaveLength(0)
   })
 
-  test('includes pending agent round in awaiting_results state', () => {
+  test('includes pending agent round in agent state (tool results not yet arrived)', () => {
     const fsm = new Fsm()
     fsm.onUser(u('task'))
     fsm.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
@@ -259,8 +291,8 @@ describe('FSM - getRenderableHistory', () => {
     const h = fsm.getRenderableHistory()
     const agentRendered = h.find(r => r.serialize().kind === 'agent')
     expect(agentRendered).toBeTruthy()
-    // Only the user chat round committed to actual history
-    expect(fsm.history).toHaveLength(1)
+    // Nothing committed yet
+    expect(fsm.history).toHaveLength(0)
   })
 
   test('committed history only - idle state', () => {
@@ -280,7 +312,6 @@ describe('FSM - hydrate (checkpoint restore)', () => {
     original.onModel(undefined, 'hi', [])
 
     const serialized = original.history.map(r => r.serialize())
-
     const restored = new Fsm()
     restored.hydrate(serialized.map(fromJSON))
 
@@ -289,7 +320,7 @@ describe('FSM - hydrate (checkpoint restore)', () => {
     expect(restored.history[0]!.serialize().kind).toBe('chat')
   })
 
-  test('hydrate preserves tool round data', () => {
+  test('hydrate preserves agent round data including trigger', () => {
     const original = new Fsm()
     original.onUser(u('task'))
     original.onModel(undefined, undefined, [{ tool: 'bash', command: 'ls' }])
@@ -300,20 +331,22 @@ describe('FSM - hydrate (checkpoint restore)', () => {
     const restored = new Fsm()
     restored.hydrate(serialized.map(fromJSON))
 
-    expect(restored.history).toHaveLength(3)
-    const agent = restored.history.find(r => r.serialize().kind === 'agent')
-    expect(agent).toBeTruthy()
+    expect(restored.history).toHaveLength(1)
+    const s = restored.history[0]!.serialize()
+    if (s.kind !== 'agent') throw new Error('not agent')
+    expect(s.trigger[0]!.text).toBe('task')
+    expect(s.response).toBe('done')
+    expect(s.rounds).toHaveLength(1)
   })
 })
 
 describe('FSM - consecutive user messages', () => {
-  test('second onUser in awaiting_model appends to existing userSpans', () => {
+  test('second onUser in chat state appends to existing userSpans', () => {
     const fsm = new Fsm()
     fsm.onUser(u('first'))
     fsm.onUser(u('second')) // model hasn't responded yet
     fsm.onModel(undefined, 'reply', [])
 
-    // Should still produce 1 chat round
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
     if (s.kind === 'chat') {

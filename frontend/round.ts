@@ -10,7 +10,7 @@ import type { StoredToolCall, StoredToolResult } from './types'
 // --- RenderContext ---
 
 export type RenderContext = {
-  age: number                          // 0 = newest, 1 = mid, 2 = old, 3 = trim
+  age: number                          // 0 = newest, 1 = mid, 2 = old
   memory: ReadonlyMap<string, string>
   budget: number                       // total char budget for the whole prompt
 }
@@ -40,7 +40,7 @@ export interface Round {
 
 export type SerializedRound =
   | { kind: 'chat'; id: string; user: Span[]; reasoning?: string; model: string }
-  | { kind: 'agent'; id: string; rounds: SerializedRound[] }
+  | { kind: 'agent'; id: string; trigger: Span[]; rounds: SerializedRound[]; response: string; responseThink?: string }
   | { kind: 'tool'; id: string; reasoning?: string; content?: string; calls: StoredToolCall[]; results: StoredToolResult[] }
   | { kind: 'system'; id: string; message: string }
   | { kind: 'error'; id: string; message: string; input?: string }
@@ -55,7 +55,7 @@ function newId(prefix: string): string {
 // --- Round factories ---
 
 /**
- * One user/model exchange.
+ * One simple user/model exchange with no tool calls.
  * userSpans may contain extractedSpan() entries - extractionPass elides them at render time.
  */
 export function chatRound(
@@ -71,7 +71,7 @@ export function chatRound(
     get count() { return count },
     set count(v: number) { count = v },
 
-    spans(ctx: RenderContext): AnnotatedText {
+    spans(_ctx: RenderContext): AnnotatedText {
       const out: AnnotatedText = []
 
       // User content (may include extractedSpan entries; extractionPass handles them)
@@ -93,13 +93,27 @@ export function chatRound(
 }
 
 /**
- * Container for an autonomous agent run.
- * Children are ToolRounds, ErrorRounds, SystemRounds, or nested AgentRounds.
- * Compression policy lives here - not in individual children.
+ * Container for any exchange involving tool calls - both chat follow-through and
+ * autonomous agent runs. Owns the full context: the triggering user message,
+ * the tool loop, and the final model response.
+ *
+ * This fixes the "orphan bug" where user messages were stranded in a separate
+ * ChatRound with empty model text. The trigger travels with the run.
+ *
+ * Compression policy (by age):
+ *   age 0: trigger + all children + response  (full fidelity)
+ *   age 1: trigger + last 3 children + response  (drop deep history within run)
+ *   age 2+: trigger + response only  (entire tool loop collapses to just the result)
  */
-export function agentRound(children: Round[]): Round {
+export function agentRound(
+  trigger: Span[],
+  children: Round[],
+  response?: string,
+  responseThink?: string,
+): Round {
   const id = newId('agent')
-  let count = children.reduce((acc, r) => acc + r.count, 0)
+  const childCount = children.reduce((acc, r) => acc + r.count, 0)
+  let count = countSpanChars(trigger) + childCount + (response?.length ?? 0) + (responseThink?.length ?? 0)
 
   return {
     id,
@@ -107,26 +121,36 @@ export function agentRound(children: Round[]): Round {
     set count(v: number) { count = v },
 
     spans(ctx: RenderContext): AnnotatedText {
+      const out: AnnotatedText = []
+
+      // Trigger always included - it's the user's question that started this run.
+      // At high age, it's all that remains alongside the final response.
+      out.push(...trigger)
+
       if (ctx.age === 0) {
-        // Full fidelity: all children at their own ages
-        return children.flatMap(c => c.spans(ctx))
+        out.push(...children.flatMap(c => c.spans(ctx)))
+
+      } else if (ctx.age === 1) {
+        // Mid history: last 3 tool rounds to show recent work
+        out.push(...children.slice(-3).flatMap(c => c.spans({ ...ctx, age: 1 })))
       }
+      // age 2+: children completely collapsed - trigger + response is the whole story
 
-      if (ctx.age === 1) {
-        // Last 3 children at age 1 (drop deep history within the agent run)
-        return children.slice(-3).flatMap(c => c.spans({ ...ctx, age: 1 }))
-      }
+      if (responseThink) out.push(reasoningSpan(responseThink))
+      if (response) out.push(modelSpan(response))
 
-      // age 2+: only the last child's output (done result or fallback)
-      // This policy handles ungraceful exits correctly - always the last committed result.
-      const last = children.at(-1)
-      if (!last) return []
-
-      return last.spans({ ...ctx, age: 2 })
+      return out
     },
 
     serialize(): SerializedRound {
-      return { kind: 'agent', id, rounds: children.map(c => c.serialize()) }
+      return {
+        kind: 'agent',
+        id,
+        trigger,
+        rounds: children.map(c => c.serialize()),
+        response: response ?? '',
+        responseThink,
+      }
     },
   }
 }
@@ -186,7 +210,7 @@ export function toolRound(
   }
 }
 
-/** Explicit orchestrator intervention (forced exit, mode switch, correction injection). */
+/** Explicit orchestrator injection (think-only correction, mode info, etc). */
 export function systemRound(message: string): Round {
   const id = newId('system')
   let count = message.length
@@ -197,8 +221,7 @@ export function systemRound(message: string): Round {
     set count(v: number) { count = v },
 
     spans(ctx: RenderContext): AnnotatedText {
-      // age 2+: transient orchestrator state is irrelevant to deep memory
-      if (ctx.age >= 2) return []
+      if (ctx.age >= 2) return []  // transient messages irrelevant to deep history
 
       return [systemSpan(message)]
     },
@@ -210,8 +233,8 @@ export function systemRound(message: string): Round {
 }
 
 /**
- * Explicit model failure: malformed JSON, FSM transition violation.
- * Preserved in context so the model sees its mistake and can correct it.
+ * Model failure record: malformed JSON, FSM transition violation.
+ * Preserved in context so the model can see its mistake and correct.
  */
 export function errorRound(message: string, input?: string): Round {
   const id = newId('error')
@@ -244,7 +267,7 @@ export function fromJSON(data: SerializedRound): Round {
       return chatRound(data.user, data.model, data.reasoning)
 
     case 'agent':
-      return agentRound(data.rounds.map(fromJSON))
+      return agentRound(data.trigger, data.rounds.map(fromJSON), data.response, data.responseThink)
 
     case 'tool':
       return toolRound(data.calls, data.results, data.reasoning, data.content)
