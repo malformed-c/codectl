@@ -264,10 +264,15 @@ export function errorRound(message: string, input?: string): Round {
 export function fromJSON(data: SerializedRound): Round {
   switch (data.kind) {
     case 'chat':
-      return chatRound(data.user, data.model, data.reasoning)
+      return chatRound(data.user ?? [], data.model, data.reasoning)
 
     case 'agent':
-      return agentRound(data.trigger, data.rounds.map(fromJSON), data.response, data.responseThink)
+      return agentRound(
+        data.trigger ?? [],
+        (data.rounds ?? []).map(fromJSON),
+        data.response,
+        data.responseThink,
+      )
 
     case 'tool':
       return toolRound(data.calls, data.results, data.reasoning, data.content)
