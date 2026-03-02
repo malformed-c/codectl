@@ -47,18 +47,22 @@ function resolveSource(
  * Only top-level ChatRounds are counted.
  */
 function getUserTurnText(rounds: SerializedRound[], offset: number): string | undefined {
-  let found = 0
+  const turns: string[] = []
+
   for (let i = rounds.length - 1; i >= 0; i--) {
     const r = rounds[i]!
-    if (r.kind === 'chat') {
-      if (found === offset) {
-        return r.user.map(s => s.text).join('')
-      }
 
-      found++
+    if (r.kind === 'chat') {
+      turns.push(r.user.map(s => s.text).join(''))
+      continue
+    }
+
+    if (r.kind === 'agent') {
+      turns.push(r.trigger.map(s => s.text).join(''))
     }
   }
-  return undefined
+
+  return turns[offset]
 }
 
 /**
@@ -74,6 +78,13 @@ function extractCodeBlocks(text: string): Array<{ lang: string; code: string }> 
   }
 
   return blocks
+}
+
+function looksLikeJsonPayload(text: string): boolean {
+  const trimmed = text.trim()
+
+  return (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    || (trimmed.startsWith('[') && trimmed.endsWith(']'))
 }
 
 // --- extract tool ---
@@ -174,6 +185,12 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
     } else if (method === 'codeblocks') {
       let blocks = extractCodeBlocks(text)
+
+      // Fallback: if no fenced blocks exist but the full message is raw JSON,
+      // treat it as one virtual json block so turn offsets still work.
+      if (blocks.length === 0 && looksLikeJsonPayload(text)) {
+        blocks = [{ lang: 'json', code: text.trim() }]
+      }
 
       // Filter by language if specified
       const langFilter = args.lang as string | undefined

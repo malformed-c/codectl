@@ -46,10 +46,12 @@ export type Checkpoint = {
  */
 export class CheckpointStore {
   private readonly dir: string
+  private readonly keepRecent: number | undefined
   private _seq = 0
 
-  constructor(checkpointPath: string) {
+  constructor(checkpointPath: string, keepRecent?: number) {
     this.dir = checkpointPath
+    this.keepRecent = keepRecent
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true })
   }
 
@@ -92,6 +94,10 @@ export class CheckpointStore {
     // the numbered file is still intact and can be found via listSeqs().
     await Bun.write(this.seqPath(seq), json)
     await Bun.write(this.latestPath, json)
+
+    if (this.keepRecent !== undefined) {
+      await this.prune(this.keepRecent)
+    }
   }
 
   /** Load the latest checkpoint. Returns null if no checkpoint exists (fresh session). */

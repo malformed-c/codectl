@@ -80,6 +80,9 @@ export type OrchestratorConfig = {
 
   /** Directory to write checkpoint files. If omitted, checkpointing is disabled. */
   checkpointDir?: string
+
+  /** Keep only this many newest checkpoint-NNN.json files. latest.json is always kept. */
+  checkpointKeep?: number
 }
 
 export type TurnResult = {
@@ -242,7 +245,9 @@ export class Orchestrator {
     this.adapter = config.adapter
     this.config = config
     this.profile = config.adapter.config.template
-    this.checkpointStore = config.checkpointDir ? new CheckpointStore(config.checkpointDir) : null
+    this.checkpointStore = config.checkpointDir
+      ? new CheckpointStore(config.checkpointDir, config.checkpointKeep)
+      : null
 
     // --- Built-in tools ---
     this.registerTool(ModeTool, async (args) => this.handleModeSwitch(args.mode as string))
