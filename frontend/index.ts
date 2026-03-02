@@ -43,9 +43,9 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
     // Slash commands
     if (text === '/new') {
-      await orchestrator.saveCheckpoint()
-
-      orchestrator.clearHistory()
+      // resetSession() clears FSM + memory + mode and overwrites the checkpoint with
+      // empty state, so the next restoreCheckpoint() call is a no-op.
+      await orchestrator.resetSession()
 
       consola.info('Started new conversation')
 
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   // One adapter, shared across all doors and rooms
   const adapter = new KoboldAdapter({
     apiServer: process.env.BASE_URL ?? config.api_server,
-    template: Profiles.mistral, // TODO load from model yaml
+    template: Profiles.mistral, // TODO Profile is hardcoded for now; future: load from model YAML or config.yaml
   })
 
   // Check what doors to run based on env
@@ -137,7 +137,6 @@ async function main(): Promise<void> {
     const telegramDoor = new TelegramDoor({
       token: telegramToken,
       adapter,
-      historyStore,
       checkpointDir: config.checkpoint_path ?? './checkpoints',
       orchestratorConfig: {
         toolFormat: (config.tool_format ?? 'json') as any,
@@ -166,10 +165,10 @@ async function main(): Promise<void> {
     })
 
     process.on('SIGINT', async () => {
-      consola.info('Saving history...')
+      consola.info('Shutting down...')
 
-      await orchestrator.saveCheckpoint()
-
+      // Checkpoint is saved automatically after each committed round.
+      // No extra save needed here.
       process.exit(0)
     })
 

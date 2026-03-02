@@ -2,7 +2,6 @@ import { join } from "node:path"
 import { readdirSync } from "node:fs"
 import { YAML } from "bun"
 
-import type { ToolResultsTemplate } from './template'
 import consola from "consola"
 
 // --- Types ---
@@ -250,18 +249,20 @@ function renderPython(tools: ToolDefinition[]): string {
   return [...header, ...fns].join("\n\n")
 }
 
-// --- Stubs ---
+// --- Unimplemented format stubs ---
+// Fall back to JSON rather than throwing, so the model still receives tool
+// definitions even when an unsupported format is requested.
 
-function renderXml(_tools: ToolDefinition[]): string {
+function renderXml(tools: ToolDefinition[]): string {
   // TODO: implement XML rendering
-  // <tools><tool><name>...</name><description>...</description><parameters>...</parameters></tool></tools>
-  throw new Error("XML tool rendering not yet implemented")
+  // Target: <tools><tool><n>name</n><description>...</description><parameters>...</parameters></tool></tools>
+  return '<!-- XML tool format not yet implemented; falling back to JSON -->\n' + renderJson(tools)
 }
 
-function renderProse(_tools: ToolDefinition[]): string {
+function renderProse(tools: ToolDefinition[]): string {
   // TODO: implement prose rendering
-  // "You have access to the following tools:\n- mode: Switch interaction mode..."
-  throw new Error("Prose tool rendering not yet implemented")
+  // Target: "You have access to the following tools:\n- name: description..."
+  return '// Prose tool format not yet implemented; falling back to JSON\n' + renderJson(tools)
 }
 
 // --- Tool call parsing ---
@@ -323,9 +324,11 @@ export function parseToolCalls(raw: string): ToolCall[] {
     }
   }
 
-  // Rich format detection (Mistral-style)
-  // [CALL_ID]id123[ARGS]{"param": "val"} or just tool_name[ARGS]{...}
   // TODO Unhardcode
+  // Rich format detection (Mistral-style).
+  // Tokens like [ARGS] and [CALL_ID] are currently hardcoded to the Mistral profile.
+  // To support other rich formats, these tokens should be passed in from the template
+  // (TextTemplate.toolCall.rich) rather than matched as string literals.
   if (text.includes('[ARGS]')) {
     const normalized = text.replace(/\r\n?/g, '\n')
     const starts: Array<{ start: number, name: string, callId?: string, argsStart: number }> = []
@@ -385,26 +388,6 @@ export function parseToolCalls(raw: string): ToolCall[] {
     // If not JSON and not rich format, maybe it's just a tool name? (not recommended)
     throw new Error(`Unrecognized tool call format: ${text}`)
   }
-}
-
-/**
- *  Render a tool result back into the conversation.
-*/
-export function renderToolResult(result: ToolResult, T?: ToolResultsTemplate): string {
-  const json = JSON.stringify(
-    result.error
-      ? { error: result.error }
-      : { result: result.result },
-    null,
-    2
-  )
-
-  if (T) {
-    // TODO add multiple tools support
-    return `${T.wrap[0]}${T.rich?.callId}${result.callId}${T.rich?.content}${json}${T.wrap[1]}`
-  }
-
-  return json
 }
 
 // --- Argument resolution ---
@@ -557,8 +540,4 @@ if (import.meta.main) {
   consola.log("\n=== parseToolCalls ===")
   const raw = JSON.stringify([{ name: "mode", arguments: { mode: "agent", reason: "user wants to edit files" } }])
   consola.log(parseToolCalls(raw))
-
-  consola.log("\n=== renderToolResult ===")
-  consola.log(renderToolResult({ result: { switched: "agent" } }))
-  consola.log(renderToolResult({ result: null, error: "unknown mode" }))
 }

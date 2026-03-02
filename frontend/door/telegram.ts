@@ -4,7 +4,6 @@ import type { HydrateFlavor } from "@grammyjs/hydrate"
 import { consola } from 'consola'
 import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
-import { HistoryStore } from '../history.ts'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
 import type { KoboldAdapter } from '../kobold'
 
@@ -13,12 +12,11 @@ import type { KoboldAdapter } from '../kobold'
 export type TelegramDoorConfig = {
   token: string
   adapter: KoboldAdapter
-  historyStore?: HistoryStore
   /** Base directory for per-room checkpoints. Each room gets its own subdirectory. */
   checkpointDir?: string
-  /** Extra orchestrator config per room (adapter is injected, do not set here) */
+  /** Extra orchestrator config per room (adapter is injected, do not set here). */
   orchestratorConfig?: Omit<OrchestratorConfig, 'adapter'>
-  /** Max message length before splitting (Telegram text limit: 4096, with media: 1024) */
+  /** Max message length before splitting (Telegram limit: 4096 for text, 1024 for media captions). */
   maxMessageLength?: number
 }
 
@@ -41,8 +39,14 @@ function splitMessage(text: string, maxLen = 4096): string[] {
   return chunks
 }
 
-function roomIdForChat(chatId: number): string {
+export function roomIdForChat(chatId: number): string {
   return `telegram-${chatId}`
+}
+
+export function checkpointDirForChat(root: string | undefined, chatId: number): string | undefined {
+  if (!root) return undefined
+  const base = root.replace(/^\.\//, '').replace(/\/$/, '')
+  return `${base}/${roomIdForChat(chatId)}`
 }
 
 /**
@@ -88,17 +92,38 @@ function renderBlock(tokens: any[]): string {
       case 'hr': return '\n'
       case 'space': return ''
       case 'html': return ''
-      case 'list': {
-        return tok.items.map((item: any) => {
-          // list_item.tokens may contain a nested text token with inline tokens inside
-          const inner = item.tokens.flatMap((t: any) => t.tokens ?? [{ type: 'text', text: t.text, raw: t.raw }])
-
-          return `- ${renderInline(inner).trim()}\n`
-        }).join('') + '\n'
-      }
-
+      case 'list': return renderList(tok, 0) + '\n'
       default: return escapeHtml(tok.raw ?? '')
     }
+  }).join('')
+}
+
+function renderList(tok: any, depth: number): string {
+  const indent = '  '.repeat(depth)
+  return tok.items.map((item: any) => {
+    // Separate inline content from nested block content (sub-lists, paragraphs)
+    const inlineTokens: any[] = []
+    const blockTokens: any[] = []
+
+    for (const t of (item.tokens ?? [])) {
+      if (t.type === 'list') {
+        blockTokens.push(t)
+
+      } else if (t.type === 'text' && t.tokens) {
+        inlineTokens.push(...t.tokens)
+
+      } else if (t.type === 'paragraph') {
+        inlineTokens.push(...(t.tokens ?? []))
+
+      } else {
+        inlineTokens.push(t)
+      }
+    }
+
+    const inlineHtml = renderInline(inlineTokens).trim()
+    const subHtml = blockTokens.map(b => renderList(b, depth + 1)).join('')
+
+    return `${indent}- ${inlineHtml}\n${subHtml}`
   }).join('')
 }
 
@@ -203,7 +228,7 @@ export class TelegramDoor {
 
       // TODO
       await ctx.reply(
-        'Hello! This is codectl system. Send a message to start chatting.\n' +
+        'Hello! This is the codectl system. Send a message to start chatting.\n' +
         'Use /new to start a fresh conversation.', {
         parse_mode: 'HTML'
       }
@@ -217,10 +242,8 @@ export class TelegramDoor {
       const existing = this.registry.get(roomId)
 
       if (existing) {
-        // Save a checkpoint before clearing so the session is recoverable
-        await existing.orchestrator.saveCheckpoint()
+        await existing.orchestrator.resetSession()
 
-        existing.orchestrator.clearHistory()
         touchRoom(existing)
       }
 
@@ -258,8 +281,9 @@ export class TelegramDoor {
       }
     }
 
-    // Show typing indicator
-    // TODO Add timeout
+    // Show typing indicator while the model is generating.
+    // Telegram typing indicators expire after ~5 s; for long runs the UX relies
+    // on tool-call progress messages to show activity instead of re-sending it.
     await ctx.replyWithChatAction('typing')
 
     try {
@@ -337,9 +361,7 @@ export class TelegramDoor {
     const roomId = roomIdForChat(chatId)
 
     return this.registry.getOrCreate(roomId, () => {
-      const checkpointDir = this.config.checkpointDir
-        ? `${this.config.checkpointDir}/${roomId}`
-        : undefined
+      const checkpointDir = checkpointDirForChat(this.config.checkpointDir, chatId)
 
       return createRoom(
         roomId,

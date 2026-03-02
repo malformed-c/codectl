@@ -1,5 +1,4 @@
 import type { Orchestrator } from './orchestrator'
-import type { Message } from './template'
 
 // --- Types ---
 

@@ -23,9 +23,9 @@ import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
+import { ValidatePlanTool, createValidatePlanHandler } from "./tools/validate_plan"
 import { TransformTools, createTransformHandlers } from "./tools/transform"
-import { codePlanSchema, type CodePlan } from "./codeplan.schema"
-import { destr } from 'destr'
+import type { CodePlan } from "./codeplan.schema"
 import { Fsm } from './fsm'
 import { RenderCache, VersionedMemory, renderHistory } from './renderer'
 import { joinWithBoundaryNormalization } from './pipeline'
@@ -54,32 +54,31 @@ export type ToolHandler = (
 
 export type OrchestratorConfig = {
   adapter: KoboldAdapter
+  /** Override the built-in system prompt. */
   systemPrompt?: string
+  /** Extra tool definitions for the model to see (handlers must be registered separately). */
   tools?: ToolDefinition[]
   toolFormat?: ToolFormat
 
-  /** Max autonomous turns before giving up */
+  /** Max autonomous turns before aborting the agent loop. Default: 16. */
   autonomousTurns?: number
 
-  /** Max follow-through turns in chat mode when the model uses a tool (default: 3) */
+  /** Max follow-through turns in chat mode when the model uses a tool. Default: 5.
+   *  Allows the model to summarise tool output after e.g. tool_library -> response. */
   chatToolTurns?: number
 
-  /** Current nesting depth (set by subagent tool) */
+  /** Current nesting depth - set by subagent tool to enforce the depth limit. */
   depth?: number
-
-  /** Max subagent nesting depth */
+  /** Max subagent nesting depth before refusing to spawn another. Default: 3. */
   maxDepth?: number
 
   /** Path to backend/ directory for Ansible subprocess. Defaults to ../backend relative to cwd. */
   backendDir?: string
 
-  /** How many assistant think blocks to keep in history (oldest are stripped). Default: 2 */
-  maxThinkHistory?: number
-
-  /** Character budget for renderHistory. Default: 128_000 (≈ 32K tokens). */
+  /** Character budget for renderHistory (≈ chars, not tokens). Default: 128_000 (≈ 32K tokens). */
   contextBudget?: number
 
-  /** Directory to write checkpoints. If omitted, checkpointing is disabled. */
+  /** Directory to write checkpoint files. If omitted, checkpointing is disabled. */
   checkpointDir?: string
 }
 
@@ -255,11 +254,21 @@ export class Orchestrator {
         ? this.tools.filter(t => t.name.startsWith(prefix))
         : this.tools
 
-      return { result: renderTools(tools, this.config.toolFormat ?? 'json') }
+      const rendered = renderTools(tools, this.config.toolFormat ?? 'json')
+      const wrapped = this.profile.availableTools
+        ? `${this.profile.availableTools[0]}${rendered}${this.profile.availableTools[1]}`
+        : rendered
+
+      return { result: wrapped }
     })
     this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
-    this.registerTool(ValidatePlanTool, async (args) => this.handleValidatePlan(args))
+    this.registerTool(ValidatePlanTool, createValidatePlanHandler((lastPlan, errors) => {
+      // Update plan validation state and rebuild the system prompt so the model always
+      // sees the latest validation status in its context (last plan valid/invalid + errors).
+      this.planValidationState = { lastPlan, validationErrors: errors }
+      this.rebuildSystemMessage()
+    }))
     this.registerTool(RunPlanTool, createRunPlanHandler(
       () => this.mode.kind !== 'chat' ? this.mode.gitRoot : '',
       () => this.config.backendDir ?? join(dirname(process.cwd()), 'backend'),
@@ -272,7 +281,9 @@ export class Orchestrator {
       this.mode.kind !== 'chat' ? this.mode.gitRoot : ''
     ))
     this.registerToolSet(ExecTools, createExecHandlers(this.shell))
-    this.registerToolSet(TransformTools, createTransformHandlers(this.versionedMemory))
+    this.registerToolSet(TransformTools, createTransformHandlers(this.versionedMemory, {
+      getCommitted: () => this.fsm.history.map(r => r.serialize()),
+    }))
 
     // --- User-supplied tools (definitions only; handlers registered by caller) ---
     for (const tool of config.tools ?? []) {
@@ -307,9 +318,19 @@ export class Orchestrator {
   getHistory(): Round[] { return [...this.fsm.history] }
   getMemory(): VersionedMemory { return this.versionedMemory }
 
-  clearHistory(): void {
-    this.fsm = new Fsm()   // old Round objects -> cache entries GC'd automatically (WeakMap)
+  /**
+   * Full session reset: clears FSM history, memory, and mode back to chat.
+   * Saves an empty checkpoint so the next restoreCheckpoint() call finds nothing.
+   * This is the correct way to start a new conversation (replaces the old clearHistory()).
+   */
+  async resetSession(): Promise<void> {
+    this.fsm = new Fsm()
+    this.versionedMemory.clear()
+    this.mode = { kind: 'chat' }
     this.rebuildSystemMessage()
+
+    // Overwrite checkpoint with empty state so restore on next message is a no-op.
+    await this._saveCheckpoint()
   }
 
   abort(): void { this.abortController?.abort() }
@@ -687,7 +708,8 @@ export class Orchestrator {
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {
     consola.trace("Executing tool", call)
 
-    // TODO handler wrapper
+    // Find the handler, falling back to an unknown-tool error.
+    // Future: add a middleware wrapper here for logging, timeouts, and per-tool sandboxing.
     const handler = this.handlers.get(call.name)
     if (!handler) return { result: null, error: `Unknown tool: ${call.name}` }
 
@@ -789,52 +811,11 @@ export class Orchestrator {
     return { result: null, error: `Unknown mode: ${targetMode}` }
   }
 
-  private async handleValidatePlan(args: Record<string, unknown>): Promise<ToolResult> {
-    const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
-    if (!raw) return { result: null, error: "'plan' argument is required" }
-
-    let parsed: unknown
-    try {
-      parsed = typeof raw === 'string' ? destr(raw as string) : raw
-
-    } catch (err) {
-      return { result: null, error: `Invalid JSON: ${err}` }
-    }
-
-    // auto-unwrap common LLM mistake: model may pass the array directly,
-    // the full {codePlan:[]} object, or nest it under .plan or .value
-    const normalized =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any).codePlan ? parsed :
-        parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any).plan?.codePlan ? (parsed as any).plan :
-          parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any).value?.codePlan ? (parsed as any).value :
-            Array.isArray(parsed) ? { codePlan: parsed } :
-              parsed
-
-    try {
-      const result = codePlanSchema.safeParse(normalized)
-      if (result.success) {
-        this.planValidationState = { ...this.planValidationState, lastPlan: result.data, validationErrors: [] }
-        this.rebuildSystemMessage()
-
-        return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
-
-      } else {
-        const issues = result.error?.issues ?? []
-        const errors: string[] = issues.length
-          ? issues.map((e: any) => `${(e.path ?? []).join('.') || '(root)'}: ${e.message}`)
-          : [`Validation failed: ${JSON.stringify(result.error)}`]
-
-        this.planValidationState = { ...this.planValidationState, validationErrors: errors }
-        this.rebuildSystemMessage()
-
-        return { result: { valid: false, errors } }
-      }
-
-    } catch (err) {
-      return { result: null, error: `Schema validation failed: ${err}` }
-    }
-  }
-
+  /**
+   * Default system prompt used when OrchestratorConfig.systemPrompt is not set.
+   * Describes the two modes (chat/agent), the think-block format, and tool-call syntax.
+   * Override via config.systemPrompt if you need custom instructions.
+   */
   // TODO unhardcode
   private defaultSystemPrompt(): string {
     return [
@@ -856,34 +837,6 @@ export class Orchestrator {
       "Use token tool-call syntax: [TOOL_CALLS]...[CALL_ID]...[ARGS]",
     ].join('\n')
   }
-}
-
-// --- Validate plan tool definition (exported for registration) ---
-
-export const ValidatePlanTool: ToolDefinition = {
-  name: 'validate_plan',
-  description:
-    'Validate a CodePlan JSON object against the schema. ' +
-    'Returns { valid: true } on success or { valid: false, errors } with schema violations.',
-  parameters: {
-    type: 'object',
-    properties: {
-      plan: {
-        type: 'object',
-        description: 'The CodePlan JSON to validate.',
-        aliases: ['json', 'codeplan', 'codePlan', 'value'],
-      },
-    },
-    required: ['plan'],
-  },
-  returns: {
-    type: 'object',
-    properties: {
-      valid: { type: 'boolean', description: 'Whether the plan passed schema validation.' },
-      errors: { type: 'string', description: 'Validation errors (when valid is false).' },
-      message: { type: 'string', description: 'Success message (when valid is true).' },
-    },
-  },
 }
 
 // --- Smoke test ---

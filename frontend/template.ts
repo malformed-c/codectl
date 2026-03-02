@@ -99,7 +99,10 @@ export type Config = {
 }
 
 // --- Built-in profiles ---
-//TODO add stop strings and optional newlines and trimming
+// TODO
+// Profiles are currently hardcoded. Model-specific parameters (stop strings,
+// sampler settings, newline handling) are not yet factored in here and are
+// passed separately via KoboldConfig.
 
 export const Profiles = {
   // Mistral instruct
@@ -180,6 +183,8 @@ export const Profiles = {
 } as const
 
 // TODO add customization through config
+// Profile selection is currently done by the caller (e.g. KoboldAdapter constructor).
+// A future config system should allow selecting the profile by name from config.yaml.
 export type ProfileName = keyof typeof Profiles
 
 // --- Helpers ---
@@ -367,44 +372,50 @@ export function renderFim(req: FimRequest, template: TextTemplate): string | nul
  * Try to autofix a malformed open/close pair in text.
  *
  * Missing open (close present, open absent):
- *   Scan from message start to the first close. If there are no other tag
- *   tokens in that region it's safe to prepend the open at position 0.
+ *   Prepend the open token at position 0, so the close can pair with it.
+ *   This is always safe because the only way to have close-without-open is
+ *   if the model forgot to emit the opening tag.
  *
  * Missing close (open present, close absent):
- *   Scan from message start to the first open. If there are no other tag
- *   tokens before it (open is the first tag in the message) it's safe to
- *   append the close at the end.
+ *   Insert the close just before the earliest "stop" token found after the
+ *   open (e.g. [TOOL_CALLS] when fixing a [THINK] block), or at EOF if
+ *   none are found. stopBefore is a list of tokens that act as implicit
+ *   close boundaries (typically other template open tokens).
  *
  * Returns the (possibly patched) text and whether a fix was applied.
  */
-function autofixPair(text: string, [open, close]: TemplatePair): { text: string; fixed: boolean } {
+function autofixPair(
+  text: string,
+  [open, close]: TemplatePair,
+  stopBefore: string[] = [],
+): { text: string; fixed: boolean } {
   if (!close) return { text, fixed: false }
 
   const hasOpen  = text.includes(open)
   const hasClose = text.includes(close)
 
-  if (hasOpen && hasClose) return { text, fixed: false }  // normal, nothing to do
-  if (!hasOpen && !hasClose) return { text, fixed: false } // no tags at all
+  if (hasOpen && hasClose) return { text, fixed: false }
+  if (!hasOpen && !hasClose) return { text, fixed: false }
 
   if (!hasOpen && hasClose) {
-    // Missing open: check region [0, firstClose) for any tag tokens
-    const firstClose = text.indexOf(close)
-    const region = text.slice(0, firstClose)
-    if (!region.includes(open) && !region.includes(close)) {
-      return { text: open + text, fixed: true }
-    }
+    // Missing open: prepend it so the existing close can pair with it.
+    return { text: open + text, fixed: true }
   }
 
-  if (hasOpen && !hasClose) {
-    // Missing close: check region [0, firstOpen) for any tag tokens
-    const firstOpen = text.indexOf(open)
-    const region = text.slice(0, firstOpen)
-    if (!region.includes(open) && !region.includes(close)) {
-      return { text: text + close, fixed: true }
-    }
-  }
+  // Missing close: insert it before the earliest stop token or at EOF.
+  const afterOpen = text.indexOf(open) + open.length
+  const stopPositions = stopBefore
+    .map(tok => text.indexOf(tok, afterOpen))
+    .filter(i => i !== -1)
 
-  return { text, fixed: false }
+  const insertAt = stopPositions.length > 0
+    ? Math.min(...stopPositions)
+    : text.length
+
+  return {
+    text: text.slice(0, insertAt) + close + text.slice(insertAt),
+    fixed: true,
+  }
 }
 
 /**
@@ -496,11 +507,13 @@ function stripTag(text: string, [open, close]: TemplatePair): string {
 }
 
 /**
- * Parse a raw user/model responses into structured parts.
- * Strips template tokens, extracts think blocks and tool calls/responses,
- * leaving only the clean content.
+ * Parse a raw model response string into structured parts.
+ * Strips template tokens, auto-fixes malformed think/tool-call pairs,
+ * extracts think blocks and tool call payloads, and returns clean content.
+ *
+ * Currently handles assistant/model output only. User-turn parsing is not needed
+ * because user messages are always constructed by the orchestrator, never parsed.
  */
-// TODO user support
 export function parse(raw: string, template: TextTemplate): ParsedTurn {
   let text = raw
 
@@ -523,9 +536,16 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
 
   const result: ParsedTurn = { content: '' }
 
-  // Extract think block - autofix missing open/close before parsing
+  // Extract think block - autofix missing open/close before parsing.
+  // Pass the tool_call open token as a stop boundary so an unclosed [THINK]
+  // gets closed right before [TOOL_CALLS] rather than at EOF.
   if (template.think) {
-    const { text: fixed, fixed: thinkFixed } = autofixPair(text, template.think)
+    const toolCallOpen = template.toolCall
+      ? resolveWrap(template.toolCall, template.modelTurn)[0]
+      : undefined
+
+    const stopBefore = toolCallOpen ? [toolCallOpen] : []
+    const { text: fixed, fixed: thinkFixed } = autofixPair(text, template.think, stopBefore)
     if (thinkFixed) result.malformed = true
     text = fixed
 

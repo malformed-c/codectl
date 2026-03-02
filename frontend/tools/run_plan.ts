@@ -75,6 +75,8 @@ export function createRunPlanHandler(
     const backendDir = getBackendDir()
 
     // TODO make a git root tool
+    // Git root comes from agent mode (set when the model calls mode[ARGS]{"mode":"agent"}).
+    // run_plan requires it because Ansible playbooks need a concrete working directory.
     if (!gitRoot) return { result: null, error: 'run_plan requires a git root (switch to agent mode first)' }
 
     const result = await runPlan(plan, { adapter, gitRoot, backendDir })
