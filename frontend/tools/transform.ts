@@ -28,17 +28,20 @@ function resolveSource(
   if (turn !== undefined) {
     const content = getUserTurnText(history.getCommitted(), turn)
     if (content === undefined) return { error: `No user turn at offset ${turn}` }
+
     return { value: content }
   }
 
   if (key) {
     const val = memory.get(key)
     if (val === undefined) return { error: `Memory key '${key}' not found` }
+
     return { value: val }
   }
 
   if (text !== undefined) return { value: text }
-  return { error: "Provide 'text', 'key' (memory key), or 'turn' (user message offset)" }
+
+  return { error: "'turn' is required for extract" }
 }
 
 /**
@@ -92,16 +95,14 @@ function looksLikeJsonPayload(text: string): boolean {
 export const ExtractTool: ToolDefinition = {
   name: 'extract',
   description:
-    'Extract a value from text, a memory key, or a user message turn. ' +
+    'Extract a value from a user message turn or memory key. ' +
     'Methods: json (dot-path), regex, lines, codeblocks. ' +
-    'Source: inline text, key (memory), or turn (user message offset - 0 = latest). ' +
+    'Source: turn (user message offset - 0 = latest). ' +
     'Optionally save result to memory with save_to.',
   parameters: {
     type: 'object',
     properties: {
-      text: { type: 'string', description: 'Inline input text.' },
-      key: { type: 'string', description: 'Memory key to read from.' },
-      turn: { type: 'number', description: 'User message offset (0 = latest, 1 = second-latest, ...). Default: 0 when method is codeblocks and no other source given.' },
+      turn: { type: 'number', description: 'User message offset (0 = latest, 1 = second-latest, ...). Default: 0.' },
       method: { type: 'string', enum: ['json', 'regex', 'lines', 'codeblocks'], description: 'Extraction strategy.' },
       path: { type: 'string', description: 'For json: dot-notation path, e.g. "a.b.0.c".' },
       pattern: { type: 'string', description: 'For regex: JS regex string. First capture group (or full match) returned.' },
@@ -126,16 +127,16 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
     const method = args.method as string
     const saveTo = args.save_to as string | undefined
 
-    // codeblocks defaults to turn:0 if no other source specified
+    // codeblocks defaults to turn:0 if no source specified
     const turnArg = args.turn as number | undefined
     const effectiveTurn =
-      method === 'codeblocks' && turnArg === undefined && !args.text && !args.key
+      method === 'codeblocks' && turnArg === undefined
         ? 0
         : turnArg
 
     const src = resolveSource(
-      args.text as string | undefined,
-      args.key as string | undefined,
+      undefined,
+      undefined,
       effectiveTurn,
       memory,
       history,
@@ -150,8 +151,19 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       if (!path) return { result: null, error: "'path' required for json extraction" }
 
       let parsed: unknown
-      try { parsed = JSON.parse(text) }
-      catch { return { result: null, error: 'Input is not valid JSON' } }
+      try { parsed = JSON.parse(text) } catch {
+        // Text may contain a JSON payload embedded in surrounding prose (e.g. a user
+        // message that starts with instructions before the JSON). Find the first
+        // { or [ and try to parse from there.
+        const jsonStart = text.search(/[{[]/)
+        if (jsonStart !== -1) {
+          try { parsed = JSON.parse(text.slice(jsonStart)) }
+          catch { return { result: null, error: 'Input is not valid JSON' } }
+
+        } else {
+          return { result: null, error: 'Input is not valid JSON' }
+        }
+      }
 
       let cur: unknown = parsed
       for (const k of path.split('.')) {
