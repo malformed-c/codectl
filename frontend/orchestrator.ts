@@ -565,6 +565,18 @@ export class Orchestrator {
 
           const result = await this.executeToolCall(call)
 
+          // Inject ask replies and message content into the agent context as
+          // system rounds so the model sees them as first-class conversation turns
+          // rather than opaque tool result JSON.
+          if (call.name === 'ask' && result.result && !result.error) {
+            const answer = (result.result as Record<string, unknown>).answer as string
+            if (answer) this.fsm.onSystem(`[User]: ${answer}`)
+
+          } else if (call.name === 'message' && !result.error) {
+            const content = call.arguments.content as string
+            if (content) this.fsm.onSystem(`[Sent to user]: ${content}`)
+          }
+
           yield { kind: 'call_result', call, result }
 
           turnTools.push({ call, result })
@@ -689,7 +701,7 @@ export class Orchestrator {
    * the WeakMap cache entry in RenderCache.
    */
   private _rebuildEnrichedSystem(): void {
-    const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory', 'ask', 'message']
+    const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
     const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
     const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
     const toolsBlock = this.profile.availableTools

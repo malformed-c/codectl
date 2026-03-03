@@ -355,9 +355,13 @@ export function parseToolCalls(raw: string): ToolCall[] {
       const nextStart = starts[index + 1]?.start ?? normalized.length
       const argsPart = normalized.slice(item.argsStart, nextStart).trim()
 
+      // Support hybrid syntax: tool_name(...)[ARGS] where parens may contain
+      // inline args that are superseded by the [ARGS] block. Strip them from name.
+      const name = item.name.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'unknown'
+
       return {
         callId: item.callId,
-        name: item.name || 'unknown',
+        name,
         arguments: parseArguments(argsPart),
       }
     })

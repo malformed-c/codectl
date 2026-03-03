@@ -37,4 +37,16 @@ describe('parseToolCalls', () => {
       arguments: { value: 'id' },
     })
   })
+
+  test('parses hybrid syntax: name(...)[ARGS]', () => {
+    const calls = parseToolCalls('tool_library()[ARGS]{}')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({ name: 'tool_library', arguments: {} })
+  })
+
+  test('parses hybrid syntax with args in parens ignored in favour of [ARGS] block', () => {
+    const calls = parseToolCalls('bash(ignored)[ARGS]{"command":"ls"}')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({ name: 'bash', arguments: { command: 'ls' } })
+  })
 })
