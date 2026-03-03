@@ -6,7 +6,7 @@ import type { ToolHandler } from '../orchestrator'
 export const AskTool: ToolDefinition = {
   name: 'ask',
   description:
-    'Ask the user a question and wait for their reply before continuing. ' +
+    'Only in agent mode. Ask the user a question and wait for their reply before continuing. ' +
     'Use this when you need clarification or a decision that only the user can provide. ' +
     'The agent loop is paused until the user responds.',
   parameters: {
@@ -22,7 +22,7 @@ export const AskTool: ToolDefinition = {
   returns: {
     type: 'object',
     properties: {
-      answer: { type: 'string', description: 'The user\'s reply.' },
+      answer: { type: 'string', description: "The user's reply." },
     },
   },
 }
@@ -30,7 +30,7 @@ export const AskTool: ToolDefinition = {
 export const MessageTool: ToolDefinition = {
   name: 'message',
   description:
-    'Send a message or status update to the user without pausing the agent loop. ' +
+    'Only in agent mode. Send a message or status update to the user without pausing the agent loop. ' +
     'Use this to report progress, intermediate results, or anything the user should ' +
     'know while you continue working.',
   parameters: {
