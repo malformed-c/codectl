@@ -291,7 +291,7 @@ export class Orchestrator {
     ))
     this.registerToolSet(ExecTools, createExecHandlers(this.shell))
     this.registerToolSet(TransformTools, createTransformHandlers(this.versionedMemory, {
-      getCommitted: () => this.fsm.history.map(r => r.serialize()),
+      getCommitted: () => this.fsm.getRenderableHistory().map(r => r.serialize()),
     }))
 
     // --- User-supplied tools (definitions only; handlers registered by caller) ---
