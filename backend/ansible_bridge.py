@@ -23,7 +23,7 @@ collection_paths = [
     "/home/engi/.ansible/collections",
     "/usr/share/ansible/collections",
 ]
-loader.set_basedir(collection_paths)
+loader.set_basedir(collection_paths[0])
 init_plugin_loader(collection_paths)
 
 # ---

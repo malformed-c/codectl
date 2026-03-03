@@ -12,13 +12,13 @@ export const RunPlanTool: ToolDefinition = {
   description:
     'Execute a validated CodePlan. Resolves stream IDs, dry-applies all Codeq ops, ' +
     'checks for file conflicts, then writes CodeEdit changes and runs Ansible tasks. ' +
-    'Only call after validate_plan has returned valid=true. Only available in codeplan mode.',
+    'Only call after validate_plan has returned valid=true.',
   parameters: {
     type: 'object',
     properties: {
       plan: {
         type: 'object',
-        description: 'The validated CodePlan JSON to execute.',
+        description: 'The validated CodePlan JSON object or memory key to execute.',
         aliases: ['json', 'codeplan', 'codePlan', 'value'],
       },
     },

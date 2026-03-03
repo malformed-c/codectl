@@ -74,7 +74,7 @@ const ansibleSchema = z.object({
   kind: z.literal("Ansible"),
   metadata: metaSchema,
   spec: z.object({
-    hosts: z.string().default("localhost"),
+    hosts: z.union([z.string(), z.array(z.string())]).default("localhost"),
     tasks: z.array(ansibleTaskSchema).min(1),
     handlers: z.array(ansibleHandlerSchema).optional(),
   }),

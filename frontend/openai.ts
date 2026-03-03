@@ -75,7 +75,7 @@ export class OpenAIChatAdapter {
 
   constructor(config: OpenAIConfig) {
     this.config = config
-    this.server = config.apiServer.replace(/\/$/, '')
+    this.server = config.apiServer.replace(/\/+$/, '').replace(/\/v\d+$/, '')
   }
 
   async status(): Promise<OpenAIStatus> {
@@ -198,7 +198,7 @@ export class OpenAITextAdapter {
 
   constructor(config: OpenAIConfig) {
     this.config = config
-    this.server = config.apiServer.replace(/\/$/, '')
+    this.server = config.apiServer.replace(/\/+$/, '').replace(/\/v\d+$/, '')
   }
 
   async status(): Promise<OpenAIStatus> {
