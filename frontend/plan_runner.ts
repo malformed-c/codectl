@@ -35,7 +35,7 @@ import type {
   Resource,
   FunctionEnsure,
 } from "./codeplan.schema"
-import type { KoboldAdapter } from "./kobold"
+import type { LLMAdapter } from "./orchestrator"
 
 // ---
 // Types
@@ -107,7 +107,7 @@ function affectedPaths(items: CodeEditItem[], gitRoot: string): string[] {
 
 async function resolveStreams(
   items: CodeEditItem[],
-  adapter: KoboldAdapter,
+  adapter: LLMAdapter,
   gitRoot: string,
 ): Promise<Map<string, StreamResolution>> {
   const jobs: Array<{ streamID: string; name: string; path: string }> = []
@@ -376,7 +376,7 @@ async function runAnsible(
 // ---
 
 export type PlanRunnerConfig = {
-  adapter: KoboldAdapter
+  adapter: LLMAdapter
   gitRoot: string
   /** Path to the backend/ directory containing pyproject.toml */
   backendDir: string

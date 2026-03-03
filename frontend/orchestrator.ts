@@ -2,6 +2,7 @@ import { consola } from "consola"
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
+import type { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
 import type { ParsedTurn, TextTemplate } from './template'
 import type { StoredToolCall, StoredToolResult } from './types'
 import {
@@ -53,8 +54,10 @@ export type ToolHandler = (
   args: Record<string, unknown>
 ) => Promise<ToolResult>
 
+export type LLMAdapter = KoboldAdapter | OpenAIChatAdapter | OpenAITextAdapter
+
 export type OrchestratorConfig = {
-  adapter: KoboldAdapter
+  adapter: LLMAdapter
   /** Override the built-in system prompt. */
   systemPrompt?: string
   /** Extra tool definitions for the model to see (handlers must be registered separately). */
@@ -224,7 +227,7 @@ export async function findGitRoot(startDir: string): Promise<string | null> {
 // --- Orchestrator ---
 
 export class Orchestrator {
-  private readonly adapter: KoboldAdapter
+  private readonly adapter: LLMAdapter
   private readonly profile: TextTemplate
   readonly config: OrchestratorConfig
   private readonly handlers = new Map<string, ToolHandler>()

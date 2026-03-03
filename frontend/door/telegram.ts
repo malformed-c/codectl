@@ -5,13 +5,13 @@ import { consola } from 'consola'
 import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
-import type { KoboldAdapter } from '../kobold'
+import type { LLMAdapter } from '../orchestrator'
 
 // --- Types ---
 
 export type TelegramDoorConfig = {
   token: string
-  adapter: KoboldAdapter
+  adapter: LLMAdapter
   /** Base directory for per-room checkpoints. Each room gets its own subdirectory. */
   checkpointDir?: string
   /** Extra orchestrator config per room (adapter is injected, do not set here). */

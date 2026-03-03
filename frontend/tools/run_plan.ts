@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolResult } from '../tool'
 import type { ToolHandler } from '../orchestrator'
-import type { KoboldAdapter } from '../kobold'
+import type { LLMAdapter } from '../orchestrator'
 import { runPlan } from '../plan_runner'
 import type { CodePlan } from '../codeplan.schema'
 import { codePlanSchema } from '../codeplan.schema'
@@ -41,7 +41,7 @@ export const RunPlanTool: ToolDefinition = {
 export function createRunPlanHandler(
   getGitRoot: () => string,
   getBackendDir: () => string,
-  adapter: KoboldAdapter,
+  adapter: LLMAdapter,
 ): ToolHandler {
   return async (args) => {
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value

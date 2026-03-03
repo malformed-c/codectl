@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { consola } from 'consola'
 import { YAML } from 'bun'
 import { KoboldAdapter } from './kobold'
+import { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
 import { Profiles, type Config } from './template'
 import { HistoryStore } from './history'
 import { TelegramDoor } from './door/telegram'
@@ -118,10 +119,25 @@ async function main(): Promise<void> {
   const historyStore = new HistoryStore(config.history_path)
 
   // One adapter, shared across all doors and rooms
-  const adapter = new KoboldAdapter({
-    apiServer: process.env.BASE_URL ?? config.api_server,
-    template: Profiles.mistral, // TODO Profile is hardcoded for now; future: load from model YAML or config.yaml
-  })
+  const apiServer = process.env.BASE_URL ?? config.api_server
+  const apiKey = process.env.OPENAI_API_KEY ?? ""
+  const model = process.env.MODEL ?? config.default_model
+  const apiType = process.env.API_TYPE ?? config.api_type ?? "koboldcpp"
+  const profile = Profiles.qwen
+
+  const adapter = (() => {
+    switch (apiType) {
+      case "openai-chat":
+      return new OpenAIChatAdapter({ apiServer, apiKey, model, template: profile })
+
+      case "openai-text":
+      return new OpenAITextAdapter({ apiServer, apiKey, model, template: profile })
+
+      case "koboldcpp":
+      default:
+        return new KoboldAdapter({ apiServer, template: Profiles.mistral })
+    }
+  })()
 
   // Check what doors to run based on env
   const telegramToken = process.env.TELEGRAM_BOT_TOKEN
