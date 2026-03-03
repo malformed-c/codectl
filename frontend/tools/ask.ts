@@ -138,10 +138,7 @@ export function createAskHandler(channel: AskChannel): ToolHandler {
 }
 
 export function createMessageHandler(): ToolHandler {
-  return async (args): Promise<ToolResult> => {
-    const content = args.content as string
-    // The actual delivery is handled by the door reading call_result events.
-    // We just ack here so the model knows it was received.
-    return { result: { sent: true, content } }
+  return async (_args): Promise<ToolResult> => {
+    return { result: { sent: true } }
   }
 }

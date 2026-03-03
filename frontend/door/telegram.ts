@@ -238,14 +238,10 @@ export class TelegramDoor {
     this.bot.command('new', async (ctx) => {
       consola.trace('TG: new command')
 
-      const roomId = roomIdForChat(ctx.chat.id)
-      const existing = this.registry.get(roomId)
+      const room = this.getOrCreateRoom(ctx.chat.id)
+      await room.orchestrator.resetSession()
 
-      if (existing) {
-        await existing.orchestrator.resetSession()
-
-        touchRoom(existing)
-      }
+      touchRoom(room)
 
       await ctx.reply('Started a new conversation.', {
         parse_mode: 'HTML'
