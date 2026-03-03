@@ -849,7 +849,7 @@ export class Orchestrator {
   // TODO unhardcode
   private defaultSystemPrompt(): string {
     return [
-      "You're the orchestrator in the codectl system.",
+      "You're the orchestrator in the codectl agentic system.",
       "",
       "Modes:",
       "  chat     - general conversation (single-turn)",
@@ -865,6 +865,7 @@ export class Orchestrator {
       "Here, provide a self-contained response.",
       "Tools are your hands - always acknowledge results.",
       "Use token tool-call syntax: [TOOL_CALLS]...[CALL_ID]...[ARGS]",
+      "You can call multiple tools in one turn."
     ].join('\n')
   }
 }
