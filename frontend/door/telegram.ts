@@ -270,7 +270,7 @@ export class TelegramDoor {
     consola.trace('Handle TG message')
 
     // If the model is waiting on an ask, route the reply to it instead of
-    // starting a new chat. The in-progress generator will resume automatically.
+    // starting a new chat. The background generator will resume automatically.
     if (room.orchestrator.hasPendingAsk()) {
       consola.debug(`[ask] routing user reply to pending ask for room ${room.meta.id}`)
       room.orchestrator.resolveAsk(text)
@@ -290,109 +290,111 @@ export class TelegramDoor {
     // on tool-call progress messages to show activity instead of re-sending it.
     await ctx.replyWithChatAction('typing')
 
-    try {
-      for await (const event of room.orchestrator.chat(text)) {
-        if (event.kind === 'turn') {
-          // Send model's text content (final response after all tools done)
-          const response = event.turn.content
-          if (response) {
-            const chunks = splitMessage(response, this.config.maxMessageLength)
-            for (const chunk of chunks) {
-              try {
-                await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
+    // Run the generator as a detached background task so the middleware returns
+    // immediately. This is essential for `ask` to work: grammY processes updates
+    // for the same chat sequentially, so if we await here the user's reply can
+    // never arrive to unblock the pending ask - deadlock.
+    this.runGenBackground(ctx, room, text)
+  }
 
-              } catch {
-                // HTML parse failed - fall back to stripped plain text
-                await ctx.reply(stripMarkdownToPlain(chunk))
-              }
-            }
-          }
+  private runGenBackground(
+    ctx: Context & { message: { text: string; chat: { id: number } } },
+    room: ReturnType<RoomRegistry['getOrCreate']>,
+    text: string,
+  ): void {
+    const maxLen = this.config.maxMessageLength
 
-        } else if (event.kind === 'call') {
-          // ask: send the question directly as a prompt, not a tool-call notification
-          if (event.call.name === 'ask') {
-            const question = event.call.arguments.question as string
-            try {
-              await ctx.reply(`❓ ${markdownToTelegramHTML(question)}`, { parse_mode: 'HTML' })
+    const sendText = async (md: string) => {
+      const chunks = splitMessage(md, maxLen)
+      for (const chunk of chunks) {
+        try {
+          await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
 
-            } catch {
-              await ctx.reply(`❓ ${stripMarkdownToPlain(question)}`)
-            }
-
-            continue
-          }
-
-          // message: will be surfaced via call_result below, skip the pending notification
-          if (event.call.name === 'message') continue
-
-          // Show call before it runs
-          const args = JSON.stringify(event.call.arguments)
-          try {
-            await ctx.reply(`⏳ <code>${escapeHtml(event.call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
-
-          } catch (err) {
-            consola.warn('Failed to send call notification:', err)
-          }
-
-        } else if (event.kind === 'call_result') {
-          // message: render content directly, not as a tool result
-          if (event.call.name === 'message') {
-            const content = event.call.arguments.content as string
-            const chunks = splitMessage(content, this.config.maxMessageLength)
-            for (const chunk of chunks) {
-              try {
-                await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
-
-              } catch {
-                await ctx.reply(stripMarkdownToPlain(chunk))
-              }
-            }
-
-            continue
-          }
-
-          // ask: show confirmation that the answer was received (quiet, no noise)
-          if (event.call.name === 'ask') continue
-          // Show result immediately after execution
-          const { call, result } = event
-          const status = result.error
-            ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
-            : `✅ <b>${escapeHtml(call.name)}</b>`
-
-          const resultStr = result.error
-            ? null
-            : typeof result.result === 'string'
-              ? result.result
-              : JSON.stringify(result.result, null, 2)
-
-          const preview = resultStr && resultStr.length > 300
-            ? resultStr.slice(0, 300) + '\n...'
-            : resultStr
-
-          const msg = preview
-            ? `${status}\n<pre>${escapeHtml(preview)}</pre>`
-            : status
-
-          try {
-            await ctx.reply(msg, { parse_mode: 'HTML' })
-
-          } catch (err) {
-            consola.warn('Failed to send tool result:', err)
-          }
+        } catch {
+          await ctx.reply(stripMarkdownToPlain(chunk))
         }
       }
-
-      touchRoom(room)
-
-      // Checkpoints are saved automatically after each committed round in runLoop
-
-    } catch (err) {
-      consola.error('Error handling Telegram message:', err)
-
-      await ctx.reply('Something went wrong. Please try again.', {
-        parse_mode: 'HTML'
-      })
     }
+
+    const run = async () => {
+      try {
+        for await (const event of room.orchestrator.chat(text)) {
+          if (event.kind === 'turn') {
+            if (event.turn.content) await sendText(event.turn.content)
+
+          } else if (event.kind === 'call') {
+            if (event.call.name === 'ask') {
+              const question = event.call.arguments.question as string
+              try {
+                await ctx.reply(`❓ ${markdownToTelegramHTML(question)}`, { parse_mode: 'HTML' })
+
+              } catch {
+                await ctx.reply(`❓ ${stripMarkdownToPlain(question)}`)
+              }
+
+              continue
+            }
+
+            if (event.call.name === 'message') continue
+
+            const args = JSON.stringify(event.call.arguments)
+            try {
+              await ctx.reply(`⏳ <code>${escapeHtml(event.call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
+
+            } catch (err) {
+              consola.warn('Failed to send call notification:', err)
+            }
+
+          } else if (event.kind === 'call_result') {
+            if (event.call.name === 'message') {
+              await sendText(event.call.arguments.content as string)
+
+              continue
+            }
+
+            if (event.call.name === 'ask') continue
+
+            const { call, result } = event
+            const status = result.error
+              ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
+              : `✅ <b>${escapeHtml(call.name)}</b>`
+
+            const resultStr = result.error
+              ? null
+              : typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result, null, 2)
+
+            const preview = resultStr && resultStr.length > 300
+              ? resultStr.slice(0, 300) + '\n...'
+              : resultStr
+
+            const msg = preview
+              ? `${status}\n<pre>${escapeHtml(preview)}</pre>`
+              : status
+
+            try {
+              await ctx.reply(msg, { parse_mode: 'HTML' })
+
+            } catch (err) {
+              consola.warn('Failed to send tool result:', err)
+            }
+          }
+        }
+
+        touchRoom(room)
+
+      } catch (err) {
+        consola.error('Error handling Telegram message:', err)
+
+        try {
+          await ctx.reply('Something went wrong. Please try again.', { parse_mode: 'HTML' })
+        } catch { /* best effort */ }
+      }
+    }
+
+    // Intentionally not awaited - detached from middleware lifecycle
+    run()
   }
 
   private getOrCreateRoom(chatId: number): ReturnType<RoomRegistry['getOrCreate']> {
