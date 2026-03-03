@@ -529,8 +529,12 @@ export class Orchestrator {
           } catch (err) {
             consola.error('failed to parse tool call:', err)
 
+            // Extract the tool name from the raw text so history shows what the model
+            // actually tried to call rather than a generic 'malformed_call' sentinel.
+            const inferredName = rawCall.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1] ?? 'malformed_call'
+
             // Push a dummy call so the FSM arrays remain perfectly aligned (1:1)
-            storedCalls.push({ tool: 'malformed_call', raw: rawCall })
+            storedCalls.push({ tool: inferredName, raw: rawCall })
             immediateResults.push({ error: `Failed to parse tool call: ${err}` })
 
             const wasAgent = this.mode.kind === 'agent'
