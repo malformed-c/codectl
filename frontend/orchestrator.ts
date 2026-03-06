@@ -4,6 +4,7 @@ import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
 import type { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
 import type { ParsedTurn, TextTemplate } from './template'
+import { turnContent, turnThink, turnToolCalls } from './template'
 import type { StoredToolCall, StoredToolResult } from './types'
 import {
   type ToolDefinition,
@@ -22,6 +23,7 @@ import { CodeqTools, createCodeqHandlers } from "./tools/codeq"
 import { ExecTools, createExecHandlers, PersistentShell } from "./tools/exec"
 import { SubagentTool, createSubagentHandler } from "./tools/subagent"
 import { MemoryTool, createMemoryHandler } from "./tools/memory"
+import { GraphMemory, GraphMemoryTool, createGraphMemoryHandler } from "./memory"
 import { AskTool, MessageTool, AskChannel, createAskHandler, createMessageHandler } from "./tools/ask"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
@@ -87,6 +89,9 @@ export type OrchestratorConfig = {
 
   /** Keep only this many newest checkpoint-NNN.json files. latest.json is always kept. */
   checkpointKeep?: number
+
+  /** Path to graph memory SQLite db. If provided, graph memory tool is registered. */
+  graphMemoryPath?: string
 }
 
 export type TurnResult = {
@@ -272,6 +277,11 @@ export class Orchestrator {
       return { result: wrapped }
     })
     this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
+
+    if (this.config.graphMemoryPath) {
+      const gm = new GraphMemory(this.config.graphMemoryPath)
+      this.registerTool(GraphMemoryTool, createGraphMemoryHandler(gm))
+    }
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
     this.registerTool(AskTool, createAskHandler(this.askChannel))
     this.registerTool(MessageTool, createMessageHandler())
@@ -452,7 +462,7 @@ export class Orchestrator {
       ? (this.config.chatToolTurns ?? 5)
       : (this.config.autonomousTurns ?? 16)
 
-    let finalTurn: ParsedTurn = { content: '' }
+    let finalTurn: ParsedTurn = { steps: [] }
     let doneResult: string | undefined
     let loopShouldStop = false
 
@@ -469,11 +479,15 @@ export class Orchestrator {
 
       // Detect think-only output: model produced reasoning but no content and no tool calls.
       // Punish with a system correction so it completes the turn.
-      const isThinkOnly = parsed.think && !parsed.content && !parsed.toolCalls?.length
+      const think   = turnThink(parsed)
+      const content  = turnContent(parsed)
+      const calls    = turnToolCalls(parsed)
+
+      const isThinkOnly = think && !content && !calls.length
       if (isThinkOnly) {
         consola.warn('[think-only] model produced reasoning with no content/tools - injecting correction')
 
-        this.fsm.onModel(parsed.think, undefined, [])
+        this.fsm.onModel(think, undefined, [])
         this.fsm.onSystem(
           'You forgot to close your reasoning tag or produce a response. ' +
           'Your reasoning tags are [THINK][/THINK]. ' +
@@ -484,8 +498,8 @@ export class Orchestrator {
       }
 
       // Stop if no tools called - commit ChatRound via FSM
-      if (!parsed.toolCalls?.length) {
-        this.fsm.onModel(parsed.think, parsed.content, [])
+      if (!calls.length) {
+        this.fsm.onModel(think, content, [])
         void this._saveCheckpoint()
 
         yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
@@ -493,9 +507,7 @@ export class Orchestrator {
         break outerLoop
       }
 
-      // #23: Malformed token correction - model used closing token without opening.
-      // Auto-normalize already happened in parse(); now log + count as failure so the
-      // model receives an inline correction in the tool_result.
+      // #23: Malformed token correction
       if (parsed.malformed) {
         consola.warn('Malformed tool call: closing token found without opening token.')
 
@@ -503,54 +515,34 @@ export class Orchestrator {
         this.recordToolFailure()
       }
 
-      // Parse tool calls
+      // Build ToolCall / StoredToolCall arrays from already-parsed steps
       loopShouldStop = false
       const turnTools: TurnResult['toolsExecuted'] = []
       const allCalls: ToolCall[] = []
       const storedCalls: StoredToolCall[] = []
       const immediateResults: StoredToolResult[] = []
 
-      if (parsed.toolCalls?.length) {
-        consola.info('received tool calls:', parsed.toolCalls)
+      if (calls.length) {
+        consola.info('received tool calls:', calls.map(c => c.name))
 
-        for (const rawCall of parsed.toolCalls) {
-          try {
-            const calls = parseToolCalls(rawCall)
+        for (const step of calls) {
+          // Resolve $var / ${var} variable references in arguments before execution
+          const resolvedArgs = resolveMemoryVars(step.arguments, this.versionedMemory)
 
-            consola.info('parsed tool calls:', calls)
-
-            allCalls.push(...calls)
-
-            for (const call of calls) yield { kind: 'call', call, pending: true }
-
-            storedCalls.push(...calls.map(c => ({
-              tool: c.name,
-              ...(c.callId ? { callId: c.callId } : {}),
-              ...c.arguments,
-            })))
-
-          } catch (err) {
-            consola.error('failed to parse tool call:', err)
-
-            // Extract the tool name from the raw text so history shows what the model
-            // actually tried to call rather than a generic 'malformed_call' sentinel.
-            const inferredName = rawCall.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1] ?? 'malformed_call'
-
-            // Push a dummy call so the FSM arrays remain perfectly aligned (1:1)
-            storedCalls.push({ tool: inferredName, raw: rawCall })
-            immediateResults.push({ error: `Failed to parse tool call: ${err}` })
-
-            const wasAgent = this.mode.kind === 'agent'
-            this.recordToolFailure()
-
-            if (wasAgent && this.wasEjected()) break
-          }
+          const call: ToolCall = { name: step.name, callId: step.callId, arguments: resolvedArgs }
+          allCalls.push(call)
+          yield { kind: 'call', call, pending: true }
+          storedCalls.push({
+            tool: call.name,
+            ...(call.callId ? { callId: call.callId } : {}),
+            ...call.arguments,
+          })
         }
       }
 
       if (storedCalls.length > 0) {
         // Signal model turn with calls to FSM - opens ToolRound
-        this.fsm.onModel(parsed.think, parsed.content, storedCalls)
+        this.fsm.onModel(think, content, storedCalls)
 
         // Yield model text FIRST so the UI can display it before tool notifications.
         // toolsExecuted is empty here; callers that need full results use call_result events
@@ -617,9 +609,9 @@ export class Orchestrator {
 
         void this._saveCheckpoint()
 
-      } else if (parsed.toolCalls?.length > 0 && !parsed.malformed) {
-        // Failsafe: if we had raw toolCalls but storedCalls is 0, FSM must not be locked.
-        this.fsm.onModel(parsed.think, parsed.content, [])
+      } else if (calls.length > 0 && !parsed.malformed) {
+        // Failsafe: had tool_call steps but storedCalls is 0, FSM must not be locked.
+        this.fsm.onModel(think, content, [])
 
         yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
 
@@ -636,7 +628,7 @@ export class Orchestrator {
 
     // If 'done' provided a specific result override, use it as final content
     if (doneResult !== undefined) {
-      finalTurn = { ...finalTurn, content: doneResult }
+      finalTurn = { ...finalTurn, steps: [{ kind: 'text' as const, text: doneResult }] }
     }
 
     return { turn: finalTurn, toolsExecuted }
@@ -685,6 +677,7 @@ export class Orchestrator {
   // --- Internals ---
 
   /** Render the full history to a prompt string via renderHistory(). */
+
   private buildPrompt(): string {
     const history = [this._enrichedSystemRound, ...this.fsm.getRenderableHistory()]
     const budget = this.config.contextBudget ?? 128_000
@@ -885,6 +878,34 @@ export class Orchestrator {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Variable resolution: substitute $key / ${key} from VersionedMemory
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk every string value in args and replace $key / ${key} references with
+ * the corresponding value from the session memory store.
+ * Non-string values (numbers, booleans, arrays, objects) are left untouched.
+ */
+function resolveMemoryVars(
+  args: Record<string, unknown>,
+  memory: VersionedMemory,
+): Record<string, unknown> {
+  const resolved: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(args)) {
+    resolved[k] = typeof v === 'string' ? substituteVars(v, memory) : v
+  }
+  return resolved
+}
+
+function substituteVars(text: string, memory: VersionedMemory): string {
+  // ${key} form — match first so it takes priority
+  text = text.replace(/\${([^}]+)}/g, (_, key: string) => memory.get(key) ?? `\${${key}}`)
+  // $key form — word-char sequence after $
+  text = text.replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g, (_, key: string) => memory.get(key) ?? `$${key}`)
+  return text
+}
+
 // --- Smoke test ---
 
 if (import.meta.main) {
@@ -905,17 +926,17 @@ if (import.meta.main) {
 
   consola.log('=== chat (no tools) ===')
   const r1 = await orchestrator.complete('Hi. Say hello in one sentence.')
-  consola.log(r1.turn.content)
+  consola.log(turnContent(r1.turn))
   consola.log('mode:', orchestrator.getMode())
 
   consola.log('\n=== mode switch ===')
   const r2 = await orchestrator.complete('Switch to agent mode using tool calls.')
-  consola.log(r2.turn.content)
+  consola.log(turnContent(r2.turn))
   consola.log('mode:', orchestrator.getMode())
   consola.log('tools executed:', r2.toolsExecuted)
 
   consola.log('\n=== tools list ===')
   const r3 = await orchestrator.complete('List available tools.')
-  consola.log(r3.turn.content)
+  consola.log(turnContent(r3.turn))
   consola.log('mode:', orchestrator.getMode())
 }

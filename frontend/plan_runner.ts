@@ -159,7 +159,7 @@ async function resolveStreams(
     return {
       streamID: job.streamID,
       name: job.name,
-      body: parsed.content.trim(),
+      body: (parsed.steps.filter((s: any) => s.kind === 'text').map((s: any) => s.text).join('') ).trim(),
     } satisfies StreamResolution
   }))
 

@@ -6,6 +6,7 @@ import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
 import { Orchestrator, type OrchestratorConfig } from '../orchestrator'
 import type { LLMAdapter } from '../orchestrator'
+import { turnContent } from '../template'
 
 // --- Types ---
 
@@ -320,7 +321,7 @@ export class TelegramDoor {
       try {
         for await (const event of room.orchestrator.chat(text)) {
           if (event.kind === 'turn') {
-            if (event.turn.content) await sendText(event.turn.content)
+            const _tc = turnContent(event.turn); if (_tc) await sendText(_tc)
 
           } else if (event.kind === 'call') {
             if (event.call.name === 'ask') {

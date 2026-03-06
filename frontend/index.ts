@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { consola } from 'consola'
 import { YAML } from 'bun'
-import { type Config } from './template'
+import { type Config, turnContent, turnThink } from './template'
 import { HistoryStore } from './history'
 import { TelegramDoor } from './door/telegram'
 import { Orchestrator } from './orchestrator'
@@ -87,9 +87,9 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
     try {
       for await (const event of orchestrator.chat(text)) {
         if (event.kind === 'turn') {
-          if (event.turn.think) consola.debug('[think]', event.turn.think)
+          const _think = turnThink(event.turn); if (_think) consola.debug('[think]', _think)
 
-          if (event.turn.content) consola.log(event.turn.content)
+          const _content = turnContent(event.turn); if (_content) consola.log(_content)
 
 
           for (const te of event.toolsExecuted) {

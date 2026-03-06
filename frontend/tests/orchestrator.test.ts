@@ -1,6 +1,6 @@
 import { expect, test, describe } from 'bun:test'
 import { Orchestrator, toPromise } from '../orchestrator'
-import { Profiles } from '../template'
+import { Profiles, makeTurn, turnContent, turnThink } from '../template'
 import { KoboldAdapter } from '../kobold'
 import type { ParsedTurn } from '../template'
 
@@ -23,31 +23,31 @@ describe('Orchestrator', () => {
   test('chat handles simple interaction', async () => {
     const orch = new Orchestrator({
       adapter: new ScriptedAdapter([
-        { content: 'Hi there!', think: 'User said hello.' },
+        makeTurn({ content: 'Hi there!', think: 'User said hello.' }),
       ])
     })
 
     const result = await toPromise(orch.chat('Hello'))
 
-    expect(result.turn.content).toBe('Hi there!')
-    expect(result.turn.think).toBe('User said hello.')
+    expect(turnContent(result.turn)).toBe('Hi there!')
+    expect(turnThink(result.turn)).toBe('User said hello.')
     expect(orch.getHistory()).toHaveLength(1)
   })
 
   test('chat handles tool calls', async () => {
     const orch = new Orchestrator({
       adapter: new ScriptedAdapter([
-        {
+        makeTurn({
           content: 'Calling tool...',
-          toolCalls: ['mode[ARGS]{"mode": "agent"}']
-        },
-        { content: 'Tool executed successfully.' },
+          toolCalls: [{ name: 'mode', arguments: { mode: 'agent' } }],
+        }),
+        makeTurn({ content: 'Tool executed successfully.' }),
       ])
     })
 
     const result = await toPromise(orch.chat('Please call tool'))
 
-    expect(result.turn.content).toBe('Tool executed successfully.')
+    expect(turnContent(result.turn)).toBe('Tool executed successfully.')
     expect(result.toolsExecuted).toHaveLength(1)
     expect(result.toolsExecuted[0]!.call.name).toBe('mode')
     expect(orch.getMode().kind).toBe('agent')

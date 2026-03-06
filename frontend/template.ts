@@ -3,6 +3,7 @@
 import consola from 'consola'
 import { match, P } from 'ts-pattern'
 import type { StoredToolCall, StoredToolResult } from './types'
+import { parseToolCalls } from './tool'
 
 type TemplatePair = [open: string, close: string]
 
@@ -72,14 +73,62 @@ export type FimContent = {
   middle: string
 }
 
-export type ParsedTurn = {
-  think?: string
-  toolCalls?: string[]
-  toolResults?: string[]
-  content: string
+// ---------------------------------------------------------------------------
+// Step-based turn model
+// ---------------------------------------------------------------------------
 
-  /** True if tool call tokens were malformed (close found but open missing) and were auto-normalized. */
+/**
+ * A single step within a model turn.
+ *
+ * Adapters produce steps in the order the model actually generated them:
+ *   thought → text → tool_call → ...
+ *
+ * Tool results are kept in ToolRound (managed by the FSM), not here.
+ */
+export type Step =
+  | { kind: 'thought';   text: string }
+  | { kind: 'text';      text: string }
+  | { kind: 'tool_call'; name: string; callId?: string; arguments: Record<string, unknown> }
+
+export type ParsedTurn = {
+  steps: Step[]
+  /** True if tool call tokens were malformed and were auto-normalised. */
   malformed?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Helper views  (keep callsites readable without spreading steps manually)
+// ---------------------------------------------------------------------------
+
+/** Concatenated text content of all 'text' steps. */
+export function turnContent(t: ParsedTurn): string {
+  return t.steps.filter((s): s is Step & { kind: 'text' } => s.kind === 'text')
+    .map(s => s.text).join('')
+}
+
+/** Concatenated text of all 'thought' steps. */
+export function turnThink(t: ParsedTurn): string {
+  return t.steps.filter((s): s is Step & { kind: 'thought' } => s.kind === 'thought')
+    .map(s => s.text).join('')
+}
+
+/** All tool_call steps as an array. */
+export function turnToolCalls(t: ParsedTurn): Array<Step & { kind: 'tool_call' }> {
+  return t.steps.filter((s): s is Step & { kind: 'tool_call' } => s.kind === 'tool_call')
+}
+
+/** Build a ParsedTurn from optional flat fields (convenience for tests / adapters). */
+export function makeTurn(opts: {
+  think?:     string
+  content?:   string
+  toolCalls?: Array<{ name: string; callId?: string; arguments: Record<string, unknown> }>
+  malformed?: boolean
+}): ParsedTurn {
+  const steps: Step[] = []
+  if (opts.think)   steps.push({ kind: 'thought', text: opts.think })
+  if (opts.content) steps.push({ kind: 'text',    text: opts.content })
+  for (const c of opts.toolCalls ?? []) steps.push({ kind: 'tool_call', ...c })
+  return { steps, malformed: opts.malformed }
 }
 
 export type ModelProfile = {
@@ -535,7 +584,8 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
     text = text.slice(0, text.length - template.modelTurn[1].length)
   }
 
-  const result: ParsedTurn = { content: '' }
+  const steps: Step[] = []
+  let malformed: boolean | undefined
 
   // Extract think block - autofix missing open/close before parsing.
   // Pass the tool_call open token as a stop boundary so an unclosed [THINK]
@@ -547,34 +597,52 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
 
     const stopBefore = toolCallOpen ? [toolCallOpen] : []
     const { text: fixed, fixed: thinkFixed } = autofixPair(text, template.think, stopBefore)
-    if (thinkFixed) result.malformed = true
+    if (thinkFixed) malformed = true
     text = fixed
 
     const think = extractBetween(text, template.think)
     if (think !== null) {
-      result.think = think
+      steps.push({ kind: 'thought', text: think })
       text = stripTag(text, template.think)
     }
   }
 
-  // Extract tool calls - autofix missing open/close before parsing
+  // Extract tool calls - parse into structured tool_call steps
   if (template.toolCall) {
     const pair = resolveWrap(template.toolCall, template.modelTurn)
 
     const { text: fixed, fixed: callFixed } = autofixPair(text, pair)
-    if (callFixed) result.malformed = true
+    if (callFixed) malformed = true
     text = fixed
 
-    const calls = extractAll(text, pair)
-    if (calls.length > 0) {
-      result.toolCalls = calls
+    const rawBlocks = extractAll(text, pair)
+    if (rawBlocks.length > 0) {
+      for (const raw of rawBlocks) {
+        try {
+          const calls = parseToolCalls(raw)
+          for (const c of calls) {
+            steps.push({
+              kind: 'tool_call',
+              name: c.name,
+              ...(c.callId ? { callId: c.callId } : {}),
+              arguments: c.arguments,
+            })
+          }
+        } catch {
+          // Malformed call - emit a best-effort tool_call with raw fallback in args
+          const inferredName = raw.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1] ?? 'malformed_call'
+          steps.push({ kind: 'tool_call', name: inferredName, arguments: { _raw: raw } })
+          malformed = true
+        }
+      }
       text = stripTag(text, pair)
     }
   }
 
-  result.content = text.trim()
+  const content = text.trim()
+  if (content) steps.push({ kind: 'text', text: content })
 
-  return result
+  return malformed ? { steps, malformed } : { steps }
 }
 
 // --- Smoke test ---

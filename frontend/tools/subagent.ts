@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from '../tool'
+import { turnContent } from '../template'
 import type { ToolHandler, Orchestrator, OrchestratorConfig } from '../orchestrator'
 
 export const SubagentTool: ToolDefinition = {
@@ -38,7 +39,7 @@ export function createSubagentHandler(
 
     try {
       const result = await subagent.complete(goal)
-      return { result: { content: result.turn.content, toolsExecuted: result.toolsExecuted.length } }
+      return { result: { content: turnContent(result.turn), toolsExecuted: result.toolsExecuted.length } }
 
     } catch (err) {
       return { result: null, error: `Subagent failed: ${err}` }

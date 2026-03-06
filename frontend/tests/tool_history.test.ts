@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { KoboldAdapter } from '../kobold'
 import { Orchestrator, toPromise } from '../orchestrator'
-import { Profiles } from '../template'
+import { Profiles, makeTurn } from '../template'
 import type { ParsedTurn } from '../template'
 
 class HistoryAdapter extends KoboldAdapter {
@@ -23,10 +23,10 @@ describe('tool_call history (Round-based)', () => {
     const orch = new Orchestrator({
       adapter: new HistoryAdapter([
         // Turn 1: model emits 3 tool calls
-        { content: '', toolCalls: ['bash[ARGS]{}\nw[ARGS]{}\nid[ARGS]{}'] },
+        makeTurn({ toolCalls: [{ name: 'bash', arguments: {} }, { name: 'w', arguments: {} }, { name: 'id', arguments: {} }] }),
 
         // Turn 2: text-only response closes the agent run
-        { content: 'done' },
+        makeTurn({ content: 'done' }),
       ]),
     })
 
@@ -60,7 +60,7 @@ describe('tool_call history (Round-based)', () => {
   test('chat round captures user and model text', async () => {
     const orch = new Orchestrator({
       adapter: new HistoryAdapter([
-        { content: 'Hello back!' },
+        makeTurn({ content: 'Hello back!' }),
       ]),
     })
 

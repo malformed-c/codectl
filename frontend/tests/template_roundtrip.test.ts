@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { makeFormatPass, joinPass } from '../pipeline'
-import { Profiles, parse, renderToolCalls } from '../template'
-import { parseToolCalls } from '../tool'
+import { Profiles, parse, renderToolCalls, turnContent, turnThink, turnToolCalls } from '../template'
 import type { Span } from '../span'
 import type { StoredToolCall } from '../types'
 
@@ -32,13 +31,18 @@ describe('mistral tool call round-trip stability', () => {
     const raw = '[THINK]deliberate[/THINK][TOOL_CALLS]bash[CALL_ID]a1[ARGS]{"command":"w"}\nbash[CALL_ID]a2[ARGS]{"command":"id"}'
     const parsed = parse(raw, Profiles.mistral)
 
-    expect(parsed.think).toBe('deliberate')
-    expect(parsed.toolCalls).toHaveLength(1)
+    expect(turnThink(parsed)).toBe('deliberate')
+    // Both bash calls become individual tool_call steps
+    const calls = turnToolCalls(parsed)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.name).toBe('bash')
+    expect(calls[0]!.callId).toBe('a1')
+    expect(calls[1]!.callId).toBe('a2')
 
-    const stored: StoredToolCall[] = parseToolCalls(parsed.toolCalls![0]!).map(call => ({
-      tool: call.name,
-      ...(call.callId ? { callId: call.callId } : {}),
-      ...call.arguments,
+    const stored: StoredToolCall[] = calls.map(c => ({
+      tool: c.name,
+      ...(c.callId ? { callId: c.callId } : {}),
+      ...c.arguments,
     }))
 
     const rerendered = renderToolCalls(stored, Profiles.mistral)
