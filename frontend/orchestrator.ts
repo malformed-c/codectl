@@ -246,6 +246,7 @@ export class Orchestrator {
   private _systemRound: Round = makeSystemRound('')
   private _enrichedSystemRound: Round = makeSystemRound('')  // cached: _systemRound + tools block
   private mode: Mode = { kind: 'chat' }
+  private _ejectedThisTurn = false
   private planValidationState: PlanValidationState = { validationErrors: [] }
   private abortController: AbortController | null = null
   private readonly checkpointStore: CheckpointStore | null
@@ -452,6 +453,7 @@ export class Orchestrator {
 
   private async *runLoop(): AsyncGenerator<OrchestratorEvent, TurnResult> {
     this.abortController = new AbortController()
+    this._ejectedThisTurn = false
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
 
@@ -657,13 +659,17 @@ export class Orchestrator {
       consola.warn(`Agent hit ${AGENT_MAX_CONSECUTIVE_FAILURES} consecutive failures - ejecting to chat mode`)
 
       this.mode = { kind: 'chat' }
+      this._ejectedThisTurn = true
       this.rebuildSystemMessage()
     }
   }
 
-  /** Returns true if we were just ejected from agent mode. */
+  /** Returns true if we were just ejected from agent mode (i.e. we were agent, now chat). */
   private wasEjected(): boolean {
-    return this.mode.kind === 'chat'
+    // consecutiveFailures is only tracked in agent mode; if we just hit the threshold
+    // recordToolFailure switches mode to chat. A bare mode.kind === 'chat' check would
+    // always fire in chat mode and break the loop after every tool error.
+    return this.mode.kind === 'chat' && this._ejectedThisTurn
   }
 
   private resetToolFailures(): void {
