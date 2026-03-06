@@ -65,7 +65,7 @@ export class EventJournal {
       `UPDATE events SET status = 'processing' WHERE id IN (${ids.map(() => '?').join(',')})`
     ).run(...ids)
 
-    return rows.map(this._rowToEvent)
+    return rows.map(r => ({ ...this._rowToEvent(r), status: 'processing' as const }))
   }
 
   async markDone(id: number): Promise<void> {
