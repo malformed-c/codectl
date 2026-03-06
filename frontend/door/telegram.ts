@@ -338,7 +338,7 @@ export class TelegramDoor {
 
             if (event.call.name === 'message') continue
 
-            const args = JSON.stringify(event.call.arguments)
+            const args = JSON.stringify(event.rawArguments)
             try {
               await ctx.reply(`⏳ <code>${escapeHtml(event.call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 

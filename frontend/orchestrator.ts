@@ -100,7 +100,7 @@ export type TurnResult = {
 }
 
 export type OrchestratorEvent =
-  | { kind: 'call'; call: ToolCall; pending: true }
+  | { kind: 'call'; call: ToolCall; rawArguments: Record<string, unknown>; pending: true }
   | { kind: 'call_result'; call: ToolCall; result: ToolResult }
   | { kind: 'turn'; turn: ParsedTurn; toolsExecuted: TurnResult['toolsExecuted'] }
 
@@ -531,7 +531,7 @@ export class Orchestrator {
 
           const call: ToolCall = { name: step.name, callId: step.callId, arguments: resolvedArgs }
           allCalls.push(call)
-          yield { kind: 'call', call, pending: true }
+          yield { kind: 'call', call, rawArguments: step.arguments, pending: true }
           storedCalls.push({
             tool: call.name,
             ...(call.callId ? { callId: call.callId } : {}),
