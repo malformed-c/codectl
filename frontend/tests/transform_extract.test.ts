@@ -30,6 +30,45 @@ describe('extract tool turn offsets', () => {
     expect(out.result).toBe('Alice')
   })
 
+  test('json path "." returns full root object', async () => {
+    const memory = new MockMemory()
+    const history: SerializedRound[] = [
+      {
+        kind: 'chat',
+        id: 'c1',
+        user: [{ kind: 'user', text: '{"codePlan":[{"kind":"Ansible"}]}' }],
+        model: '',
+      },
+    ]
+
+    const handler = createExtractHandler(memory, { getCommitted: () => history })
+    const out = await handler({ method: 'json', turn: 0, path: '.' })
+
+    expect(out.error).toBeUndefined()
+    const parsed = JSON.parse(out.result as string)
+    expect(parsed).toHaveProperty('codePlan')
+    expect(parsed.codePlan[0].kind).toBe('Ansible')
+  })
+
+  test('json path "." saves to memory', async () => {
+    const memory = new MockMemory()
+    const history: SerializedRound[] = [
+      {
+        kind: 'chat',
+        id: 'c1',
+        user: [{ kind: 'user', text: '{"x":1}' }],
+        model: '',
+      },
+    ]
+
+    const handler = createExtractHandler(memory, { getCommitted: () => history })
+    const out = await handler({ method: 'json', turn: 0, path: '.', save_to: 'whole' })
+
+    expect(out.error).toBeUndefined()
+    expect(memory.get('whole')).toBe('{"x":1}')
+  })
+
+
   test('codeblocks fallback accepts raw JSON without fences', async () => {
     const memory = new MockMemory()
     const history: SerializedRound[] = [

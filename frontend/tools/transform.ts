@@ -165,8 +165,11 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
         }
       }
 
+      // "." or empty path means identity — return the whole root
+      const segments = path === '.' ? [] : path.split('.').filter(k => k !== '')
+
       let cur: unknown = parsed
-      for (const k of path.split('.')) {
+      for (const k of segments) {
         if (cur === null || typeof cur !== 'object') {
           return { result: null, error: `Path segment '${k}' not reachable` }
         }
