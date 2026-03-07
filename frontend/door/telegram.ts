@@ -321,10 +321,7 @@ export class TelegramDoor {
       try {
         for await (const event of room.orchestrator.chat(text)) {
           if (event.kind === 'turn') {
-            const _tc = turnContent(event.turn)
-            consola.debug('turn event steps:', JSON.stringify(event.turn.steps))
-            consola.debug('turnContent result:', JSON.stringify(_tc))
-            if (_tc) await sendText(_tc)
+            const _tc = turnContent(event.turn); if (_tc) await sendText(_tc)
 
           } else if (event.kind === 'call') {
             if (event.call.name === 'ask') {
