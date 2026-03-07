@@ -90,7 +90,7 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         if (!kind)    return err('"kind" is required for add')
         if (!content) return err('"content" is required for add')
 
-        const tags       = parseTags(args.tags as string | undefined)
+        const tags       = parseTags(args.tags as string | string[] | undefined)
         const confidence = parseFloat(String(args.confidence ?? '1.0'))
 
         const id = memory.add({ kind, content, tags, confidence })
@@ -103,11 +103,11 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         if (!kind)    return err('"kind" is required for upsert')
         if (!content) return err('"content" is required for upsert')
 
-        const tags       = parseTags(args.tags as string | undefined)
+        const tags       = parseTags(args.tags as string | string[] | undefined)
         const confidence = parseFloat(String(args.confidence ?? '1.0'))
 
         const result = memory.upsert({ kind, content, tags, confidence })
-        return { result }
+        return ok(result)
       }
 
       case 'link': {
@@ -131,17 +131,15 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         const kinds    = args.kind ? [args.kind as NodeKind] : undefined
 
         const results = memory.search(query, { anchorId, limit, kinds })
-        return {
-          result: results.map(r => ({
-            id:          r.node.id,
-            kind:        r.node.kind,
-            content:     r.node.content,
-            tags:        r.node.tags,
-            confidence:  r.node.confidence,
-            score:       Math.round(r.score * 1000) / 1000,
-            path_length: r.pathLength,
-          })),
-        }
+        return ok(results.map(r => ({
+          id:          r.node.id,
+          kind:        r.node.kind,
+          content:     r.node.content,
+          tags:        r.node.tags,
+          confidence:  r.node.confidence,
+          score:       Math.round(r.score * 1000) / 1000,
+          path_length: r.pathLength,
+        })))
       }
 
       case 'get': {
@@ -157,15 +155,13 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         const kind  = args.kind as NodeKind | undefined
         const limit = args.limit ? parseInt(String(args.limit), 10) : 20
         const nodes = memory.list({ kind, limit })
-        return {
-          result: nodes.map(n => ({
-            id:         n.id,
-            kind:       n.kind,
-            content:    n.content,
-            tags:       n.tags,
-            confidence: n.confidence,
-          })),
-        }
+        return ok(nodes.map(n => ({
+          id:         n.id,
+          kind:       n.kind,
+          content:    n.content,
+          tags:       n.tags,
+          confidence: n.confidence,
+        })))
       }
 
       default:
@@ -178,7 +174,16 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseTags(raw: string | undefined): string[] {
+function parseTags(raw: string | string[] | undefined): string[] {
   if (!raw) return []
-  return raw.split(',').map(t => t.trim()).filter(Boolean)
+  if (Array.isArray(raw)) return raw.map(t => t.trim()).filter(Boolean)
+  // Model sometimes passes a JSON array as a string
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) return parsed.map((t: unknown) => String(t).trim()).filter(Boolean)
+    } catch { /* fall through to comma-split */ }
+  }
+  return trimmed.split(',').map(t => t.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
 }
