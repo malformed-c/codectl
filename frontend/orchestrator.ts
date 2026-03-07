@@ -293,16 +293,14 @@ export class Orchestrator {
       this.rebuildSystemMessage()
     }))
     this.registerTool(RunPlanTool, createRunPlanHandler(
-      () => this.mode.kind !== 'chat' ? this.mode.gitRoot : '',
+      () => this.shell.getCwd(),
       () => this.config.backendDir ?? join(dirname(process.cwd()), 'backend'),
       this.adapter,
     ))
     this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
 
     // --- Tool-set registrations (def + handler paired by name) ---
-    this.registerToolSet(CodeqTools, createCodeqHandlers(() =>
-      this.mode.kind !== 'chat' ? this.mode.gitRoot : ''
-    ))
+    this.registerToolSet(CodeqTools, createCodeqHandlers(() => this.shell.getCwd()))
     this.registerToolSet(ExecTools, createExecHandlers(this.shell))
     this.registerToolSet(TransformTools, createTransformHandlers(this.versionedMemory, {
       getCommitted: () => this.fsm.getRenderableHistory().map(r => r.serialize()),
@@ -404,9 +402,7 @@ export class Orchestrator {
 
     // Restore mode
     if (session.modeKind === 'agent' && this.mode.kind !== 'agent') {
-      const gitRoot = await findGitRoot(process.cwd())
-
-      this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
+      this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
     }
 
     this.rebuildSystemMessage()
@@ -428,9 +424,7 @@ export class Orchestrator {
    */
   async *run(goal: string): AsyncGenerator<OrchestratorEvent, TurnResult> {
     if (this.mode.kind !== 'agent') {
-      const gitRoot = await findGitRoot(process.cwd())
-
-      this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
+      this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
     }
 
     // Reset FSM, inject goal into system message - no user turn
@@ -729,14 +723,14 @@ export class Orchestrator {
 
     const modeContext = match(this.mode)
       .with({ kind: 'chat' }, () => '')
-      .with({ kind: 'agent' }, ({ gitRoot }) => {
+      .with({ kind: 'agent' }, () => {
         const goalPart = agentGoal
           ? `\n\nGOAL:\n${agentGoal}`
           : ''
 
         return (
           `\n\nYou are in AGENT mode. Use tools continuously to accomplish the user's goal. ` +
-          `Call 'done' when finished. Git root: ${gitRoot || '(no git repo)'}.` +
+          `Call 'done' when finished. Use 'bash' to navigate to a repo (cd) before running plans.` +
           goalPart
         )
       })
@@ -850,12 +844,10 @@ export class Orchestrator {
     }
 
     if (targetMode === 'agent') {
-      const gitRoot = await findGitRoot(process.cwd())
-
-      this.mode = { kind: 'agent', gitRoot: gitRoot ?? '', consecutiveFailures: 0 }
+      this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
       this.rebuildSystemMessage()
 
-      return { result: { switched: 'agent', gitRoot } }
+      return { result: { switched: 'agent', cwd: this.shell.getCwd() } }
     }
 
     return { result: null, error: `Unknown mode: ${targetMode}` }
