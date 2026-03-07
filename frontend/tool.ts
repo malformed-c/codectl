@@ -391,6 +391,12 @@ export function parseToolCalls(raw: string): ToolCall[] {
     }))
 
   } catch (err) {
+    // Bare name() with no args — e.g. tool_library()
+    const bareCall = text.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*\)\s*$/)
+    if (bareCall) {
+      return [{ name: bareCall[1]!, arguments: {} }]
+    }
+
     // If not JSON and not rich format, maybe it's just a tool name? (not recommended)
     throw new Error(`Unrecognized tool call format: ${text}`)
   }
