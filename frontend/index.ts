@@ -145,6 +145,7 @@ async function main(): Promise<void> {
       orchestratorConfig: {
         toolFormat: (config.tool_format ?? 'json') as any,
         autonomousTurns: 16,
+        graphMemoryPath: config.graph_memory_path,
       },
     })
 
@@ -167,6 +168,7 @@ async function main(): Promise<void> {
       autonomousTurns: 16,
       checkpointDir: config.checkpoint_path ? `${config.checkpoint_path}/cli-default` : undefined,
       checkpointKeep: config.checkpoint_keep,
+      graphMemoryPath: config.graph_memory_path,
     })
 
     process.on('SIGINT', async () => {

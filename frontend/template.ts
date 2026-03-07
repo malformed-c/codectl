@@ -143,6 +143,7 @@ export type Config = {
   history_path: string
   checkpoint_path?: string
   checkpoint_keep?: number
+  graph_memory_path?: string
   default_model: string
   available_models: string[]
   tool_format?: string
