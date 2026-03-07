@@ -39,16 +39,20 @@ malf:   ⏳ mode({"mode":"agent"})
 User:   Pretty print the plan, get the destination path, and add author metadata
 
 malf:   ⏳ json({"action":"pretty","key":"plan"})
-        ⏳ json({"action":"get","key":"plan","path":"codePlan.0.spec.tasks.0.args.dest"})
-        ⏳ json({"action":"set","key":"plan","path":"codePlan.0.metadata.author","value":"\"malf\""})
+        ⏳ json({"action":"get","key":"plan","path":"codePlan[0].spec.tasks[0].args.dest"})
+        ⏳ json({"action":"set","key":"plan","path":"codePlan[0].metadata.author","value":"\"malf\""})
 
-        ✅ json  { "codePlan": [ ... ] }
-        ✅ json  /tmp/hello.txt
-        ✅ json  (updated)
+        ✅ json
+        { "codePlan": [ ... ] }
+
+        ✅ json
+        /tmp/hello.txt
+
+        ✅ json
+        (updated)
 
         Destination is /tmp/hello.txt. Author field added to metadata.
 ```
-
 
 ## Repository layout
 
