@@ -138,13 +138,14 @@ export const BashTool: ToolDefinition = {
       },
       restart: {
         type: 'boolean',
-        description: 'If true, restart the bash session (clears all state).',
+        description: 'If true, restart the bash session (clears all state). Omit command when using restart.',
       },
       timeout: {
         type: 'number',
         description: 'Timeout in milliseconds (default: 30000).',
       },
     },
+    required: ['command'],
   },
 }
 
