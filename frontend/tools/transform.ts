@@ -83,6 +83,18 @@ function extractCodeBlocks(text: string): Array<{ lang: string; code: string }> 
   return blocks
 }
 
+/**
+ * Parse a dot/bracket path into segments.
+ * Supports: "a.b.0.c", "a[0].b[1].c", "a.b[2].c.d[3]"
+ * "." or "" returns an empty segment list (identity).
+ */
+function parsePath(path: string): string[] {
+  if (path === '.' || path === '') return []
+  // Normalise bracket notation to dot notation: a[0].b -> a.0.b
+  const normalised = path.replace(/\[(\w+)\]/g, '.$1')
+  return normalised.split('.').filter(k => k !== '')
+}
+
 function looksLikeJsonPayload(text: string): boolean {
   const trimmed = text.trim()
 
@@ -166,7 +178,7 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       }
 
       // "." or empty path means identity — return the whole root
-      const segments = path === '.' ? [] : path.split('.').filter(k => k !== '')
+      const segments = parsePath(path)
 
       let cur: unknown = parsed
       for (const k of segments) {
@@ -302,7 +314,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       if (!path) return { result: null, error: "'path' required for get" }
 
       let cur: unknown = parsed
-      for (const k of path.split('.')) {
+      for (const k of parsePath(path)) {
         if (cur === null || typeof cur !== 'object') return { result: null, error: `Cannot traverse into '${k}'` }
 
         cur = (cur as Record<string, unknown>)[k]
@@ -317,7 +329,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       if (!path) return { result: null, error: `'path' required for ${action}` }
 
       const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
-      const keys = path.split('.')
+      const keys = parsePath(path)
       let cur: Record<string, unknown> = root
       for (let i = 0; i < keys.length - 1; i++) {
         const k = keys[i]!

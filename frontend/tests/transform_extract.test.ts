@@ -87,3 +87,23 @@ describe('extract tool turn offsets', () => {
     expect(out.result).toContain('"timeout": 30')
   })
 })
+
+describe('extract tool bracket notation', () => {
+  test('json path with bracket notation resolves array element', async () => {
+    const memory = new MockMemory()
+    const history: SerializedRound[] = [
+      {
+        kind: 'chat',
+        id: 'c1',
+        user: [{ kind: 'user', text: '{"codePlan":[{"spec":{"tasks":[{"args":{"dest":"/tmp/hello.txt"}}]}}]}' }],
+        model: '',
+      },
+    ]
+
+    const handler = createExtractHandler(memory, { getCommitted: () => history })
+    const out = await handler({ method: 'json', turn: 0, path: 'codePlan[0].spec.tasks[0].args.dest' })
+
+    expect(out.error).toBeUndefined()
+    expect(out.result).toBe('/tmp/hello.txt')
+  })
+})
