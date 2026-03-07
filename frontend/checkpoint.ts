@@ -1,5 +1,5 @@
-import { join } from 'node:path'
-import { mkdirSync, existsSync } from 'node:fs'
+import { join, basename, dirname } from 'node:path'
+import { mkdirSync, existsSync, renameSync, readdirSync, rmSync } from 'node:fs'
 import type { SerializedRound } from './round'
 import { fromJSON, type Round, type History } from './round'
 import { VersionedMemory } from './renderer'
@@ -146,6 +146,46 @@ export class CheckpointStore {
     for (const seq of seqs.slice(keep)) {
       await Bun.file(this.seqPath(seq)).delete?.()
     }
+  }
+  /**
+   * Archive the current session before starting a new one.
+   *
+   * Renames the checkpoint directory to a sibling directory named
+   * `<basename>-archive-<timestamp>`, then recreates the original directory
+   * empty so the next session starts fresh. Prunes old archives keeping only
+   * the most recent `keepArchives` (default 10).
+   *
+   * Returns the path of the archive directory.
+   */
+  async archiveSession(keepArchives = 10): Promise<string> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const parent = dirname(this.dir)
+    const name = basename(this.dir)
+    const archivePath = join(parent, `${name}-archive-${timestamp}`)
+
+    // Rename current dir to archive
+    if (existsSync(this.dir)) {
+      renameSync(this.dir, archivePath)
+    }
+
+    // Recreate fresh checkpoint dir
+    mkdirSync(this.dir, { recursive: true })
+
+    // Reset internal sequence counter
+    this._seq = 0
+
+    // Prune old archives
+    const entries = readdirSync(parent)
+    const archives = entries
+      .filter(e => e.startsWith(`${name}-archive-`))
+      .sort()
+      .reverse()
+
+    for (const old of archives.slice(keepArchives)) {
+      rmSync(join(parent, old), { recursive: true, force: true })
+    }
+
+    return archivePath
   }
 }
 

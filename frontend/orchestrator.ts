@@ -361,12 +361,18 @@ export class Orchestrator {
    */
   async resetSession(): Promise<void> {
     this.askChannel.abort('Session was reset.')
+
+    // Archive the current checkpoint dir before wiping state
+    if (this.checkpointStore) {
+      await this.checkpointStore.archiveSession()
+    }
+
     this.fsm = new Fsm()
     this.versionedMemory.clear()
     this.mode = { kind: 'chat' }
     this.rebuildSystemMessage()
 
-    // Overwrite checkpoint with empty state so restore on next message is a no-op.
+    // Write an empty checkpoint so restore on next message is a no-op.
     await this._saveCheckpoint()
   }
 
