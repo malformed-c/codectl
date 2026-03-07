@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 
 export const MemoryTool: ToolDefinition = {
@@ -28,7 +29,6 @@ type MemoryStore = {
   keys(): IterableIterator<string>
 }
 
-// TODO ts-pattern
 export function createMemoryHandler(memory: MemoryStore): ToolHandler {
   return async (args) => {
     const action = args.action as string
@@ -37,34 +37,29 @@ export function createMemoryHandler(memory: MemoryStore): ToolHandler {
 
     switch (action) {
       case 'set':
-        if (!key) return { result: null, error: 'Key is required for set action' }
-
+        if (!key) return err('Key is required for set action')
         memory.set(key, content ?? '')
-        return { result: { success: true, key } }
+        return ok({ success: true, key })
 
       case 'get':
-        if (!key) return { result: null, error: 'Key is required for get action' }
-
-        return { result: { content: memory.get(key) ?? null } }
+        if (!key) return err('Key is required for get action')
+        return ok({ content: memory.get(key) ?? null })
 
       case 'append':
-        if (!key) return { result: null, error: 'Key is required for append action' }
-
+        if (!key) return err('Key is required for append action')
         memory.append(key, content ?? '')
-
-        return { result: { success: true, key, totalLength: (memory.get(key) ?? '').length } }
+        return ok({ success: true, key, totalLength: (memory.get(key) ?? '').length })
 
       case 'list':
-        return { result: { keys: Array.from(memory.keys()) } }
+        return ok({ keys: Array.from(memory.keys()) })
 
       case 'delete':
-        if (!key) return { result: null, error: 'Key is required for delete action' }
-
+        if (!key) return err('Key is required for delete action')
         const deleted = memory.delete(key)
-        return { result: { success: deleted } }
+        return ok({ success: deleted })
 
       default:
-        return { result: null, error: `Unknown memory action: ${action}` }
+        return err(`Unknown memory action: ${action}`)
     }
   }
 }

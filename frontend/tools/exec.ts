@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 
 // --- Persistent shell ---
@@ -204,17 +205,17 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
   const bashHandler: ToolHandler = async (args) => {
     if (args.restart) {
       sh.restart()
-      return { result: { restarted: true, cwd: sh.getCwd() } }
+      return ok({ restarted: true, cwd: sh.getCwd()})
     }
     const command = args.command as string
-    if (!command) return { result: null, error: "'command' or 'restart' required" }
+    if (!command) return err("'command' or 'restart' required")
     const timeout = typeof args.timeout === 'number' ? args.timeout : undefined
     try {
       const { stdout, stderr, exitCode } = await sh.exec(command, timeout)
-      return { result: { stdout, stderr, exitCode, cwd: sh.getCwd() } }
+      return ok({ stdout, stderr, exitCode, cwd: sh.getCwd()})
 
     } catch (err) {
-      return { result: null, error: String(err) }
+      return err(String(err))
     }
   }
 
@@ -230,10 +231,10 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
       const stderr = await new Response(proc.stderr).text()
       await proc.exited
 
-      return { result: { stdout, stderr, exitCode: proc.exitCode } }
+      return ok({ stdout, stderr, exitCode: proc.exitCode})
 
     } catch (err) {
-      return { result: null, error: String(err) }
+      return err(String(err))
     }
   }
 
@@ -250,10 +251,10 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
       const stderr = await new Response(proc.stderr).text()
       await proc.exited
 
-      return { result: { stdout, stderr, exitCode: proc.exitCode } }
+      return ok({ stdout, stderr, exitCode: proc.exitCode})
 
     } catch (err) {
-      return { result: null, error: String(err) }
+      return err(String(err))
     }
   }
 
@@ -265,7 +266,7 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
     if (lang === 'python' || lang === 'py') return pythonHandler({ code })
     if (lang === 'typescript' || lang === 'ts') return tsHandler({ code })
 
-    return { result: null, error: `Unsupported language: ${lang}` }
+    return err(`Unsupported language: ${lang}`)
   }
 
   return {

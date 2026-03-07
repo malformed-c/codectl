@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import type { CodePlan } from '../codeplan.schema'
 import { codePlanSchema } from '../codeplan.schema'
@@ -56,13 +57,13 @@ export const ValidatePlanTool: ToolDefinition = {
 export function createValidatePlanHandler(onValidated: PlanValidationCallback): ToolHandler {
   return async (args: Record<string, unknown>) => {
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
-    if (!raw) return { result: null, error: "'plan' argument is required" }
+    if (!raw) return err("'plan' argument is required")
 
     let parsed: unknown
     try {
       parsed = typeof raw === 'string' ? destr(raw as string) : raw
     } catch (err) {
-      return { result: null, error: `Invalid JSON: ${err}` }
+      return err(`Invalid JSON: ${err}`)
     }
 
     // Auto-unwrap common LLM mistakes - the model may pass the array directly,
@@ -79,7 +80,7 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
 
       if (result.success) {
         onValidated(result.data, [])
-        return { result: { valid: true, message: 'CodePlan is valid and ready for execution.' } }
+        return ok({ valid: true, message: 'CodePlan is valid and ready for execution.'})
       }
 
       const issues = result.error?.issues ?? []
@@ -88,10 +89,10 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
         : [`Validation failed: ${JSON.stringify(result.error)}`]
 
       onValidated(undefined, errors)
-      return { result: { valid: false, errors } }
+      return ok({ valid: false, errors})
 
     } catch (err) {
-      return { result: null, error: `Schema validation failed: ${err}` }
+      return err(`Schema validation failed: ${err}`)
     }
   }
 }

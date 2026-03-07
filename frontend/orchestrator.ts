@@ -11,6 +11,7 @@ import {
   type ToolCall,
   type ToolResult,
   type ToolFormat,
+  ok, err,
   parseToolCalls,
   resolveArgs,
   renderTools,
@@ -262,8 +263,8 @@ export class Orchestrator {
 
     // --- Built-in tools ---
     this.registerTool(ModeTool, async (args) => this.handleModeSwitch(args.mode as string))
-    this.registerTool(DoneTool, async () => ({ result: { accepted: true } }))
-    this.registerTool(ContinueTool, async () => ({ result: { continuing: true } }))
+    this.registerTool(DoneTool, async () => ok({ accepted: true }))
+    this.registerTool(ContinueTool, async () => ok({ continuing: true }))
     this.registerTool(LibraryTool, async (args) => {
       const prefix = args.prefix as string | undefined
       const tools = prefix
@@ -275,7 +276,7 @@ export class Orchestrator {
         ? `${this.profile.availableTools[0]}${rendered}${this.profile.availableTools[1]}`
         : rendered
 
-      return { result: wrapped }
+      return ok(wrapped)
     })
     this.registerTool(MemoryTool, createMemoryHandler(this.versionedMemory))
 
@@ -565,11 +566,11 @@ export class Orchestrator {
           // Inject ask replies and message content into the agent context as
           // system rounds so the model sees them as first-class conversation turns
           // rather than opaque tool result JSON.
-          if (call.name === 'ask' && result.result && !result.error) {
-            const answer = (result.result as Record<string, unknown>).answer as string
+          if (call.name === 'ask' && result.ok) {
+            const answer = (result.value as Record<string, unknown>).answer as string
             if (answer) this.fsm.onSystem(`[User]: ${answer}`)
 
-          } else if (call.name === 'message' && !result.error) {
+          } else if (call.name === 'message' && result.ok) {
             const content = call.arguments.content as string
             if (content) this.fsm.onSystem(`[Sent to user]: ${content}`)
           }
@@ -581,13 +582,13 @@ export class Orchestrator {
 
           storedResults.push({
             callId: result.callId,
-            error: result.error,
-            value: result.result,
+            error: result.ok ? undefined : result.error,
+            value: result.ok ? result.value : null,
           })
 
           // Track agent-mode failure ejection
           // #22: Count explicit errors AND null results (handler returned nothing useful) as failures.
-          if (result.error || result.result === null) {
+          if (!result.ok || result.value === null) {
             this.recordToolFailure()
 
             if (this.wasEjected()) { loopShouldStop = true; break }
@@ -755,7 +756,7 @@ export class Orchestrator {
     // Find the handler, falling back to an unknown-tool error.
     // Future: add a middleware wrapper here for logging, timeouts, and per-tool sandboxing.
     const handler = this.handlers.get(call.name)
-    if (!handler) return { result: null, error: `Unknown tool: ${call.name}` }
+    if (!handler) return err(`Unknown tool: ${call.name}`)
 
     // Find the definition so we can resolve aliases + positional args
     const def = this.tools.find(t => t.name === call.name)
@@ -793,18 +794,18 @@ export class Orchestrator {
 
       // Ensure callId is preserved if not returned by handler
       if (!result.callId && call.callId) {
-        result.callId = call.callId
+        (result as { callId?: string }).callId = call.callId
       }
 
       const args = JSON.stringify(call.arguments)
-      const res = result.error ? `Error: ${result.error}` : this.shortenResult(result.result)
+      const res = result.ok ? this.shortenResult(result.value) : `Error: ${result.error}`
       consola.info(`Action: ${call.name}(${args}) -> ${res}`)
 
       // --- Automatic Call-ID Caching ---
-      if (result.callId && result.result !== undefined && !result.error) {
-        const cacheValue = typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result)
+      if (result.callId && result.ok && result.value !== undefined) {
+        const cacheValue = typeof result.value === 'string'
+          ? result.value
+          : JSON.stringify(result.value)
 
         this.callIdCache.set(result.callId, cacheValue)
         consola.debug(`Auto-cached result for ${result.callId}`)
@@ -812,10 +813,10 @@ export class Orchestrator {
 
       return result
 
-    } catch (err) {
-      consola.error(`Error executing tool ${call.name}:`, err)
+    } catch (e) {
+      consola.error(`Error executing tool ${call.name}:`, e)
 
-      return { result: null, error: String(err) }
+      return err(String(e))
     }
   }
 
@@ -840,17 +841,17 @@ export class Orchestrator {
       this.mode = { kind: 'chat' }
       this.rebuildSystemMessage()
 
-      return { result: { switched: 'chat' } }
+      return ok({ switched: 'chat' })
     }
 
     if (targetMode === 'agent') {
       this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
       this.rebuildSystemMessage()
 
-      return { result: { switched: 'agent', cwd: this.shell.getCwd() } }
+      return ok({ switched: 'agent', cwd: this.shell.getCwd() })
     }
 
-    return { result: null, error: `Unknown mode: ${targetMode}` }
+    return err(`Unknown mode: ${targetMode}`)
   }
 
   /**

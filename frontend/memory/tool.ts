@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import type { GraphMemory, NodeKind, EdgeKind } from './graph'
 
@@ -86,21 +87,21 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
       case 'add': {
         const kind    = args.kind as NodeKind
         const content = args.content as string
-        if (!kind)    return { result: null, error: '"kind" is required for add' }
-        if (!content) return { result: null, error: '"content" is required for add' }
+        if (!kind)    return err('"kind" is required for add')
+        if (!content) return err('"content" is required for add')
 
         const tags       = parseTags(args.tags as string | undefined)
         const confidence = parseFloat(String(args.confidence ?? '1.0'))
 
         const id = memory.add({ kind, content, tags, confidence })
-        return { result: { id } }
+        return ok({ id})
       }
 
       case 'upsert': {
         const kind    = args.kind as NodeKind
         const content = args.content as string
-        if (!kind)    return { result: null, error: '"kind" is required for upsert' }
-        if (!content) return { result: null, error: '"content" is required for upsert' }
+        if (!kind)    return err('"kind" is required for upsert')
+        if (!content) return err('"content" is required for upsert')
 
         const tags       = parseTags(args.tags as string | undefined)
         const confidence = parseFloat(String(args.confidence ?? '1.0'))
@@ -113,17 +114,17 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         const fromId   = args.from_id as string
         const toId     = args.to_id   as string
         const edgeKind = args.edge_kind as EdgeKind
-        if (!fromId)   return { result: null, error: '"from_id" is required for link' }
-        if (!toId)     return { result: null, error: '"to_id" is required for link' }
-        if (!edgeKind) return { result: null, error: '"edge_kind" is required for link' }
+        if (!fromId)   return err('"from_id" is required for link')
+        if (!toId)     return err('"to_id" is required for link')
+        if (!edgeKind) return err('"edge_kind" is required for link')
 
         const edgeId = memory.link(fromId, toId, edgeKind)
-        return { result: { edge_id: edgeId } }
+        return ok({ edge_id: edgeId})
       }
 
       case 'search': {
         const query = args.query as string
-        if (!query) return { result: null, error: '"query" is required for search' }
+        if (!query) return err('"query" is required for search')
 
         const anchorId = args.anchor_id as string | undefined
         const limit    = args.limit ? parseInt(String(args.limit), 10) : 8
@@ -145,11 +146,11 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
 
       case 'get': {
         const id = args.id as string
-        if (!id) return { result: null, error: '"id" is required for get' }
+        if (!id) return err('"id" is required for get')
 
         const node = memory.get(id)
-        if (!node) return { result: null, error: `Node ${id} not found` }
-        return { result: node }
+        if (!node) return err(`Node ${id} not found`)
+        return ok(node)
       }
 
       case 'list': {
@@ -168,7 +169,7 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
       }
 
       default:
-        return { result: null, error: `Unknown action: ${action}` }
+        return err(`Unknown action: ${action}`)
     }
   }
 }

@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import type { LLMAdapter } from '../orchestrator'
 import { runPlan } from '../plan_runner'
@@ -45,14 +46,14 @@ export function createRunPlanHandler(
 ): ToolHandler {
   return async (args) => {
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
-    if (!raw) return { result: null, error: "'plan' argument is required" }
+    if (!raw) return err("'plan' argument is required")
 
     let parsed: unknown
     try {
       parsed = typeof raw === 'string' ? destr(raw as string) : raw
 
     } catch (err) {
-      return { result: null, error: `Invalid JSON: ${err}` }
+      return err(`Invalid JSON: ${err}`)
     }
 
     // auto-unwrap common LLM mistake
@@ -67,7 +68,7 @@ export function createRunPlanHandler(
       const issues = validated.error.issues ?? []
       const errors = issues.map(e => `${e.path.join('.')}: ${e.message}`)
 
-      return { result: null, error: `Plan failed schema validation:\n${errors.join('\n')}` }
+      return err(`Plan failed schema validation:\n${errors.join('\n')}`)
     }
 
     const plan = validated.data as CodePlan
@@ -77,12 +78,12 @@ export function createRunPlanHandler(
     // TODO make a git root tool
     // Git root comes from agent mode (set when the model calls mode[ARGS]{"mode":"agent"}).
     // run_plan requires it because Ansible playbooks need a concrete working directory.
-    if (!gitRoot) return { result: null, error: 'run_plan requires a git root (cd into a repo first)' }
+    if (!gitRoot) return err('run_plan requires a git root (cd into a repo first)')
 
     const result = await runPlan(plan, { adapter, gitRoot, backendDir })
 
     if (!result.ok) {
-      return { result: null, error: formatRunPlanFailure(result) }
+      return err(formatRunPlanFailure(result))
     }
 
     return {

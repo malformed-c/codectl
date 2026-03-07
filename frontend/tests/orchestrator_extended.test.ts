@@ -17,10 +17,10 @@ class ScriptedAdapter extends KoboldAdapter {
 }
 
 async function runAndCollectResults(orch: Orchestrator, message: string) {
-  const results: Array<{ name: string; result: unknown; error?: string }> = []
+  const results: Array<{ name: string; value: unknown; error?: string }> = []
   for await (const event of orch.chat(message)) {
     if (event.kind === 'call_result') {
-      results.push({ name: event.call.name, result: event.result.result, error: event.result.error })
+      results.push({ name: event.call.name, value: event.result.ok ? event.result.value : null, error: (event.result.ok ? undefined : event.result.error) })
     }
   }
   return results
@@ -37,8 +37,8 @@ describe('tool_library', () => {
     const results = await runAndCollectResults(orch, 'list tools')
     const libResult = results.find(r => r.name === 'tool_library')
     expect(libResult).toBeTruthy()
-    expect(typeof libResult!.result).toBe('string')
-    expect(libResult!.result as string).toContain('memory')
+    expect(typeof libResult!.value).toBe('string')
+    expect(libResult!.value as string).toContain('memory')
   })
 
   test('filters tools by prefix', async () => {
@@ -49,7 +49,7 @@ describe('tool_library', () => {
       ]),
     })
     const results = await runAndCollectResults(orch, 'list memory tools')
-    const output = results.find(r => r.name === 'tool_library')!.result as string
+    const output = results.find(r => r.name === 'tool_library')!.value as string
     expect(output).toContain('memory')
     expect(output).not.toContain('bash')
     expect(output).not.toContain('"mode"')
@@ -63,7 +63,7 @@ describe('tool_library', () => {
       ]),
     })
     const results = await runAndCollectResults(orch, 'list tools')
-    const output = results.find(r => r.name === 'tool_library')!.result as string
+    const output = results.find(r => r.name === 'tool_library')!.value as string
     expect(output).toContain('[AVAILABLE_TOOLS]')
     expect(output).toContain('[/AVAILABLE_TOOLS]')
   })
@@ -81,7 +81,7 @@ describe('memory tool integration', () => {
     const results = await runAndCollectResults(orch, 'test memory')
     const getResult = results.find((r, i) => r.name === 'memory' && i > 0)
     expect(getResult).toBeTruthy()
-    expect((getResult!.result as any)?.content).toBe('hello')
+    expect((getResult!.value as any)?.content).toBe('hello')
   })
 })
 

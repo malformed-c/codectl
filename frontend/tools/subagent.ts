@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import { turnContent } from '../template'
 import type { ToolHandler, Orchestrator, OrchestratorConfig } from '../orchestrator'
 
@@ -29,7 +30,7 @@ export function createSubagentHandler(
     const maxDepth = currentConfig.maxDepth ?? 3
 
     if (depth > maxDepth) {
-      return { result: null, error: `Max subagent depth reached (${maxDepth})` }
+      return err(`Max subagent depth reached (${maxDepth})`)
     }
 
     const subagent = new OrchestratorClass({
@@ -39,10 +40,10 @@ export function createSubagentHandler(
 
     try {
       const result = await subagent.complete(goal)
-      return { result: { content: turnContent(result.turn), toolsExecuted: result.toolsExecuted.length } }
+      return ok({ content: turnContent(result.turn), toolsExecuted: result.toolsExecuted.length})
 
     } catch (err) {
-      return { result: null, error: `Subagent failed: ${err}` }
+      return err(`Subagent failed: ${err}`)
     }
   }
 }

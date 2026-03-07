@@ -1,5 +1,6 @@
 import { Codeq, CodeKind, CodePart } from '../codeq/codeq'
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import { join, isAbsolute, relative, extname } from 'node:path'
 
@@ -231,9 +232,9 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
       }
     }
 
-    if (lines.length === 0) return { result: { repomap: '(no supported files found)' } }
+    if (lines.length === 0) return ok({ repomap: '(no supported files found)'})
 
-    return { result: { repomap: lines.join('\n') } }
+    return ok({ repomap: lines.join('\n')})
   }
 
   const fileMapHandler: ToolHandler = async (args) => {
@@ -243,9 +244,9 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
 
     const lines = codeq.fileMap()
 
-    if (lines.length === 0) return { result: { filemap: '(no functions or classes found)' } }
+    if (lines.length === 0) return ok({ filemap: '(no functions or classes found)'})
 
-    return { result: { filemap: lines.join('\n') } }
+    return ok({ filemap: lines.join('\n')})
   }
 
   const retrieveHandler: ToolHandler = async (args) => {
@@ -255,9 +256,9 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
     const part = codePartFrom(args.part as string)
     const content = codeq.retrieve(kind, args.target as string, part)
 
-    if (content === null) return { result: null, error: `${args.kind} '${args.target}' not found in ${args.path}` }
+    if (content === null) return err(`${args.kind} '${args.target}' not found in ${args.path}`)
 
-    return { result: { content } }
+    return ok({ content})
   }
 
   const replaceHandler: ToolHandler = async (args) => {
@@ -270,7 +271,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
 
     const written = await codeq.writeFile(path)
 
-    return { result: { written } }
+    return ok({ written})
   }
 
   const addImportHandler: ToolHandler = async (args) => {
@@ -282,7 +283,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
 
     if (added) await codeq.writeFile(path)
 
-    return { result: { added } }
+    return ok({ added})
   }
 
   return {

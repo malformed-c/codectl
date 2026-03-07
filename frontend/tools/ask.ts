@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 
 // --- Tool definitions ---
@@ -129,16 +130,16 @@ export function createAskHandler(channel: AskChannel): ToolHandler {
     try {
       const answer = await channel.waitForReply(question)
 
-      return { result: { answer } }
+      return ok({ answer})
 
     } catch (err) {
-      return { result: null, error: String(err) }
+      return err(String(err))
     }
   }
 }
 
 export function createMessageHandler(): ToolHandler {
   return async (_args): Promise<ToolResult> => {
-    return { result: { sent: true } }
+    return ok({ sent: true})
   }
 }

@@ -71,7 +71,7 @@ describe('createRunPlanHandler', () => {
 
     const result = await handler({ plan: { notAPlan: true } })
 
-    expect(result.result).toBeNull()
-    expect(result.error).toContain('Plan failed schema validation:')
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toContain('Plan failed schema validation:')
   })
 })

@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import type { SerializedRound } from '../round'
 
@@ -153,14 +154,14 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       memory,
       history,
     )
-    if ('error' in src) return { result: null, error: src.error }
+    if ('error' in src) return err(src.error)
     const text = src.value
 
     let extracted: string | null = null
 
     if (method === 'json') {
       const path = args.path as string | undefined
-      if (!path) return { result: null, error: "'path' required for json extraction" }
+      if (!path) return err("'path' required for json extraction")
 
       let parsed: unknown
       try { parsed = JSON.parse(text) } catch {
@@ -170,10 +171,10 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
         const jsonStart = text.search(/[{[]/)
         if (jsonStart !== -1) {
           try { parsed = JSON.parse(text.slice(jsonStart)) }
-          catch { return { result: null, error: 'Input is not valid JSON' } }
+          catch { return err('Input is not valid JSON') }
 
         } else {
-          return { result: null, error: 'Input is not valid JSON' }
+          return err('Input is not valid JSON')
         }
       }
 
@@ -183,25 +184,25 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       let cur: unknown = parsed
       for (const k of segments) {
         if (cur === null || typeof cur !== 'object') {
-          return { result: null, error: `Path segment '${k}' not reachable` }
+          return err(`Path segment '${k}' not reachable`)
         }
 
         cur = (cur as Record<string, unknown>)[k]
-        if (cur === undefined) return { result: null, error: `Key '${k}' not found` }
+        if (cur === undefined) return err(`Key '${k}' not found`)
       }
 
       extracted = typeof cur === 'string' ? cur : JSON.stringify(cur)
 
     } else if (method === 'regex') {
       const pattern = args.pattern as string | undefined
-      if (!pattern) return { result: null, error: "'pattern' required for regex extraction" }
+      if (!pattern) return err("'pattern' required for regex extraction")
 
       let re: RegExp
       try { re = new RegExp(pattern, 's') }
-      catch (e) { return { result: null, error: `Invalid regex: ${e}` } }
+      catch (e) { return err(`Invalid regex: ${e}`) }
 
       const m = re.exec(text)
-      if (!m) return { result: null, error: 'Pattern did not match' }
+      if (!m) return err('Pattern did not match')
       extracted = m[1] ?? m[0]
 
     } else if (method === 'lines') {
@@ -228,7 +229,7 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       const indexArg = args.index as number | undefined
       if (indexArg !== undefined) {
         const block = blocks[indexArg]
-        if (!block) return { result: null, error: `No code block at index ${indexArg} (found ${blocks.length})` }
+        if (!block) return err(`No code block at index ${indexArg} (found ${blocks.length})`)
         extracted = block.code
 
       } else {
@@ -237,14 +238,14 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       }
 
     } else {
-      return { result: null, error: `Unknown method '${method}'. Use json, regex, lines, or codeblocks.` }
+      return err(`Unknown method '${method}'. Use json, regex, lines, or codeblocks.`)
     }
 
     if (saveTo && extracted !== null) {
       memory.set(saveTo, extracted)
     }
 
-    return { result: extracted }
+    return ok(extracted)
   }
 }
 
@@ -285,48 +286,48 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
           ? { value: args.text as string }
           : { error: "Provide 'text' or 'key'" }
 
-    if ('error' in src) return { result: null, error: src.error }
+    if ('error' in src) return err(src.error)
 
     let parsed: unknown
     try { parsed = JSON.parse(src.value) }
-    catch { return { result: null, error: 'Input is not valid JSON' } }
+    catch { return err('Input is not valid JSON') }
 
     const persist = (root: unknown) => {
       const out = JSON.stringify(root)
 
       if (memKey) memory.set(memKey, out)
 
-      return { result: out }
+      return ok(out)
     }
 
-    if (action === 'pretty') return { result: JSON.stringify(parsed, null, 2) }
+    if (action === 'pretty') return ok(JSON.stringify(parsed, null, 2))
 
     if (action === 'keys') {
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return { result: null, error: 'keys requires a JSON object at the root' }
+        return err('keys requires a JSON object at the root')
       }
 
-      return { result: Object.keys(parsed as object).join(', ') }
+      return ok(Object.keys(parsed as object).join(', '))
     }
 
     if (action === 'get') {
       const path = args.path as string | undefined
-      if (!path) return { result: null, error: "'path' required for get" }
+      if (!path) return err("'path' required for get")
 
       let cur: unknown = parsed
       for (const k of parsePath(path)) {
-        if (cur === null || typeof cur !== 'object') return { result: null, error: `Cannot traverse into '${k}'` }
+        if (cur === null || typeof cur !== 'object') return err(`Cannot traverse into '${k}'`)
 
         cur = (cur as Record<string, unknown>)[k]
-        if (cur === undefined) return { result: null, error: `Key '${k}' not found` }
+        if (cur === undefined) return err(`Key '${k}' not found`)
       }
 
-      return { result: typeof cur === 'string' ? cur : JSON.stringify(cur) }
+      return ok(typeof cur === 'string' ? cur : JSON.stringify(cur))
     }
 
     if (action === 'set' || action === 'append' || action === 'delete') {
       const path = args.path as string | undefined
-      if (!path) return { result: null, error: `'path' required for ${action}` }
+      if (!path) return err(`'path' required for ${action}`)
 
       const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
       const keys = parsePath(path)
@@ -346,7 +347,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       }
 
       const val = args.value as string | undefined
-      if (val === undefined) return { result: null, error: `'value' required for ${action}` }
+      if (val === undefined) return err(`'value' required for ${action}`)
       let newVal: unknown
       try { newVal = JSON.parse(val) } catch { newVal = val }
 
@@ -369,7 +370,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       return persist(root)
     }
 
-    return { result: null, error: `Unknown action '${action}'` }
+    return err(`Unknown action '${action}'`)
   }
 }
 
@@ -421,12 +422,12 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
 
     if (templateName) {
       const tpl = BUILTIN_TEMPLATES[templateName]
-      if (!tpl) return { result: null, error: `Unknown template '${templateName}'` }
+      if (!tpl) return err(`Unknown template '${templateName}'`)
       rendered = JSON.stringify(tpl, null, 2)
 
     } else if (templateStr !== undefined) {
       if (!vars || typeof vars !== 'object') {
-        return { result: null, error: "'vars' must be an object when using template string" }
+        return err("'vars' must be an object when using template string")
       }
 
       rendered = templateStr.replace(/\{\{(\w+)\}\}/g, (_, name: string) =>
@@ -434,19 +435,19 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
       )
       const remaining = [...rendered.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1])
       if (remaining.length) {
-        return { result: null, error: `Unfilled placeholders: ${remaining.join(', ')}` }
+        return err(`Unfilled placeholders: ${remaining.join(', ')}`)
       }
 
     } else {
-      return { result: null, error: "Provide either 'template_name' or 'template'" }
+      return err("Provide either 'template_name' or 'template'")
     }
 
     if (saveTo) {
       memory.set(saveTo, rendered)
-      return { result: { saved_to: saveTo } }
+      return ok({ saved_to: saveTo})
     }
 
-    return { result: rendered }
+    return ok(rendered)
   }
 }
 

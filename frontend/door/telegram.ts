@@ -356,15 +356,15 @@ export class TelegramDoor {
             if (event.call.name === 'ask') continue
 
             const { call, result } = event
-            const status = result.error
+            const status = !result.ok
               ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
               : `✅ <b>${escapeHtml(call.name)}</b>`
 
-            const resultStr = result.error
+            const resultStr = !result.ok
               ? null
-              : typeof result.result === 'string'
-                ? result.result
-                : JSON.stringify(result.result, null, 2)
+              : typeof result.value === 'string'
+                ? result.value
+                : JSON.stringify(result.value, null, 2)
 
             const preview = resultStr && resultStr.length > 300
               ? resultStr.slice(0, 300) + '\n...'

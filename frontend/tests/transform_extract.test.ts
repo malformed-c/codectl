@@ -26,8 +26,8 @@ describe('extract tool turn offsets', () => {
     const handler = createExtractHandler(memory, { getCommitted: () => history })
     const out = await handler({ method: 'json', turn: 0, path: 'users.0.name' })
 
-    expect(out.error).toBeUndefined()
-    expect(out.result).toBe('Alice')
+    expect((out.ok ? undefined : out.error)).toBeUndefined()
+    expect(out.value).toBe('Alice')
   })
 
   test('json path "." returns full root object', async () => {
@@ -44,8 +44,8 @@ describe('extract tool turn offsets', () => {
     const handler = createExtractHandler(memory, { getCommitted: () => history })
     const out = await handler({ method: 'json', turn: 0, path: '.' })
 
-    expect(out.error).toBeUndefined()
-    const parsed = JSON.parse(out.result as string)
+    expect((out.ok ? undefined : out.error)).toBeUndefined()
+    const parsed = JSON.parse(out.value as string)
     expect(parsed).toHaveProperty('codePlan')
     expect(parsed.codePlan[0].kind).toBe('Ansible')
   })
@@ -64,7 +64,7 @@ describe('extract tool turn offsets', () => {
     const handler = createExtractHandler(memory, { getCommitted: () => history })
     const out = await handler({ method: 'json', turn: 0, path: '.', save_to: 'whole' })
 
-    expect(out.error).toBeUndefined()
+    expect((out.ok ? undefined : out.error)).toBeUndefined()
     expect(memory.get('whole')).toBe('{"x":1}')
   })
 
@@ -83,8 +83,8 @@ describe('extract tool turn offsets', () => {
     const handler = createExtractHandler(memory, { getCommitted: () => history })
     const out = await handler({ method: 'codeblocks', turn: 0, lang: 'json', index: 0 })
 
-    expect(out.error).toBeUndefined()
-    expect(out.result).toContain('"timeout": 30')
+    expect((out.ok ? undefined : out.error)).toBeUndefined()
+    expect(out.value).toContain('"timeout": 30')
   })
 })
 
@@ -103,7 +103,7 @@ describe('extract tool bracket notation', () => {
     const handler = createExtractHandler(memory, { getCommitted: () => history })
     const out = await handler({ method: 'json', turn: 0, path: 'codePlan[0].spec.tasks[0].args.dest' })
 
-    expect(out.error).toBeUndefined()
-    expect(out.result).toBe('/tmp/hello.txt')
+    expect((out.ok ? undefined : out.error)).toBeUndefined()
+    expect(out.value).toBe('/tmp/hello.txt')
   })
 })

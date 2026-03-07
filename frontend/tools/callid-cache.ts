@@ -1,4 +1,5 @@
 import type { ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 
 /**
@@ -14,38 +15,38 @@ export function createCallIdCacheHandler(cache: Map<string, string>): ToolHandle
 
     switch (action) {
       case 'set': {
-        if (!id) return { result: null, error: "'id' is required for 'set'" }
+        if (!id) return err("'id' is required for 'set'")
 
-        if (value === undefined) return { result: null, error: "'value' is required for 'set'" }
+        if (value === undefined) return err("'value' is required for 'set'")
 
         cache.set(id, value)
 
-        return { result: { success: `Stored under key '${id}'` } }
+        return ok({ success: `Stored under key '${id}'` })
       }
 
       case 'get': {
-        if (!id) return { result: null, error: "'id' is required for 'get'" }
+        if (!id) return err("'id' is required for 'get'")
 
         const stored = cache.get(id)
-        if (stored === undefined) return { result: null, error: `No entry for key '${id}'` }
+        if (stored === undefined) return err(`No entry for key '${id}'`)
 
-        return { result: { value: stored } }
+        return ok({ value: stored})
       }
 
       case 'delete': {
-        if (!id) return { result: null, error: "'id' is required for 'delete'" }
+        if (!id) return err("'id' is required for 'delete'")
 
         const existed = cache.delete(id)
-        return { result: { success: existed ? `Deleted '${id}'` : `Key '${id}' not found` } }
+        return ok({ success: existed ? `Deleted '${id}'` : `Key '${id}' not found` })
       }
 
       case 'list': {
         const keys = Array.from(cache.keys())
-        return { result: { keys: keys.length ? keys.join(', ') : '(empty)' } }
+        return ok({ keys: keys.length ? keys.join(', ') : '(empty)'})
       }
 
       default:
-        return { result: null, error: `Unknown cache action: ${action}` }
+        return err(`Unknown cache action: ${action}`)
     }
   }
 }

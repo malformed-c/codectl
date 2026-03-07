@@ -94,7 +94,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
           for (const te of event.toolsExecuted) {
             const args = JSON.stringify(te.call.arguments)
-            const res = te.result.error ? `Error: ${te.result.error}` : 'success'
+            const res = !te.result.ok ? `Error: ${te.result.error}` : 'success'
 
             consola.info(`  🛠️  ${te.call.name}(${args}) -> ${res}`)
           }

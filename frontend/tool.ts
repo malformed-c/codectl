@@ -36,11 +36,13 @@ export type ToolCall = {
   arguments: Record<string, unknown>
 }
 
-export type ToolResult = {
-  callId?: string
-  result: unknown
-  error?: string
-}
+export type ToolResult =
+  | { ok: true;  callId?: string; value: unknown }
+  | { ok: false; callId?: string; error: string }
+
+/** Convenience constructors */
+export const ok  = (value: unknown, callId?: string): ToolResult => ({ ok: true,  value, callId })
+export const err = (error: string,  callId?: string): ToolResult => ({ ok: false, error, callId })
 
 export type ToolFormat = "json" | "typescript" | "python" | "xml" | "prose"
 

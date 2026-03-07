@@ -11,6 +11,7 @@
  */
 
 import type { ToolDefinition, ToolResult } from '../tool'
+import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import { TaskEngine } from '../plan/engine'
 
@@ -142,7 +143,7 @@ export function createTaskHandlers(engine: TaskEngine): Record<string, ToolHandl
   return {
     async task_create(args): Promise<ToolResult> {
       const goal = args.goal as string
-      if (!goal) return { result: null, error: "'goal' is required" }
+      if (!goal) return err("'goal' is required")
 
       const task = await engine.create({
         goal,
@@ -153,41 +154,41 @@ export function createTaskHandlers(engine: TaskEngine): Record<string, ToolHandl
         payload:     (args.payload as Record<string, unknown> | undefined) ?? {},
       })
 
-      return { result: { taskId: task.taskId, status: task.status } }
+      return ok({ taskId: task.taskId, status: task.status})
     },
 
     async task_complete(args): Promise<ToolResult> {
       const taskId = args.taskId as string
-      if (!taskId) return { result: null, error: "'taskId' is required" }
+      if (!taskId) return err("'taskId' is required")
 
       await engine.complete({ taskId, result: args.result })
-      return { result: { ok: true } }
+      return ok({ ok: true})
     },
 
     async task_fail(args): Promise<ToolResult> {
       const taskId = args.taskId as string
       const error  = args.error as string
-      if (!taskId || !error) return { result: null, error: "'taskId' and 'error' are required" }
+      if (!taskId || !error) return err("'taskId' and 'error' are required")
 
       await engine.fail({ taskId, error })
-      return { result: { ok: true } }
+      return ok({ ok: true})
     },
 
     async task_cancel(args): Promise<ToolResult> {
       const taskId = args.taskId as string
-      if (!taskId) return { result: null, error: "'taskId' is required" }
+      if (!taskId) return err("'taskId' is required")
 
       await engine.cancel(taskId, args.reason as string | undefined)
-      return { result: { ok: true } }
+      return ok({ ok: true})
     },
 
     async task_get(args): Promise<ToolResult> {
       const taskId = args.taskId as string
-      if (!taskId) return { result: null, error: "'taskId' is required" }
+      if (!taskId) return err("'taskId' is required")
 
       const task = engine.get(taskId)
-      if (!task) return { result: null, error: `Task ${taskId} not found` }
-      return { result: task }
+      if (!task) return err(`Task ${taskId} not found`)
+      return ok(task)
     },
 
     async task_list(args): Promise<ToolResult> {
@@ -202,7 +203,7 @@ export function createTaskHandlers(engine: TaskEngine): Record<string, ToolHandl
         ? tasks.filter(t => t.status === args.status)
         : tasks
 
-      return { result: filtered.slice(0, limit) }
+      return ok(filtered.slice(0, limit))
     },
   }
 }
