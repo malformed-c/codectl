@@ -30,6 +30,7 @@ import { AskTool, MessageTool, AskChannel, createAskHandler, createMessageHandle
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
 import { PipeTool, createPipeHandler } from "./tools/pipe"
+import { CodePlanSchemaTool, createCodePlanSchemaHandler } from "./tools/codeplan_schema"
 import { ValidatePlanTool, createValidatePlanHandler } from "./tools/validate_plan"
 import { TransformTools, createTransformHandlers } from "./tools/transform"
 import type { CodePlan } from "./codeplan.schema"
@@ -338,6 +339,8 @@ export class Orchestrator {
     this.registerTool(PipeTool, createPipeHandler(
       (name, args) => this.executeToolCall({ name, arguments: args })
     ))
+
+    this.registerTool(CodePlanSchemaTool, createCodePlanSchemaHandler())
 
     // --- Tool-set registrations (def + handler paired by name) ---
     this.registerToolSet(CodeqTools, createCodeqHandlers(() => this.shell.getCwd()))
