@@ -39,7 +39,35 @@ malf:   ⏳ mode({"mode":"agent"})
         Done. Created /tmp/ansible_test/ and /tmp/ansible_test/test.txt.
 ```
 
-## Example: multi-tool JSON manipulation
+## Example: Gemini native tool calling
+
+Running on `gemini-3.1-flash-lite-preview` via the native function-calling API:
+
+```
+User:   Can you write your own Ansible plan then and run it
+
+malf:   ⏳ validate_plan({...})
+        ✅ validate_plan  {"valid": true, "message": "CodePlan is valid and ready for execution."}
+
+        ⏳ run_plan({...})
+        ✅ run_plan
+        {
+          "ok": true,
+          "results": [
+            { "name": "Create directory",  "status": "changed" },
+            { "name": "Create status file","status": "changed" }
+          ]
+        }
+
+        ⏳ bash({"command":"cat /tmp/codectl_test/status.txt"})
+        ✅ bash  Codectl test successful!
+
+        I have successfully created and executed my own Ansible plan.
+```
+
+Set `API_TYPE=gemini-native` (or `gemini-interactions`) with a `GEMINI_API_KEY` to use Gemini models. Tools are passed as function declarations — no prompt engineering required.
+
+
 
 Memory variable substitution and multiple tool calls in a single turn:
 
