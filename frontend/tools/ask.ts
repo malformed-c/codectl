@@ -138,8 +138,10 @@ export function createAskHandler(channel: AskChannel): ToolHandler {
   }
 }
 
-export function createMessageHandler(): ToolHandler {
-  return async (_args): Promise<ToolResult> => {
-    return ok({ sent: true})
+export function createMessageHandler(onParentMessage?: (content: string) => void): ToolHandler {
+  return async (args): Promise<ToolResult> => {
+    const content = args.content as string
+    onParentMessage?.(content)
+    return ok({ sent: true })
   }
 }

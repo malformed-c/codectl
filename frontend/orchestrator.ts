@@ -95,6 +95,27 @@ export type OrchestratorConfig = {
 
   /** Path to graph memory SQLite db. If provided, graph memory tool is registered. */
   graphMemoryPath?: string
+
+  /**
+   * Config overrides applied when this orchestrator spawns a subagent.
+   * Merged over the parent config — lets you give subagents a cheaper adapter,
+   * a different turn budget, a specialised system prompt, etc.
+   */
+  subagentConfig?: Partial<Omit<OrchestratorConfig, 'subagentConfig'>>
+
+  /**
+   * If set, this orchestrator is running as a subagent.
+   * ask/message tools will communicate via this channel instead of waiting
+   * on a user-facing door.
+   */
+  parentAskChannel?: AskChannel
+
+  /**
+   * Callback invoked when the subagent's `message` tool fires.
+   * Typically injects a system message into the parent FSM so the parent
+   * model sees the subagent's status updates.
+   */
+  onParentMessage?: (content: string) => void
 }
 
 export type TurnResult = {
@@ -287,8 +308,8 @@ export class Orchestrator {
       this.registerTool(GraphMemoryTool, createGraphMemoryHandler(gm))
     }
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
-    this.registerTool(AskTool, createAskHandler(this.askChannel))
-    this.registerTool(MessageTool, createMessageHandler())
+    this.registerTool(AskTool, createAskHandler(this.config.parentAskChannel ?? this.askChannel))
+    this.registerTool(MessageTool, createMessageHandler(this.config.onParentMessage))
     this.registerTool(ValidatePlanTool, createValidatePlanHandler((lastPlan, errors) => {
       // Update plan validation state and rebuild the system prompt so the model always
       // sees the latest validation status in its context (last plan valid/invalid + errors).
@@ -300,7 +321,12 @@ export class Orchestrator {
       () => this.config.backendDir ?? join(dirname(process.cwd()), 'backend'),
       this.adapter,
     ))
-    this.registerTool(SubagentTool, createSubagentHandler(Orchestrator, this.config))
+    this.registerTool(SubagentTool, createSubagentHandler(
+      Orchestrator,
+      this.config,
+      this.askChannel,
+      (content) => this.fsm.onSystem(`[Subagent] ${content}`),
+    ))
 
     // --- Tool-set registrations (def + handler paired by name) ---
     this.registerToolSet(CodeqTools, createCodeqHandlers(() => this.shell.getCwd()))
