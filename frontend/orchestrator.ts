@@ -485,7 +485,7 @@ export class Orchestrator {
           ? (this._enrichedSystemRound.serialize() as any).message
           : ''
         const messages = roundsToMessages(history.slice(1), systemPrompt)
-        consola.info('[native] turn', 'messages:', messages.length, 'roles:', messages.map(m => m.role))
+        consola.debug('[native] turn', 'messages:', messages.length, 'roles:', messages.map(m => m.role))
         try {
           parsed = await (this.adapter as any).generate(messages, this.tools)
         } catch (e) {

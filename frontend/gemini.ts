@@ -276,7 +276,7 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
             name: callNames[i] ?? `tool_${i}`,
             response: r.error
               ? { error: r.error }
-              : { output: typeof r.value === 'string' ? r.value : JSON.stringify(r.value) },
+              : (typeof r.value === 'string' ? { output: r.value } : r.value as object ?? {}),
           },
         })),
       })
@@ -296,7 +296,7 @@ function extractSystem(messages: Message[]): string | undefined {
 
 /** Parse SDK response parts into a step-based ParsedTurn. */
 function parseSDKResponse(parts: SDKPart[]): ParsedTurn {
-  consola.info('[gemini] response parts:', JSON.stringify(parts.map(p => ({
+  consola.debug('[gemini] response parts:', JSON.stringify(parts.map(p => ({
     thought: p.thought,
     hasText: !!p.text,
     textLen: p.text?.length,
