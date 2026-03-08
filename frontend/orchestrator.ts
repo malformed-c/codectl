@@ -34,6 +34,7 @@ import { TransformTools, createTransformHandlers } from "./tools/transform"
 import type { CodePlan } from "./codeplan.schema"
 import { Fsm } from './fsm'
 import { RenderCache, VersionedMemory, renderHistory } from './renderer'
+import { roundsToMessages } from './native_messages'
 import { joinWithBoundaryNormalization } from './pipeline'
 import { userSpan } from './span'
 import { systemRound as makeSystemRound, type Round } from './round'
@@ -475,9 +476,21 @@ export class Orchestrator {
       // Check abort signal
       if (this.abortController.signal.aborted) break
 
-      const prompt = this.buildPrompt()
+      let parsed: ParsedTurn
 
-      const parsed = await this.adapter.generateRaw(prompt)
+      if ('supportsNativeTools' in this.adapter && (this.adapter as any).supportsNativeTools) {
+        // Native path: structured messages + tool definitions, no template rendering
+        const history = [this._enrichedSystemRound, ...this.fsm.getRenderableHistory()]
+        const systemPrompt = this._enrichedSystemRound.serialize().kind === 'system'
+          ? (this._enrichedSystemRound.serialize() as any).message
+          : ''
+        const messages = roundsToMessages(history.slice(1), systemPrompt)
+        parsed = await (this.adapter as any).generate(messages, this.tools)
+      } else {
+        // Template path: full history rendered to a single prompt string
+        const prompt = this.buildPrompt()
+        parsed = await this.adapter.generateRaw(prompt)
+      }
 
       finalTurn = parsed
 

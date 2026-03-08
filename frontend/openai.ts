@@ -16,6 +16,9 @@ export type OpenAIConfig = {
   topP?: number
   stopSequences?: string[]
   streaming?: boolean
+
+  // Override the chat completions path (e.g. Gemini OpenAI-compat endpoint)
+  completionsPath?: string
 }
 
 export type OpenAIStatus = {
@@ -72,10 +75,12 @@ function toChatMessages(messages: Message[]): ChatMessage[] {
 export class OpenAIChatAdapter {
   readonly config: OpenAIConfig
   private readonly server: string
+  private readonly completionsPath: string
 
   constructor(config: OpenAIConfig) {
     this.config = config
     this.server = config.apiServer.replace(/\/+$/, '').replace(/\/v\d+$/, '')
+    this.completionsPath = config.completionsPath ?? '/v1/chat/completions'
   }
 
   async status(): Promise<OpenAIStatus> {
@@ -118,7 +123,7 @@ export class OpenAIChatAdapter {
   }
 
   private async chatComplete(messages: ChatMessage[], retries = 3): Promise<string> {
-    const url = `${this.server}/v1/chat/completions`
+    const url = `${this.server}${this.completionsPath}`
     const body = this.buildPayload(messages, false)
 
     for (let i = 0; i < retries; i++) {
@@ -150,7 +155,7 @@ export class OpenAIChatAdapter {
   }
 
   private async *streamChatComplete(messages: ChatMessage[]): AsyncGenerator<string> {
-    const url = `${this.server}/v1/chat/completions`
+    const url = `${this.server}${this.completionsPath}`
     const body = this.buildPayload(messages, true)
 
     const response = await fetch(url, {
