@@ -161,8 +161,13 @@ function stripMarkdownToPlain(md: string): string {
 function markdownToTelegramHTML(md: string | undefined | null): string {
   if (!md) return ''
 
+  // Normalize fenced blocks where lang tag and content share a line: ```json{  →  ```json\n{
+  // The lookahead excludes both lang chars AND newline so the greedy + cannot
+  // backtrack (a shorter match would leave a lang char as the lookahead char).
+  const normalized = md.replace(/(```[a-zA-Z0-9_+\-]+)(?=[^a-zA-Z0-9_+\-\n`])/g, '$1\n')
+
   try {
-    const tokens = marked.lexer(md)
+    const tokens = marked.lexer(normalized)
 
     return renderBlock(tokens).trim()
 
