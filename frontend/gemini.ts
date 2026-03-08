@@ -296,6 +296,14 @@ function extractSystem(messages: Message[]): string | undefined {
 
 /** Parse SDK response parts into a step-based ParsedTurn. */
 function parseSDKResponse(parts: SDKPart[]): ParsedTurn {
+  consola.debug('[gemini] response parts:', JSON.stringify(parts.map(p => ({
+    thought: p.thought,
+    hasText: !!p.text,
+    textLen: p.text?.length,
+    hasSig: !!p.thoughtSignature,
+    hasFn: !!p.functionCall,
+    fnName: p.functionCall?.name,
+  }))))
   let think = ''
   let content = ''
   const toolCalls: Array<{ name: string; arguments: Record<string, unknown>; thoughtSignature?: string }> = []
