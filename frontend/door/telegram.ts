@@ -161,10 +161,12 @@ function stripMarkdownToPlain(md: string): string {
 function markdownToTelegramHTML(md: string | undefined | null): string {
   if (!md) return ''
 
-  // Normalize fenced blocks where lang tag and content share a line: ```json{  →  ```json\n{
-  // The lookahead excludes both lang chars AND newline so the greedy + cannot
-  // backtrack (a shorter match would leave a lang char as the lookahead char).
-  const normalized = md.replace(/(```[a-zA-Z0-9_+\-]+)(?=[^a-zA-Z0-9_+\-\n`])/g, '$1\n')
+  // Normalize fenced code blocks:
+  //   1. Insert \n before ``` when not at line start (marked requires fence on its own line)
+  //   2. Insert \n after lang tag when content follows immediately: ```json{ → ```json\n{
+  const normalized = md
+    .replace(/(?<=[^\n])(`{3})/g, '\n$1')
+    .replace(/(```[a-zA-Z0-9_+\-]+)(?=[^a-zA-Z0-9_+\-\n`])/g, '$1\n')
 
   try {
     const tokens = marked.lexer(normalized)
