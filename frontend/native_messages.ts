@@ -45,21 +45,21 @@ function flattenRound(s: SerializedRound, out: Message[]): void {
     case 'chat':
       // Simple user/model exchange
       out.push({ role: 'user', content: spansText(s.user) })
-      if (s.model) out.push({ role: 'assistant', content: s.model })
+      if (s.model) out.push({ role: 'model', content: s.model })
       break
 
     case 'agent':
       // Trigger user message, then tool loop children, then final model response
       out.push({ role: 'user', content: spansText(s.trigger) })
       for (const child of s.rounds) flattenRound(child, out)
-      if (s.response) out.push({ role: 'assistant', content: s.response })
+      if (s.response) out.push({ role: 'model', content: s.response })
       break
 
     case 'tool': {
       // Assistant message with function calls
       if (s.calls.length) {
         out.push({
-          role: 'assistant',
+          role: 'model',
           content: s.content ?? '',
           calls: s.calls,
         })

@@ -486,12 +486,10 @@ export class Orchestrator {
           : ''
         const messages = roundsToMessages(history.slice(1), systemPrompt)
         consola.debug('[native] turn', 'messages:', messages.length, 'roles:', messages.map(m => m.role))
-        try {
-          parsed = await (this.adapter as any).generate(messages, this.tools)
-        } catch (e) {
-          consola.error('[native] generate() threw:', e)
-          throw e
-        }
+        // tool_library is only useful for template models — native adapters see all
+        // tool names/descriptions via function declarations already.
+        const nativeTools = this.tools.filter(t => t.name !== 'tool_library')
+        parsed = await (this.adapter as any).generate(messages, nativeTools)
       } else {
         // Template path: full history rendered to a single prompt string
         const prompt = this.buildPrompt()
