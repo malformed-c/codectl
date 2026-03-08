@@ -520,6 +520,17 @@ export class Orchestrator {
         continue
       }
 
+      // Detect completely empty response (no think, no content, no calls).
+      // Can happen with native models after a function response — inject a nudge.
+      const isEmpty = !think && !content && !calls.length
+      if (isEmpty) {
+        consola.warn('[empty] model returned empty response - injecting nudge')
+
+        this.fsm.onSystem('Please respond to the user based on the tool results above.')
+
+        continue
+      }
+
       // Stop if no tools called - commit ChatRound via FSM
       if (!calls.length) {
         this.fsm.onModel(think, content, [])
