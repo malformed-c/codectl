@@ -75,7 +75,9 @@ export class GeminiNativeAdapter {
           : {}),
       },
     })
-    return parseSDKResponse(response.candidates?.[0]?.content?.parts ?? [])
+    const candidate = response.candidates?.[0]
+    consola.debug('[gemini] finishReason:', (candidate as any)?.finishReason, 'parts:', candidate?.content?.parts?.length)
+    return parseSDKResponse(candidate?.content?.parts ?? [])
   }
 
   async generateRaw(prompt: string): Promise<ParsedTurn> {
@@ -267,18 +269,20 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
         }),
       })
     } else if (m.role === 'tool_result' && m.results?.length) {
-      // Tool result message — pair results with calls by index to recover tool name
+      // Tool result message — pair results with calls by index to recover tool name.
+      // Truncate large results — lite models return empty responses on very long context.
       const callNames = m.calls?.map(c => c.tool) ?? []
+      const MAX_RESULT = 8000
       out.push({
         role: 'user',
-        parts: m.results.map((r, i) => ({
-          functionResponse: {
-            name: callNames[i] ?? `tool_${i}`,
-            response: r.error
-              ? { error: r.error }
-              : (typeof r.value === 'string' ? { output: r.value } : r.value as object ?? {}),
-          },
-        })),
+        parts: m.results.map((r, i) => {
+          const raw = r.error
+            ? { error: r.error }
+            : typeof r.value === 'string'
+              ? { output: r.value.length > MAX_RESULT ? r.value.slice(0, MAX_RESULT) + '\n...(truncated)' : r.value }
+              : (r.value as object ?? {})
+          return { functionResponse: { name: callNames[i] ?? `tool_${i}`, response: raw } }
+        }),
       })
     } else {
       out.push({
