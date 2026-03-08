@@ -288,6 +288,7 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
       // Truncate large results — lite models return empty responses on very long context.
       const callNames = m.calls?.map(c => c.tool) ?? []
       const MAX_RESULT = 8000
+      consola.debug('[gemini] tool_result results:', JSON.stringify(m.results), 'calls:', callNames)
       out.push({
         role: 'user',
         parts: m.results.map((r, i) => {
@@ -300,6 +301,9 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
         }),
       })
     } else {
+      if (m.role === 'tool_result') {
+        consola.debug('[gemini] tool_result with no results! results:', m.results, 'content:', m.content)
+      }
       out.push({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }],
