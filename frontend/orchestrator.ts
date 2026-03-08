@@ -552,6 +552,7 @@ export class Orchestrator {
           storedCalls.push({
             tool: call.name,
             ...(call.callId ? { callId: call.callId } : {}),
+            ...(step.thoughtSignature ? { thoughtSignature: step.thoughtSignature } : {}),
             ...call.arguments,
           })
         }

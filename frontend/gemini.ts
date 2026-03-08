@@ -215,6 +215,7 @@ export class GeminiInteractionsAdapter {
 type SDKPart = {
   text?: string
   thought?: boolean
+  thoughtSignature?: string
   functionCall?: { name: string; args: Record<string, unknown> }
   functionResponse?: { name: string; response: unknown }
 }
@@ -252,12 +253,17 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
     if (m.role === 'system') continue
 
     if (m.calls?.length) {
-      // Assistant message with function calls
+      // Assistant message with function calls.
+      // First call carries thoughtSignature (Gemini 3 requirement) — strip it from args.
       out.push({
         role: 'model',
-        parts: m.calls.map(c => {
-          const { tool, callId, ...args } = c
-          return { functionCall: { name: tool, args: args as Record<string, unknown> } }
+        parts: m.calls.map((c, i) => {
+          const { tool, callId, thoughtSignature, ...args } = c
+          return {
+            functionCall: { name: tool, args: args as Record<string, unknown> },
+            // Signature only on first part per Gemini spec (parallel calls)
+            ...(i === 0 && thoughtSignature ? { thoughtSignature } : {}),
+          }
         }),
       })
     } else if (m.role === 'tool_result' && m.results?.length) {
@@ -288,18 +294,38 @@ function extractSystem(messages: Message[]): string | undefined {
   return messages.find(m => m.role === 'system')?.content
 }
 
+/** Parse SDK response parts into a step-based ParsedTurn. */
 function parseSDKResponse(parts: SDKPart[]): ParsedTurn {
   let think = ''
   let content = ''
-  const toolCalls: Array<{ name: string; arguments: Record<string, unknown> }> = []
+  const toolCalls: Array<{ name: string; arguments: Record<string, unknown>; thoughtSignature?: string }> = []
+
+  // Gemini 3: thoughtSignature is on the first functionCall part (or last text part).
+  // It must be stored and replayed exactly when sending history back.
+  let pendingSignature: string | undefined
 
   for (const part of parts) {
-    if (part.thought)             think += part.text ?? ''
-    else if (part.functionCall)   toolCalls.push({ name: part.functionCall.name, arguments: part.functionCall.args ?? {} })
-    else if (part.text)           content += part.text
+    if (part.thought) {
+      think += part.text ?? ''
+    } else if (part.functionCall) {
+      const signature = part.thoughtSignature ?? pendingSignature
+      toolCalls.push({
+        name: part.functionCall.name,
+        arguments: part.functionCall.args ?? {},
+        ...(signature ? { thoughtSignature: signature } : {}),
+      })
+      pendingSignature = undefined
+    } else if (part.text) {
+      if (part.thoughtSignature) pendingSignature = part.thoughtSignature
+      content += part.text
+    }
   }
 
-  return makeTurn({ think: think || undefined, content: content || undefined, toolCalls })
+  return makeTurn({
+    think: think || undefined,
+    content: content || undefined,
+    toolCalls,
+  })
 }
 
 function parseInteractionOutputs(outputs: Interactions.Content[], template: TextTemplate): ParsedTurn {

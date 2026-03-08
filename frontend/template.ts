@@ -88,7 +88,7 @@ export type FimContent = {
 export type Step =
   | { kind: 'thought';   text: string }
   | { kind: 'text';      text: string }
-  | { kind: 'tool_call'; name: string; callId?: string; arguments: Record<string, unknown> }
+  | { kind: 'tool_call'; name: string; callId?: string; thoughtSignature?: string; arguments: Record<string, unknown> }
 
 export type ParsedTurn = {
   steps: Step[]
@@ -121,7 +121,7 @@ export function turnToolCalls(t: ParsedTurn): Array<Step & { kind: 'tool_call' }
 export function makeTurn(opts: {
   think?:     string
   content?:   string
-  toolCalls?: Array<{ name: string; callId?: string; arguments: Record<string, unknown> }>
+  toolCalls?: Array<{ name: string; callId?: string; thoughtSignature?: string; arguments: Record<string, unknown> }>
   malformed?: boolean
 }): ParsedTurn {
   const steps: Step[] = []
