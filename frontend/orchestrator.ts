@@ -276,6 +276,7 @@ export class Orchestrator {
   private abortController: AbortController | null = null
   private readonly checkpointStore: CheckpointStore | null
   private readonly askChannel = new AskChannel()
+  private graphMemory: GraphMemory | null = null
 
   constructor(config: OrchestratorConfig) {
     this.adapter = config.adapter
@@ -306,6 +307,7 @@ export class Orchestrator {
 
     if (this.config.graphMemoryPath) {
       const gm = new GraphMemory(this.config.graphMemoryPath)
+      this.graphMemory = gm
       this.registerTool(GraphMemoryTool, createGraphMemoryHandler(gm))
     }
     this.registerTool(CallIdCacheTool, createCallIdCacheHandler(this.callIdCache))
@@ -461,6 +463,9 @@ export class Orchestrator {
     this.fsm = new Fsm()
     this.rebuildSystemMessage(goal)
 
+    // Inject relevant graph memory as a system round before the agent loop
+    this._injectMemoryContext(goal)
+
     return yield* this.runLoop()
   }
 
@@ -469,6 +474,9 @@ export class Orchestrator {
     if (this._systemRound.count === 0) this.rebuildSystemMessage()
 
     this.fsm.onUser([userSpan(userMessage)])
+
+    // Inject relevant graph memory as a system round before the first model turn
+    this._injectMemoryContext(userMessage)
 
     return yield* this.runLoop()
   }
@@ -479,6 +487,17 @@ export class Orchestrator {
    */
   async complete(userMessage: string): Promise<TurnResult> {
     return toPromise(this.chat(userMessage))
+  }
+
+  /**
+   * Search graph memory for nodes relevant to `query` and inject the result
+   * as a system round so the model sees it before its first turn.
+   * No-ops when graph memory is not configured or returns no results.
+   */
+  private _injectMemoryContext(query: string): void {
+    if (!this.graphMemory) return
+    const block = this.graphMemory.recallForPrompt(query)
+    if (block) this.fsm.onSystem(block)
   }
 
   private async *runLoop(): AsyncGenerator<OrchestratorEvent, TurnResult> {

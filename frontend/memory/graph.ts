@@ -431,6 +431,37 @@ export class GraphMemory {
     return pruned
   }
 
+  // ---------------------------------------------------------------------------
+  // Prompt recall
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Search for nodes relevant to `query` and return a compact formatted string
+   * suitable for injecting into the model prompt as a system context block.
+   *
+   * Returns an empty string when the store has no relevant results, so callers
+   * can skip injection without special-casing.
+   */
+  recallForPrompt(query: string, limit = 5): string {
+    let results: MemorySearchResult[]
+    try {
+      results = this.search(query, { limit })
+    } catch {
+      // FTS can throw on malformed queries (e.g. bare operators); degrade gracefully
+      return ''
+    }
+
+    if (results.length === 0) return ''
+
+    const lines = results.map(({ node, score }) => {
+      const conf = score.toFixed(2)
+      const tags = node.tags.length ? ` [${node.tags.join(', ')}]` : ''
+      return `• (${node.kind}, conf ${conf})${tags} ${node.content}`
+    })
+
+    return `[Recalled memory]\n${lines.join('\n')}`
+  }
+
   // --- Internal ---
 
   private _rowToNode(r: {
