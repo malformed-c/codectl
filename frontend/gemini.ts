@@ -232,7 +232,18 @@ function toThinkingLevel(level?: string): ThinkingLevel {
 }
 
 function toFunctionDeclarations(tools: ToolDefinition[]): unknown[] {
-  return tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters }))
+  return tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    parameters: {
+      ...t.parameters,
+      properties: Object.fromEntries(
+        Object.entries(t.parameters.properties ?? {}).map(
+          ([k, { aliases: _aliases, ...prop }]: [string, any]) => [k, prop]
+        )
+      ),
+    },
+  }))
 }
 
 function messagesToSDKContents(messages: Message[]): SDKContent[] {
