@@ -583,11 +583,23 @@ export class Orchestrator {
       }
 
       // #23: Malformed token correction
+      // autofixPair() in template.ts already repaired the token pair before parsing,
+      // so calls[] is populated even when malformed=true.  Only penalise when the
+      // fix produced no usable calls (i.e. genuinely unrecoverable).
       if (parsed.malformed) {
-        consola.warn('Malformed tool call: closing token found without opening token.')
-
-        this.fsm.onError('Malformed tool call: your response contained a closing tool token without the opening token. Always start tool calls with the opening token.')
-        this.recordToolFailure()
+        if (calls.length > 0) {
+          // Auto-fixed: calls extracted successfully — continue silently.
+          consola.debug('Malformed tool token auto-fixed; calls recovered:', calls.map(c => c.name))
+        } else {
+          // Unrecoverable: no calls extracted despite fix attempt.
+          consola.warn('Malformed tool call: token auto-fix produced no calls.')
+          this.fsm.onError(
+            'Malformed tool call: your response contained a closing tool token without the ' +
+            'opening token, and no tool calls could be recovered. ' +
+            'Always start tool calls with the opening token [TOOL_CALLS].'
+          )
+          this.recordToolFailure()
+        }
       }
 
       // Build ToolCall / StoredToolCall arrays from already-parsed steps

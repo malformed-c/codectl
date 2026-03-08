@@ -630,9 +630,22 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
             })
           }
         } catch {
-          // Malformed call - emit a best-effort tool_call with raw fallback in args
+          // parseToolCalls threw — try a last-resort recovery before giving up.
+          // Strip [ARGS] marker and attempt to parse the remainder as JSON args.
           const inferredName = raw.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1] ?? 'malformed_call'
-          steps.push({ kind: 'tool_call', name: inferredName, arguments: { _raw: raw } })
+          let recoveredArgs: Record<string, unknown> = { _raw: raw }
+          try {
+            const argsIdx = raw.indexOf('[ARGS]')
+            if (argsIdx !== -1) {
+              const argsText = raw.slice(argsIdx + 6).trim()
+              const parsed = argsText ? JSON.parse(argsText) : {}
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                recoveredArgs = parsed as Record<string, unknown>
+              }
+            }
+          } catch { /* keep _raw fallback */ }
+          consola.debug(`[parse] last-resort recovery for "${inferredName}":`, recoveredArgs)
+          steps.push({ kind: 'tool_call', name: inferredName, arguments: recoveredArgs })
           malformed = true
         }
       }
