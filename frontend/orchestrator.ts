@@ -577,6 +577,12 @@ export class Orchestrator {
       const storedCalls: StoredToolCall[] = []
       const immediateResults: StoredToolResult[] = []
 
+      // Accumulate raw (pre-resolution) arguments for each call so we can yield
+      // them in the 'call' events after the 'turn' event.  Must be stored here
+      // because step.arguments is the pre-resolution value the door needs to
+      // display (e.g. unresolved $var refs shown as-is to the user).
+      const rawArgsByCall = new Map<ToolCall, Record<string, unknown>>()
+
       if (calls.length) {
         consola.info('received tool calls:', calls.map(c => c.name))
 
@@ -586,7 +592,7 @@ export class Orchestrator {
 
           const call: ToolCall = { name: step.name, callId: step.callId, arguments: resolvedArgs }
           allCalls.push(call)
-          yield { kind: 'call', call, rawArguments: step.arguments, pending: true }
+          rawArgsByCall.set(call, step.arguments)   // store raw for 'call' event
           storedCalls.push({
             tool: call.name,
             ...(call.callId ? { callId: call.callId } : {}),
@@ -604,6 +610,12 @@ export class Orchestrator {
         // toolsExecuted is empty here; callers that need full results use call_result events
         // or the TurnResult returned from the generator.
         yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+
+        // Yield 'call' (pending) events AFTER the turn so tool notifications
+        // appear below the model's text in the UI, not above it.
+        for (const call of allCalls) {
+          yield { kind: 'call', call, rawArguments: rawArgsByCall.get(call)!, pending: true }
+        }
 
         const storedResults: StoredToolResult[] = []
 
