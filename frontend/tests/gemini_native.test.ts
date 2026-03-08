@@ -1,0 +1,216 @@
+import { describe, expect, test } from 'bun:test'
+import { Orchestrator, toPromise } from '../orchestrator'
+import { Profiles, makeTurn, turnContent } from '../template'
+import { KoboldAdapter } from '../kobold'
+import { GeminiNativeAdapter, GeminiInteractionsAdapter } from '../gemini'
+import { ModelRouter } from '../llm/router'
+import type { ParsedTurn, Message } from '../template'
+import type { ToolDefinition } from '../tool'
+
+// ---------------------------------------------------------------------------
+// Mock native adapter
+// Simulates supportsNativeTools=true — records what messages+tools it receives.
+// Does NOT extend KoboldAdapter since generate() is not part of that interface.
+// ---------------------------------------------------------------------------
+
+class MockNativeAdapter {
+  readonly supportsNativeTools = true
+  private index = 0
+  readonly calls: Array<{ messages: Message[]; tools?: ToolDefinition[] }> = []
+
+  constructor(private readonly turns: ParsedTurn[]) {}
+
+  async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
+    this.calls.push({ messages: [...messages], tools })
+    const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]!
+    this.index++
+    return turn
+  }
+
+  async generateRaw(_prompt: string): Promise<ParsedTurn> {
+    throw new Error('generateRaw should not be called for native adapter')
+  }
+
+  async status() { return { model: 'mock' } }
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator native path branching
+// ---------------------------------------------------------------------------
+
+describe('Orchestrator native path (supportsNativeTools)', () => {
+  test('calls generate(messages, tools) instead of generateRaw', async () => {
+    const adapter = new MockNativeAdapter([
+      makeTurn({ content: 'Hello from native!' }),
+    ])
+
+    const orch = new Orchestrator({ adapter: adapter as any })
+    const result = await toPromise(orch.chat('Hi'))
+
+    expect(turnContent(result.turn)).toBe('Hello from native!')
+    expect(adapter.calls).toHaveLength(1)
+    // First message should be system prompt
+    expect(adapter.calls[0]!.messages[0]!.role).toBe('system')
+    // Last message should be user input
+    const msgs = adapter.calls[0]!.messages
+    expect(msgs[msgs.length - 1]).toMatchObject({ role: 'user', content: 'Hi' })
+  })
+
+  test('passes registered tools to generate()', async () => {
+    const adapter = new MockNativeAdapter([
+      makeTurn({ content: 'Done.' }),
+    ])
+
+    const orch = new Orchestrator({ adapter: adapter as any })
+    // mode and done tools are always registered; register one more
+    orch.registerTool(
+      { name: 'test_tool', description: 'A test tool', parameters: { type: 'object', properties: {} } },
+      async () => ({ ok: true, value: 'ok' } as any),
+    )
+
+    await toPromise(orch.chat('Do something'))
+
+    const toolNames = adapter.calls[0]!.tools?.map(t => t.name) ?? []
+    expect(toolNames).toContain('test_tool')
+  })
+
+  test('tool call round-trip: model calls tool, result fed back as tool_result message', async () => {
+    const adapter = new MockNativeAdapter([
+      makeTurn({ toolCalls: [{ name: 'mode', arguments: { mode: 'agent' } }] }),
+      makeTurn({ content: 'Switched.' }),
+    ])
+
+    const orch = new Orchestrator({ adapter: adapter as any })
+    const result = await toPromise(orch.chat('Switch to agent mode'))
+
+    expect(result.toolsExecuted).toHaveLength(1)
+    expect(result.toolsExecuted[0]!.call.name).toBe('mode')
+    expect(orch.getMode().kind).toBe('agent')
+
+    // Second generate() call should include tool_result message in history
+    expect(adapter.calls).toHaveLength(2)
+    const secondCallMsgs = adapter.calls[1]!.messages
+    const hasToolResult = secondCallMsgs.some(m => m.role === 'tool_result')
+    expect(hasToolResult).toBe(true)
+  })
+
+  test('system messages are included in native path', async () => {
+    const adapter = new MockNativeAdapter([
+      makeTurn({ content: 'Hi!' }),
+    ])
+
+    const orch = new Orchestrator({ adapter: adapter as any })
+    await toPromise(orch.chat('Hello'))
+
+    const systemMsg = adapter.calls[0]!.messages.find(m => m.role === 'system')
+    expect(systemMsg).toBeDefined()
+    expect(systemMsg!.content.length).toBeGreaterThan(0)
+  })
+
+  test('multi-turn: second message includes prior chat history', async () => {
+    const adapter = new MockNativeAdapter([
+      makeTurn({ content: 'First response.' }),
+      makeTurn({ content: 'Second response.' }),
+    ])
+
+    const orch = new Orchestrator({ adapter: adapter as any })
+    await toPromise(orch.chat('Turn one'))
+    await toPromise(orch.chat('Turn two'))
+
+    expect(adapter.calls).toHaveLength(2)
+    const secondCallMsgs = adapter.calls[1]!.messages.filter(m => m.role !== 'system')
+    // Should have: user(turn1), assistant(first response), user(turn2)
+    expect(secondCallMsgs.length).toBeGreaterThanOrEqual(3)
+    const userMsgs = secondCallMsgs.filter(m => m.role === 'user')
+    expect(userMsgs.some(m => m.content === 'Turn one')).toBe(true)
+    expect(userMsgs.some(m => m.content === 'Turn two')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Template path still works (supportsNativeTools absent/false)
+// ---------------------------------------------------------------------------
+
+describe('Orchestrator template path (no supportsNativeTools)', () => {
+  class TemplateAdapter extends KoboldAdapter {
+    readonly generateRawCalls: string[] = []
+
+    constructor(private readonly turns: ParsedTurn[]) {
+      super({ apiServer: 'http://localhost', template: Profiles.qwen })
+    }
+
+    private index = 0
+    override async generateRaw(prompt: string): Promise<ParsedTurn> {
+      this.generateRawCalls.push(prompt)
+      const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]!
+      this.index++
+      return turn
+    }
+  }
+
+  test('calls generateRaw when supportsNativeTools is absent', async () => {
+    const adapter = new TemplateAdapter([makeTurn({ content: 'Template response.' })])
+    const orch = new Orchestrator({ adapter })
+
+    const result = await toPromise(orch.chat('Hello'))
+
+    expect(turnContent(result.turn)).toBe('Template response.')
+    expect(adapter.generateRawCalls).toHaveLength(1)
+    expect(adapter.generateRawCalls[0]!.length).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Router: gemini-native and gemini-interactions provider resolution
+// ---------------------------------------------------------------------------
+
+describe('ModelRouter Gemini providers', () => {
+  test('gemini-native resolves without throwing', () => {
+    const router = ModelRouter.fromLegacyEnv({
+      apiType: 'gemini-native',
+      apiServer: 'https://generativelanguage.googleapis.com',
+      apiKey: 'fake-key',
+      model: 'gemini-3.1-flash-lite-preview',
+    })
+    const adapter = router.getAdapter('default')
+    expect(adapter).toBeDefined()
+    expect((adapter as any).supportsNativeTools).toBe(true)
+  })
+
+  test('gemini-interactions resolves without throwing', () => {
+    const router = ModelRouter.fromLegacyEnv({
+      apiType: 'gemini-interactions',
+      apiServer: 'https://generativelanguage.googleapis.com',
+      apiKey: 'fake-key',
+      model: 'gemini-3-flash-preview',
+    })
+    const adapter = router.getAdapter('default')
+    expect(adapter).toBeDefined()
+    expect((adapter as any).supportsNativeTools).toBe(true)
+  })
+
+  test('gemini-interactions store=false does not set previousInteractionId', () => {
+    const adapter = new GeminiInteractionsAdapter({
+      apiKey: 'fake',
+      model: 'gemini-3-flash-preview',
+      template: Profiles.qwen,
+      store: false,
+    })
+    expect((adapter as any).previousInteractionId).toBeUndefined()
+    adapter.resetSession()
+    expect((adapter as any).previousInteractionId).toBeUndefined()
+  })
+
+  test('gemini-interactions store=true (default) tracks previousInteractionId', () => {
+    const adapter = new GeminiInteractionsAdapter({
+      apiKey: 'fake',
+      model: 'gemini-3-flash-preview',
+      template: Profiles.qwen,
+    })
+    ;(adapter as any).previousInteractionId = 'fake-session-id'
+    expect((adapter as any).previousInteractionId).toBe('fake-session-id')
+
+    adapter.resetSession()
+    expect((adapter as any).previousInteractionId).toBeUndefined()
+  })
+})
