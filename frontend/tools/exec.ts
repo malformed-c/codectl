@@ -320,6 +320,12 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
 
     try {
       const { stdout, stderr, exitCode } = await sh.exec(command, timeout)
+      if (exitCode !== 0) {
+        // Non-zero exit codes are errors — include stdout/stderr so the model
+        // sees what went wrong without needing a separate read.
+        const detail = [stderr, stdout].filter(Boolean).join('\n').trim()
+        return err(`exit ${exitCode}${detail ? ': ' + detail : ''}`)
+      }
       return ok({ stdout, stderr, exitCode, cwd: sh.getCwd() })
     } catch (e) {
       return err(String(e))
