@@ -252,7 +252,18 @@ function toFunctionDeclarations(tools: ToolDefinition[]): unknown[] {
 function messagesToSDKContents(messages: Message[]): SDKContent[] {
   const out: SDKContent[] = []
   for (const m of messages) {
-    if (m.role === 'system') continue
+    if (m.role === 'system') {
+      // The first system message is already passed as systemInstruction — skip it.
+      // Subsequent system messages (corrections, nudges) need to reach the model.
+      // Gemini requires strict user/model alternation so we can't inject a bare
+      // user turn — instead append to the last user/tool_result part if possible.
+      if (out.length === 0) continue
+      const last = out[out.length - 1]
+      if (last && (last.role === 'user')) {
+        last.parts = [...last.parts, { text: `\n[System: ${m.content}]` }]
+      }
+      continue
+    }
 
     if (m.calls?.length) {
       // Assistant message with function calls.
