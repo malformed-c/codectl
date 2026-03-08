@@ -10,3 +10,4 @@ available_models:
   - "models/sample-model.yaml"
 
 tool_format: "typescript"  # json | typescript | python
+graph_memory_path: ./memory.db
