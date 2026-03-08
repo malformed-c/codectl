@@ -48,11 +48,18 @@ function mainValue(result: ToolResult): string {
 /**
  * Build a flat map of substitution variables for a completed step.
  *
- *   $_N        → main string value (stdout / string / JSON)
- *   $_N.field  → individual fields of an object result
- *   $_prev     → same as $_N (always points to the last step)
- *   $name      → same as $_N when step.as is set
- *   $name.field
+ *   $_N         → main string value (stdout / content / string / JSON)
+ *   $_N.field   → individual fields of an object result
+ *   $_N.stdout  → always an alias for the main value (universal, works for any tool)
+ *   $_prev      → same as $_N (always points to the last step)
+ *   $name       → same as $_N when step.as is set
+ *   $name.field / $name.stdout
+ *
+ * The `.stdout` universal alias exists so the model can use `$name.stdout`
+ * consistently across bash (native stdout field) and other tools like memory
+ * (which have a `content` field). For bash results both `$name.stdout` and
+ * `$name.content` point to the real stdout string; for memory both point to
+ * the stored content string.
  */
 function stepVars(result: ToolResult, index: number, as?: string): Record<string, string> {
   const vars: Record<string, string> = {}
@@ -70,6 +77,14 @@ function stepVars(result: ToolResult, index: number, as?: string): Record<string
       vars[`${nKey}.${k}`] = fieldStr
       if (as) vars[`${as}.${k}`] = fieldStr
     }
+  }
+
+  // Always expose `.stdout` as an alias for the main value so the model can
+  // use `$name.stdout` uniformly regardless of which tool produced the step.
+  // Only set if not already populated by a native `stdout` field above.
+  if (!(`${nKey}.stdout` in vars)) {
+    vars[`${nKey}.stdout`] = main
+    if (as && !(`${as}.stdout` in vars)) vars[`${as}.stdout`] = main
   }
 
   return vars
