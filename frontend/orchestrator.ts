@@ -185,6 +185,7 @@ export const LibraryTool: ToolDefinition = {
       prefix: {
         type: 'string',
         description: 'Optional prefix to filter tools by name.',
+        aliases: ['value', 'filter', 'query'],
       },
     },
     required: [],

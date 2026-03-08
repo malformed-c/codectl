@@ -397,6 +397,16 @@ export function parseToolCalls(raw: string): ToolCall[] {
       return [{ name: bareCall[1]!, arguments: {} }]
     }
 
+    // name(args) function-call syntax — e.g. tool_library("memory") or bash({"command":"ls"})
+    // Try to extract the content of the outermost parens and parse it as args.
+    const funcCall = text.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([\s\S]*)\)\s*$/)
+    if (funcCall) {
+      const name = funcCall[1]!
+      const inner = funcCall[2]!.trim()
+      const args = parseArguments(inner)
+      return [{ name, arguments: args }]
+    }
+
     // If not JSON and not rich format, maybe it's just a tool name? (not recommended)
     throw new Error(`Unrecognized tool call format: ${text}`)
   }

@@ -49,4 +49,22 @@ describe('parseToolCalls', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toEqual({ name: 'bash', arguments: { command: 'ls' } })
   })
+
+  test('parses function-call syntax with quoted string arg', () => {
+    const calls = parseToolCalls('tool_library("memory")')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({ name: 'tool_library', arguments: { value: 'memory' } })
+  })
+
+  test('parses function-call syntax with JSON object arg', () => {
+    const calls = parseToolCalls('bash({"command": "ls -la"})')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({ name: 'bash', arguments: { command: 'ls -la' } })
+  })
+
+  test('parses bare name() with no args', () => {
+    const calls = parseToolCalls('tool_library()')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({ name: 'tool_library', arguments: {} })
+  })
 })
