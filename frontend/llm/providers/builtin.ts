@@ -87,10 +87,15 @@ export class GeminiNativeProvider implements ModelProvider {
   readonly providerType = 'gemini-native'
 
   build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
+    // Gemini 3+ models think by default; explicitly enabling ensures correct
+    // thought_signature handling in multi-turn function calling.
+    const isGemini3 = modelName.startsWith('gemini-3') || modelName.startsWith('gemini-2.5')
     return new GeminiNativeAdapter({
-      apiKey:   apiKey ?? '',
-      model:    modelName,
-      template: Profiles.qwen,
+      apiKey:        apiKey ?? '',
+      model:         modelName,
+      template:      Profiles.qwen,
+      thinking:      isGemini3,
+      thinkingLevel: 'low',
     })
   }
 }
