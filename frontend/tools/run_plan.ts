@@ -86,13 +86,11 @@ export function createRunPlanHandler(
       return err(formatRunPlanFailure(result))
     }
 
-    return {
-      result: {
-        ok: true,
-        written: result.written ?? [],
-        ansibleReport: result.ansibleReport ?? null,
-      },
-    }
+    return ok({
+      ok: true,
+      written: result.written ?? [],
+      ansibleReport: result.ansibleReport ?? null,
+    })
   }
 }
 
