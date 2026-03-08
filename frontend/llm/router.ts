@@ -14,7 +14,7 @@
 import consola from 'consola'
 import type { LLMAdapter } from '../orchestrator'
 import type { ModelConfig, ProviderConfig, ModelProvider, CapabilityKey } from './protocol'
-import { KoboldProvider, OpenAIChatProvider, OpenAITextProvider } from './providers/builtin'
+import { KoboldProvider, OpenAIChatProvider, OpenAITextProvider, GeminiNativeProvider, GeminiInteractionsProvider } from './providers/builtin'
 
 // ---------------------------------------------------------------------------
 // Config shape (subset of config.yaml)
@@ -264,6 +264,8 @@ export class ModelRouter {
     this.registerProvider(new KoboldProvider())
     this.registerProvider(new OpenAIChatProvider())
     this.registerProvider(new OpenAITextProvider())
+    this.registerProvider(new GeminiNativeProvider())
+    this.registerProvider(new GeminiInteractionsProvider())
   }
 
   private _resolveKey(cfg: ProviderConfig): string | null {

@@ -9,6 +9,7 @@ import type { ModelProvider, ProviderConfig } from '../protocol'
 import type { LLMAdapter } from '../../orchestrator'
 import { KoboldAdapter } from '../../kobold'
 import { OpenAIChatAdapter, OpenAITextAdapter } from '../../openai'
+import { GeminiNativeAdapter, GeminiInteractionsAdapter } from '../../gemini'
 import { Profiles } from '../../template'
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,34 @@ export class OpenAITextProvider implements ModelProvider {
       apiServer: config.baseUrl ?? 'https://api.openai.com/v1',
       apiKey: apiKey ?? '',
       model: modelName,
+      template: Profiles.qwen,
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Gemini providers
+// ---------------------------------------------------------------------------
+
+export class GeminiNativeProvider implements ModelProvider {
+  readonly providerType = 'gemini-native'
+
+  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
+    return new GeminiNativeAdapter({
+      apiKey:   apiKey ?? '',
+      model:    modelName,
+      template: Profiles.qwen,
+    })
+  }
+}
+
+export class GeminiInteractionsProvider implements ModelProvider {
+  readonly providerType = 'gemini-interactions'
+
+  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
+    return new GeminiInteractionsAdapter({
+      apiKey:   apiKey ?? '',
+      model:    modelName,
       template: Profiles.qwen,
     })
   }

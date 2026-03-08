@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
 import type { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
+import type { GeminiNativeAdapter, GeminiInteractionsAdapter } from './gemini'
 import type { ParsedTurn, TextTemplate } from './template'
 import { turnContent, turnThink, turnToolCalls } from './template'
 import type { StoredToolCall, StoredToolResult } from './types'
@@ -57,7 +58,7 @@ export type ToolHandler = (
   args: Record<string, unknown>
 ) => Promise<ToolResult>
 
-export type LLMAdapter = KoboldAdapter | OpenAIChatAdapter | OpenAITextAdapter
+export type LLMAdapter = KoboldAdapter | OpenAIChatAdapter | OpenAITextAdapter | GeminiNativeAdapter | GeminiInteractionsAdapter
 
 export type OrchestratorConfig = {
   adapter: LLMAdapter

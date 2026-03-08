@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   const router = ModelRouter.fromLegacyEnv({
     apiType:   process.env.API_TYPE       ?? config.api_type   ?? 'koboldcpp',
     apiServer: process.env.BASE_URL       ?? config.api_server,
-    apiKey:    process.env.OPENAI_API_KEY ?? process.env.GEMINI_API_KEY ?? '',
+    apiKey:    process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY ?? '',
     model:     process.env.MODEL          ?? config.default_model,
   })
   const adapter = router.getAdapter('default')
