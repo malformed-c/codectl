@@ -58,7 +58,6 @@ function flattenRound(s: SerializedRound, out: Message[]): void {
 
     case 'tool': {
       // Assistant message with function calls
-      consola.debug('[flattenRound] tool case: calls=', s.calls?.length, 'results=', s.results?.length, 'raw results:', JSON.stringify(s.results))
       if (s.calls.length) {
         out.push({
           role: 'model',

@@ -77,10 +77,6 @@ export class GeminiNativeAdapter {
     })
     const candidate = response.candidates?.[0]
     consola.debug('[gemini] finishReason:', (candidate as any)?.finishReason, 'parts:', candidate?.content?.parts?.length)
-    const contents = messagesToSDKContents(messages)
-    if (contents.some((c: SDKContent) => c.parts?.some((p: SDKPart) => p.functionResponse))) {
-      consola.debug('[gemini] sent contents:', JSON.stringify(contents, null, 2))
-    }
     return parseSDKResponse(candidate?.content?.parts ?? [])
   }
 
@@ -256,7 +252,6 @@ function toFunctionDeclarations(tools: ToolDefinition[]): unknown[] {
 function messagesToSDKContents(messages: Message[]): SDKContent[] {
   const out: SDKContent[] = []
   for (const m of messages) {
-    consola.debug('[gemini:msg] role:', m.role, 'results?:', m.results?.length, 'calls?:', m.calls?.length)
     if (m.role === 'system') {
       // The first system message is already passed as systemInstruction — skip it.
       // Subsequent system messages (corrections, nudges) need to reach the model.
