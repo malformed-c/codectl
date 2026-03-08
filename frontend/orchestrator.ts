@@ -29,6 +29,7 @@ import { GraphMemory, GraphMemoryTool, createGraphMemoryHandler } from "./memory
 import { AskTool, MessageTool, AskChannel, createAskHandler, createMessageHandler } from "./tools/ask"
 import { createCallIdCacheHandler } from "./tools/callid-cache"
 import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
+import { PipeTool, createPipeHandler } from "./tools/pipe"
 import { ValidatePlanTool, createValidatePlanHandler } from "./tools/validate_plan"
 import { TransformTools, createTransformHandlers } from "./tools/transform"
 import type { CodePlan } from "./codeplan.schema"
@@ -329,6 +330,13 @@ export class Orchestrator {
       this.config,
       this.askChannel,
       (content) => this.fsm.onSystem(`[Subagent] ${content}`),
+    ))
+
+    // Pipe tool: pass a bound executor so pipe steps go through the full
+    // alias/memory-interpolation/callId-cache pipeline without needing
+    // to expose executeToolCall publicly.
+    this.registerTool(PipeTool, createPipeHandler(
+      (name, args) => this.executeToolCall({ name, arguments: args })
     ))
 
     // --- Tool-set registrations (def + handler paired by name) ---
