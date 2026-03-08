@@ -77,6 +77,10 @@ export class GeminiNativeAdapter {
     })
     const candidate = response.candidates?.[0]
     consola.debug('[gemini] finishReason:', (candidate as any)?.finishReason, 'parts:', candidate?.content?.parts?.length)
+    const contents = messagesToSDKContents(messages)
+    if (contents.some((c: SDKContent) => c.parts?.some((p: SDKPart) => p.functionResponse))) {
+      consola.debug('[gemini] sent contents:', JSON.stringify(contents, null, 2))
+    }
     return parseSDKResponse(candidate?.content?.parts ?? [])
   }
 
