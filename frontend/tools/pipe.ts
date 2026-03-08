@@ -170,8 +170,14 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
         return err(`Step ${i}: missing 'tool'`)
       }
 
+      // Tolerate model putting `as` inside args instead of at the step level.
+      // Hoist it out so scope gets the correct name without penalising the model.
+      const rawArgs = { ...(step.args ?? {}) } as Record<string, unknown>
+      const stepAs: string | undefined = step.as
+        ?? (typeof rawArgs.as === 'string' ? rawArgs.as : undefined)
+      if (stepAs) delete rawArgs.as
+
       // Interpolate $-refs from previous step outputs into this step's args
-      const rawArgs = (step.args ?? {}) as Record<string, unknown>
       const resolvedArgs = interpolate(rawArgs, scope)
 
       consola.debug(`[pipe] step ${i}: ${step.tool}`, resolvedArgs)
@@ -188,7 +194,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
 
       if (result.ok) {
         // Merge this step's variables into scope for subsequent steps
-        Object.assign(scope, stepVars(result, i, step.as))
+        Object.assign(scope, stepVars(result, i, stepAs))
       } else {
         failedAt = i
         consola.warn(`[pipe] step ${i} (${step.tool}) failed: ${result.error}`)
