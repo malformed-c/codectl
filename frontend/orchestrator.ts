@@ -718,16 +718,23 @@ export class Orchestrator {
    * the WeakMap cache entry in RenderCache.
    */
   private _rebuildEnrichedSystem(): void {
-    const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
-    const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
-    const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
-    const toolsBlock = this.profile.availableTools
-      ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
-      : ''
+    const isNative = 'supportsNativeTools' in this.adapter && (this.adapter as any).supportsNativeTools
 
     const sysContent = this._systemRound.spans({ age: 0, memory: new Map(), budget: Infinity })
       .map(s => s.text).join('')
-    const fullContent = joinWithBoundaryNormalization([sysContent, toolsBlock])
+
+    // Native adapters receive tool definitions as function declarations — no text block needed.
+    const fullContent = isNative
+      ? sysContent
+      : (() => {
+          const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
+          const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
+          const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
+          const toolsBlock = this.profile.availableTools
+            ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
+            : ''
+          return joinWithBoundaryNormalization([sysContent, toolsBlock])
+        })()
 
     this._enrichedSystemRound = makeSystemRound(fullContent)
     this._enrichedSystemRound.count = fullContent.length
@@ -870,11 +877,28 @@ export class Orchestrator {
 
   /**
    * Default system prompt used when OrchestratorConfig.systemPrompt is not set.
-   * Describes the two modes (chat/agent), the think-block format, and tool-call syntax.
-   * Override via config.systemPrompt if you need custom instructions.
+   * Native adapters (supportsNativeTools) get a clean prompt with no template scaffolding.
+   * Template-based adapters get the full think-block + tool-call syntax instructions.
    */
-  // TODO unhardcode
   private defaultSystemPrompt(): string {
+    const isNative = 'supportsNativeTools' in this.adapter && (this.adapter as any).supportsNativeTools
+
+    if (isNative) {
+      return [
+        "You're the orchestrator in the codectl agentic system.",
+        "",
+        "Modes:",
+        "  chat - general conversation (single-turn)",
+        "  agent - autonomous tool loop; call 'done' when task is complete.",
+        "Ejected back to chat after 3 consecutive tool failures.",
+        "",
+        "Think through your response carefully before answering.",
+        "Format your response using Markdown. Use LaTeX for mathematical equations.",
+        "Tools are your hands - always acknowledge results.",
+        "You can call multiple tools in one turn.",
+      ].join('\n')
+    }
+
     return [
       "You're the orchestrator in the codectl agentic system.",
       "",
