@@ -877,8 +877,12 @@ export class Orchestrator {
     // --- Automatic Call-ID Resolution ---
     for (const [key, val] of Object.entries(resolvedArgs)) {
       if (typeof val === 'string' && this.callIdCache.has(val)) {
-        const cachedValue = this.callIdCache.get(val)
-        resolvedArgs[key] = cachedValue
+        const cachedValue = this.callIdCache.get(val)!
+        try {
+          resolvedArgs[key] = JSON.parse(cachedValue)
+        } catch {
+          resolvedArgs[key] = cachedValue
+        }
         consola.debug(`Auto-resolved arg '${key}': ${val} -> (cached value)`)
       }
     }
