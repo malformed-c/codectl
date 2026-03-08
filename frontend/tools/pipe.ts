@@ -38,8 +38,9 @@ function mainValue(result: ToolResult): string {
   if (typeof v === 'string') return v
   if (v && typeof v === 'object') {
     const obj = v as Record<string, unknown>
-    if (typeof obj.stdout === 'string') return obj.stdout
-    if (typeof obj.output === 'string') return obj.output
+    if (typeof obj.stdout  === 'string') return obj.stdout   // bash / exec
+    if (typeof obj.output  === 'string') return obj.output
+    if (typeof obj.content === 'string') return obj.content  // memory get
   }
   return JSON.stringify(v)
 }
@@ -131,12 +132,8 @@ export const PipeTool: ToolDefinition = {
     required: ['steps'],
   },
   returns: {
-    type: 'object',
-    properties: {
-      results:   { type: 'array',   description: 'Per-step results.' },
-      final:     { type: 'object',  description: 'Last step\'s result value.' },
-      failed_at: { type: 'number',  description: 'Index of the first failed step, if any.' },
-    },
+    type: 'array',
+    description: 'Per-step results. Each item: {tool, ok, value?, error?}.',
   },
 }
 
@@ -202,13 +199,10 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
       }
     }
 
-    const lastResult = results.at(-1)
-    const finalValue = lastResult?.ok ? lastResult.value : undefined
-
-    return ok({
-      results,
-      final: finalValue,
-      ...(failedAt !== undefined ? { failed_at: failedAt } : {}),
-    })
+    // Return the results array directly — wrapping in { results: [...] } creates
+    // an extra level of nesting in history (value.results) that is harder to read.
+    // Individual step objects carry ok/error/value, so failed_at and final are
+    // derivable by the model from the array itself.
+    return ok(results)
   }
 }
