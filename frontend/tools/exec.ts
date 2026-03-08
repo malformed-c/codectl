@@ -214,8 +214,8 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
       const { stdout, stderr, exitCode } = await sh.exec(command, timeout)
       return ok({ stdout, stderr, exitCode, cwd: sh.getCwd()})
 
-    } catch (err) {
-      return err(String(err))
+    } catch (e) {
+      return err(String(e))
     }
   }
 
@@ -233,8 +233,8 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
 
       return ok({ stdout, stderr, exitCode: proc.exitCode})
 
-    } catch (err) {
-      return err(String(err))
+    } catch (e) {
+      return err(String(e))
     }
   }
 
@@ -253,8 +253,8 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
 
       return ok({ stdout, stderr, exitCode: proc.exitCode})
 
-    } catch (err) {
-      return err(String(err))
+    } catch (e) {
+      return err(String(e))
     }
   }
 

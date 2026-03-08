@@ -132,8 +132,8 @@ export function createAskHandler(channel: AskChannel): ToolHandler {
 
       return ok({ answer})
 
-    } catch (err) {
-      return err(String(err))
+    } catch (e) {
+      return err(String(e))
     }
   }
 }

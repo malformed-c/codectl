@@ -62,8 +62,8 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
     let parsed: unknown
     try {
       parsed = typeof raw === 'string' ? destr(raw as string) : raw
-    } catch (err) {
-      return err(`Invalid JSON: ${err}`)
+    } catch (e) {
+      return err(`Invalid JSON: ${e}`)
     }
 
     // Auto-unwrap common LLM mistakes - the model may pass the array directly,
@@ -91,8 +91,8 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
       onValidated(undefined, errors)
       return ok({ valid: false, errors})
 
-    } catch (err) {
-      return err(`Schema validation failed: ${err}`)
+    } catch (e) {
+      return err(`Schema validation failed: ${e}`)
     }
   }
 }

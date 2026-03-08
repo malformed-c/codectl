@@ -52,8 +52,8 @@ export function createRunPlanHandler(
     try {
       parsed = typeof raw === 'string' ? destr(raw as string) : raw
 
-    } catch (err) {
-      return err(`Invalid JSON: ${err}`)
+    } catch (e) {
+      return err(`Invalid JSON: ${e}`)
     }
 
     // auto-unwrap common LLM mistake
