@@ -3,7 +3,7 @@ import { ok, err } from '../tool'
 import type { ToolHandler } from '../orchestrator'
 import type { CodePlan } from '../codeplan.schema'
 import { codePlanSchema } from '../codeplan.schema'
-import destr from 'destr'
+import { parsePlan } from './plan_parse'
 
 // --- Types ---
 
@@ -59,38 +59,9 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return err("'plan' argument is required")
 
-    // Parse: try JSON.parse first (throws on failure), fall back to destr
-    // (returns input unchanged on failure - so check after).
-    let parsed: unknown = raw
-    if (typeof raw === 'string') {
-      try { parsed = JSON.parse(raw) } catch {
-        parsed = destr(raw)
-        // destr returns the original string on failure — treat as parse error
-        if (typeof parsed === 'string') return err(`Invalid JSON: could not parse plan string`)
-      }
-    }
-
-    // Auto-unwrap common LLM mistakes. Apply recursively: a string value inside
-    // a wrapper object should itself be parsed as JSON before unwrapping.
-    function maybeParseString(v: unknown): unknown {
-      if (typeof v !== 'string') return v
-      try { return JSON.parse(v) } catch { return v }
-    }
-
-    function unwrap(v: unknown): unknown {
-      if (!v || typeof v !== 'object' || Array.isArray(v)) return v
-      const o = v as Record<string, unknown>
-      // Already correct shape
-      if (o.codePlan) return v
-      // Nested under .plan
-      if (o.plan) return unwrap(maybeParseString(o.plan))
-      // Nested under .value
-      if (o.value) return unwrap(maybeParseString(o.value))
-      return v
-    }
-
-    const unwrapped = unwrap(parsed)
-    const normalized = Array.isArray(unwrapped) ? { codePlan: unwrapped } : unwrapped
+    const planResult = parsePlan(raw)
+    if (!planResult.ok) return err(planResult.error)
+    const normalized = planResult.value
 
     try {
       const result = codePlanSchema.safeParse(normalized)

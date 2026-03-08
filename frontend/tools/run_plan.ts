@@ -6,7 +6,7 @@ import { runPlan } from '../plan_runner'
 import type { CodePlan } from '../codeplan.schema'
 import { codePlanSchema } from '../codeplan.schema'
 import type { PlanRunResult } from '../plan_runner'
-import destr from 'destr'
+import { parsePlan } from './plan_parse'
 
 export const RunPlanTool: ToolDefinition = {
   name: 'run_plan',
@@ -48,20 +48,9 @@ export function createRunPlanHandler(
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
     if (!raw) return err("'plan' argument is required")
 
-    let parsed: unknown
-    try {
-      parsed = typeof raw === 'string' ? destr(raw as string) : raw
-
-    } catch (e) {
-      return err(`Invalid JSON: ${e}`)
-    }
-
-    // auto-unwrap common LLM mistake
-    const normalized =
-      parsed?.codePlan ? parsed :
-        parsed?.plan?.codePlan ? parsed.plan :
-          parsed?.value?.codePlan ? parsed.value :
-            parsed
+    const planResult = parsePlan(raw)
+    if (!planResult.ok) return err(planResult.error)
+    const normalized = planResult.value
 
     const validated = codePlanSchema.safeParse(normalized)
     if (!validated.success) {

@@ -10,7 +10,8 @@ import type { ToolHandler } from '../orchestrator'
 export function createCallIdCacheHandler(cache: Map<string, string>): ToolHandler {
   return async (args) => {
     const action = args.action as string
-    const id = args.id as string | undefined
+    const rawId = args.id as string | undefined
+    const id = rawId?.startsWith('$') ? rawId.slice(1) : rawId
     const value = args.value as string | undefined
 
     switch (action) {

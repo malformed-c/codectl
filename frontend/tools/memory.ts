@@ -32,8 +32,15 @@ type MemoryStore = {
 export function createMemoryHandler(memory: MemoryStore): ToolHandler {
   return async (args) => {
     const action = args.action as string
-    const key = args.key as string | undefined
-    const content = args.content as string | undefined
+    // Strip leading $ if model passes key as "$foo" (intent is the key name, not a ref)
+    const rawKey = args.key as string | undefined
+    const key = rawKey?.startsWith('$') ? rawKey.slice(1) : rawKey
+    // Coerce content to string: objects → JSON, numbers/booleans → String()
+    const rawContent = args.content
+    const content: string | undefined = rawContent === undefined ? undefined
+      : typeof rawContent === 'string' ? rawContent
+      : typeof rawContent === 'object' ? JSON.stringify(rawContent)
+      : String(rawContent)
 
     switch (action) {
       case 'set':
