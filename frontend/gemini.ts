@@ -308,7 +308,7 @@ if (import.meta.main) {
   consola.log('\n=== GeminiNativeAdapter (thinking) ===')
   const thinking = new GeminiNativeAdapter({
     apiKey,
-    model: 'gemini-2.5-flash-preview-04-17',
+    model: 'gemini-3.1-flash-lite-preview',
     template: Profiles.qwen,
     maxTokens: 500,
     thinking: true,
