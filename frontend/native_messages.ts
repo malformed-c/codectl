@@ -7,6 +7,7 @@
  * with tool calls and results as first-class fields.
  */
 
+import consola from 'consola'
 import type { Message } from './template'
 import type { Round } from './round'
 import type { SerializedRound } from './round'
@@ -57,6 +58,7 @@ function flattenRound(s: SerializedRound, out: Message[]): void {
 
     case 'tool': {
       // Assistant message with function calls
+      consola.debug('[flattenRound] tool case: calls=', s.calls?.length, 'results=', s.results?.length, 'raw results:', JSON.stringify(s.results))
       if (s.calls.length) {
         out.push({
           role: 'model',
