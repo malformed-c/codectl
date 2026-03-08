@@ -119,7 +119,7 @@ describe('Orchestrator native path (supportsNativeTools)', () => {
 
     expect(adapter.calls).toHaveLength(2)
     const secondCallMsgs = adapter.calls[1]!.messages.filter(m => m.role !== 'system')
-    // Should have: user(turn1), assistant(first response), user(turn2)
+    // Should have: user(turn1), model(first response), user(turn2)
     expect(secondCallMsgs.length).toBeGreaterThanOrEqual(3)
     const userMsgs = secondCallMsgs.filter(m => m.role === 'user')
     expect(userMsgs.some(m => m.content === 'Turn one')).toBe(true)
@@ -212,5 +212,170 @@ describe('ModelRouter Gemini providers', () => {
 
     adapter.resetSession()
     expect((adapter as any).previousInteractionId).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// messagesToSDKContents — unit tests for the bugs found in production
+// ---------------------------------------------------------------------------
+
+import { messagesToSDKContents } from '../gemini'
+import type { Message } from '../template'
+
+describe('messagesToSDKContents', () => {
+  test('tool_result with calls[] emits functionResponse (not functionCall)', () => {
+    // Regression: tool_result messages carry calls[] for name recovery.
+    // A branch ordering bug caused them to hit the functionCall branch instead.
+    const messages: Message[] = [
+      {
+        role: 'model',
+        content: '',
+        calls: [{ tool: 'validate_plan', plan: '{}' }],
+      },
+      {
+        role: 'tool_result',
+        content: '',
+        calls: [{ tool: 'validate_plan', plan: '{}' }],
+        results: [{ value: '{"valid":true}' }],
+      },
+    ]
+
+    const contents = messagesToSDKContents(messages)
+    const toolResultContent = contents.find(c =>
+      c.parts?.some((p: any) => p.functionResponse),
+    )
+
+    expect(toolResultContent).toBeDefined()
+    expect(toolResultContent!.role).toBe('user')
+
+    const part = toolResultContent!.parts.find((p: any) => p.functionResponse) as any
+    expect(part.functionResponse.name).toBe('validate_plan')
+    expect(part.functionResponse.response.output).toBe('{"valid":true}')
+  })
+
+  test('model message with calls[] emits functionCall parts', () => {
+    const messages: Message[] = [
+      {
+        role: 'model',
+        content: '',
+        calls: [{ tool: 'bash', command: 'ls' }],
+      },
+    ]
+
+    const contents = messagesToSDKContents(messages)
+    const modelContent = contents.find(c => c.role === 'model')
+    expect(modelContent).toBeDefined()
+
+    const part = modelContent!.parts.find((p: any) => p.functionCall) as any
+    expect(part).toBeDefined()
+    expect(part.functionCall.name).toBe('bash')
+  })
+
+  test('object tool result values are JSON-stringified', () => {
+    // Regression: Gemini proto rejects nested arrays inside functionResponse.
+    // Object values must be stringified.
+    const messages: Message[] = [
+      {
+        role: 'model',
+        content: '',
+        calls: [{ tool: 'run_plan' }],
+      },
+      {
+        role: 'tool_result',
+        content: '',
+        calls: [{ tool: 'run_plan' }],
+        results: [{ value: { ok: true, written: ['a.ts', 'b.ts'], ansibleReport: null } }],
+      },
+    ]
+
+    const contents = messagesToSDKContents(messages)
+    const part = contents
+      .flatMap(c => c.parts)
+      .find((p: any) => p.functionResponse) as any
+
+    expect(typeof part.functionResponse.response.output).toBe('string')
+    const parsed = JSON.parse(part.functionResponse.response.output)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.written).toEqual(['a.ts', 'b.ts'])
+  })
+
+  test('mid-conversation system message is appended to last user part', () => {
+    // Gemini requires strict alternation — inline system turns are appended
+    // to the last user/tool_result part as extra text.
+    const messages: Message[] = [
+      { role: 'system', content: 'System prompt' },
+      { role: 'user', content: 'Hello' },
+      { role: 'model', content: 'Hi' },
+      { role: 'system', content: 'Please respond to the user.' },
+    ]
+
+    const contents = messagesToSDKContents(messages)
+    // The injected system message should be appended to the last user/model part
+    // that is role=user (or last part of role=user).
+    // In this case there's no tool_result, so it should append to the 'model' turn... 
+    // Actually per our code: appends to last 'user' role in out[].
+    // Here last role='user' is 'Hello', so it gets appended there.
+    const userContent = contents.find(c => c.role === 'user')
+    const hasNudge = userContent?.parts?.some((p: any) =>
+      typeof p.text === 'string' && p.text.includes('Please respond to the user.'),
+    )
+    expect(hasNudge).toBe(true)
+  })
+
+  test('long string results are truncated at MAX_RESULT chars', () => {
+    const longValue = 'x'.repeat(10000)
+    const messages: Message[] = [
+      { role: 'model', content: '', calls: [{ tool: 'tool_library' }] },
+      {
+        role: 'tool_result',
+        content: '',
+        calls: [{ tool: 'tool_library' }],
+        results: [{ value: longValue }],
+      },
+    ]
+
+    const contents = messagesToSDKContents(messages)
+    const part = contents
+      .flatMap(c => c.parts)
+      .find((p: any) => p.functionResponse) as any
+
+    expect(part.functionResponse.response.output.length).toBeLessThan(longValue.length)
+    expect(part.functionResponse.response.output.endsWith('...(truncated)')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Orchestrator empty response nudge
+// ---------------------------------------------------------------------------
+
+describe('Orchestrator empty response nudge', () => {
+  test('injects system nudge and retries when model returns completely empty response', async () => {
+    // Regression: Gemini sometimes returns empty parts (no text, no calls) after
+    // tool results. The orchestrator should nudge and retry rather than committing
+    // empty agent rounds.
+    let callCount = 0
+    const adapter = new MockNativeAdapter([
+      // First call: make a tool call
+      makeTurn({ toolCalls: [{ name: 'mode', arguments: { mode: 'agent' } }] }),
+      // Second call (after tool result): return empty — triggers nudge
+      { steps: [] } as any,
+      // Third call (after nudge): return real content
+      makeTurn({ content: 'Done, switched to agent mode.' }),
+    ])
+
+    // Patch generate to count calls
+    const origGenerate = adapter.generate.bind(adapter)
+    adapter.generate = async function(messages: Message[], tools?: ToolDefinition[]) {
+      callCount++
+      return origGenerate(messages, tools)
+    }
+
+    const orch = new Orchestrator({ adapter: adapter as any })
+    const result = await toPromise(orch.chat('Switch modes'))
+
+    // Should have recovered and returned the real content
+    expect(turnContent(result.turn)).toBe('Done, switched to agent mode.')
+    // Should have made 3 generate calls total
+    expect(callCount).toBe(3)
   })
 })

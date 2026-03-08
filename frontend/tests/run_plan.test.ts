@@ -75,3 +75,35 @@ describe('createRunPlanHandler', () => {
     expect(result.ok ? undefined : result.error).toContain('Plan failed schema validation:')
   })
 })
+
+describe('createRunPlanHandler success path', () => {
+  test('returns err when gitRoot is unavailable (no bare object thrown)', async () => {
+    // Regression: run_plan used to return { result: { ok: true, ... } } bare object
+    // instead of ok(...). Verify the handler always returns a ToolResult shape.
+    const handler = createRunPlanHandler(
+      () => '',   // empty gitRoot -> triggers err('run_plan requires a git root')
+      () => '',
+      {} as any,
+    )
+
+    const validPlan = {
+      plan: {
+        codePlan: [{
+          apiVersion: 'codectl/v1',
+          kind: 'Ansible',
+          metadata: { description: 'test', order: 1 },
+          spec: { hosts: 'localhost', tasks: [] },
+        }],
+      },
+    }
+
+    const result = await handler(validPlan)
+
+    // Must be a proper ToolResult, not a bare object
+    expect('ok' in result).toBe(true)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('git root')
+    }
+  })
+})

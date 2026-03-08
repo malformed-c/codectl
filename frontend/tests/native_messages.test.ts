@@ -10,17 +10,17 @@ describe('roundsToMessages', () => {
     expect(messages[0]).toMatchObject({ role: 'system', content: 'You are a helpful assistant.' })
   })
 
-  test('converts chatRound to user + assistant messages', () => {
+  test('converts chatRound to user + model messages', () => {
     const round = chatRound([userSpan('Hello')], 'Hi there!')
     const messages = roundsToMessages([round], '')
 
     const nonSystem = messages.filter(m => m.role !== 'system')
     expect(nonSystem).toHaveLength(2)
     expect(nonSystem[0]).toMatchObject({ role: 'user', content: 'Hello' })
-    expect(nonSystem[1]).toMatchObject({ role: 'assistant', content: 'Hi there!' })
+    expect(nonSystem[1]).toMatchObject({ role: 'model', content: 'Hi there!' })
   })
 
-  test('chatRound with no model text omits assistant message', () => {
+  test('chatRound with no model text omits model message', () => {
     const round = chatRound([userSpan('Hello')], '')
     const messages = roundsToMessages([round], '')
     const nonSystem = messages.filter(m => m.role !== 'system')
@@ -34,7 +34,7 @@ describe('roundsToMessages', () => {
     expect(messages.some(m => m.role === 'system' && m.content === 'Mode switched to agent.')).toBe(true)
   })
 
-  test('toolRound emits assistant call message + tool_result message', () => {
+  test('toolRound emits model call message + tool_result message', () => {
     const calls = [{ tool: 'bash', command: 'ls' }]
     const results = [{ value: 'file.ts\n' }]
     const round = toolRound(calls, results)
@@ -44,7 +44,7 @@ describe('roundsToMessages', () => {
     expect(nonSystem).toHaveLength(2)
 
     const callMsg = nonSystem[0]!
-    expect(callMsg.role).toBe('assistant')
+    expect(callMsg.role).toBe('model')
     expect(callMsg.calls).toHaveLength(1)
     expect(callMsg.calls![0]!.tool).toBe('bash')
 
@@ -66,9 +66,9 @@ describe('roundsToMessages', () => {
     const messages = roundsToMessages([round], '')
 
     const nonSystem = messages.filter(m => m.role !== 'system')
-    // user trigger, assistant call, tool_result, assistant response
+    // user trigger, model call, tool_result, model response
     expect(nonSystem[0]).toMatchObject({ role: 'user', content: 'Do the thing' })
-    expect(nonSystem[nonSystem.length - 1]).toMatchObject({ role: 'assistant', content: 'Done.' })
+    expect(nonSystem[nonSystem.length - 1]).toMatchObject({ role: 'model', content: 'Done.' })
     const resultMsg = nonSystem.find(m => m.role === 'tool_result')
     expect(resultMsg).toBeTruthy()
   })

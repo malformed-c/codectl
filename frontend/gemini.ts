@@ -249,7 +249,7 @@ function toFunctionDeclarations(tools: ToolDefinition[]): unknown[] {
   }))
 }
 
-function messagesToSDKContents(messages: Message[]): SDKContent[] {
+export function messagesToSDKContents(messages: Message[]): SDKContent[] {
   const out: SDKContent[] = []
   for (const m of messages) {
     if (m.role === 'system') {
