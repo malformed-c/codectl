@@ -885,8 +885,27 @@ export class Orchestrator {
 
     // --- #24: Memory Variable Interpolation ---
     // Substitute $key or ${key} references in string args with memory values.
+    // Special case: if the entire arg value is a single $ref (e.g. "$my_plan"),
+    // and the memory value is valid JSON, deserialize it into the real type
+    // (object, array, number) so tools like run_plan receive a proper object
+    // rather than a JSON string.
     for (const [key, val] of Object.entries(resolvedArgs)) {
       if (typeof val === 'string' && val.includes('$')) {
+        const singleRef = val.match(/^\$\{([^}]+)\}$|^\$([\w]+)$/)
+        if (singleRef) {
+          const memKey = singleRef[1] ?? singleRef[2]!
+          const memVal = this.versionedMemory.get(memKey)
+          if (memVal !== undefined) {
+            consola.debug(`Memory interpolation (single ref): $${memKey} -> (value)`)
+            try {
+              resolvedArgs[key] = JSON.parse(memVal)
+            } catch {
+              resolvedArgs[key] = memVal // not JSON, use as string
+            }
+            continue
+          }
+        }
+
         resolvedArgs[key] = val.replace(/\$\{([^}]+)\}|\$([\w]+)/g, (_match, braced, bare) => {
           const memKey = braced ?? bare
           const memVal = this.versionedMemory.get(memKey)
