@@ -270,26 +270,11 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
       continue
     }
 
-    if (m.calls?.length) {
-      // Assistant message with function calls.
-      // First call carries thoughtSignature (Gemini 3 requirement) — strip it from args.
-      out.push({
-        role: 'model',
-        parts: m.calls.map((c, i) => {
-          const { tool, callId, thoughtSignature, ...args } = c
-          return {
-            functionCall: { name: tool, args: args as Record<string, unknown> },
-            // Signature only on first part per Gemini spec (parallel calls)
-            ...(i === 0 && thoughtSignature ? { thoughtSignature } : {}),
-          }
-        }),
-      })
-    } else if (m.role === 'tool_result' && m.results?.length) {
-      // Tool result message — pair results with calls by index to recover tool name.
-      // Truncate large results — lite models return empty responses on very long context.
+    if (m.role === 'tool_result' && m.results?.length) {
+      // Tool result message — must be checked BEFORE calls check since tool_result
+      // messages also carry calls[] for name recovery.
       const callNames = m.calls?.map(c => c.tool) ?? []
       const MAX_RESULT = 8000
-      consola.debug('[gemini] tool_result results:', JSON.stringify(m.results), 'calls:', callNames)
       out.push({
         role: 'user',
         parts: m.results.map((r, i) => {
@@ -301,10 +286,20 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
           return { functionResponse: { name: callNames[i] ?? `tool_${i}`, response: raw } }
         }),
       })
+    } else if (m.calls?.length) {
+      // Model message with function calls.
+      // First call carries thoughtSignature (Gemini 3 requirement) — strip it from args.
+      out.push({
+        role: 'model',
+        parts: m.calls.map((c, i) => {
+          const { tool, callId, thoughtSignature, ...args } = c
+          return {
+            functionCall: { name: tool, args: args as Record<string, unknown> },
+            ...(i === 0 && thoughtSignature ? { thoughtSignature } : {}),
+          }
+        }),
+      })
     } else {
-      if (m.role === 'tool_result') {
-        consola.debug('[gemini] tool_result with no results! results:', m.results, 'content:', m.content)
-      }
       out.push({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }],
