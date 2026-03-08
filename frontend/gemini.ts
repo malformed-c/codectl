@@ -273,12 +273,12 @@ function messagesToSDKContents(messages: Message[]): SDKContent[] {
       out.push({
         role: 'user',
         parts: m.results.map((r, i) => {
-          const raw = r.error
+          const response = r.error
             ? { error: r.error }
             : typeof r.value === 'string'
               ? { output: r.value.length > MAX_RESULT ? r.value.slice(0, MAX_RESULT) + '\n...(truncated)' : r.value }
-              : (r.value as object ?? {})
-          return { functionResponse: { name: callNames[i] ?? `tool_${i}`, response: raw } }
+              : { output: JSON.stringify(r.value) }  // stringify objects — Gemini proto rejects nested arrays
+          return { functionResponse: { name: callNames[i] ?? `tool_${i}`, response } }
         }),
       })
     } else if (m.calls?.length) {
