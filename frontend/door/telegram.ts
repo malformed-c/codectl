@@ -328,7 +328,11 @@ export class TelegramDoor {
       try {
         for await (const event of room.orchestrator.chat(text)) {
           if (event.kind === 'turn') {
-            const _tc = turnContent(event.turn); if (_tc) await sendText(_tc)
+            // Only display content on the final turn — intermediate turns precede
+            // tool calls and their text is pre-tool reasoning, not a user-facing message.
+            if (event.final) {
+              const _tc = turnContent(event.turn); if (_tc) await sendText(_tc)
+            }
 
           } else if (event.kind === 'call') {
             if (event.call.name === 'ask') {

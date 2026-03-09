@@ -128,7 +128,7 @@ export type TurnResult = {
 export type OrchestratorEvent =
   | { kind: 'call'; call: ToolCall; rawArguments: Record<string, unknown>; pending: true }
   | { kind: 'call_result'; call: ToolCall; result: ToolResult }
-  | { kind: 'turn'; turn: ParsedTurn; toolsExecuted: TurnResult['toolsExecuted'] }
+  | { kind: 'turn'; turn: ParsedTurn; toolsExecuted: TurnResult['toolsExecuted']; final: boolean }
 
 /**
  * Drain an orchestrator generator to completion, ignoring intermediate events.
@@ -588,7 +588,7 @@ export class Orchestrator {
         this.fsm.onModel(think, content, [])
         void this._saveCheckpoint()
 
-        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [], final: true }
 
         break outerLoop
       }
@@ -652,7 +652,7 @@ export class Orchestrator {
         // Yield model text FIRST so the UI can display it before tool notifications.
         // toolsExecuted is empty here; callers that need full results use call_result events
         // or the TurnResult returned from the generator.
-        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [], final: false }
 
         // Yield 'call' (pending) events AFTER the turn so tool notifications
         // appear below the model's text in the UI, not above it.
@@ -724,7 +724,7 @@ export class Orchestrator {
         // Failsafe: had tool_call steps but storedCalls is 0, FSM must not be locked.
         this.fsm.onModel(think, content, [])
 
-        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [], final: true }
 
         break outerLoop
       }
