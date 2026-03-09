@@ -130,7 +130,6 @@ describe('malformed tool call handling', () => {
         makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: {} }] }),
         makeTurn({ content: 'done' }),
       ]),
-      chatToolTurns: 8,  // enough room for mode switch + 5 failure turns
     })
     await toPromise(orch.chat('test ejection'))
     expect(orch.getMode().kind).toBe('chat')

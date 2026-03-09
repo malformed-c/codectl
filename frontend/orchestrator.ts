@@ -543,10 +543,10 @@ export class Orchestrator {
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
 
-    // Chat mode allows tool calls but caps at a small number of follow-through turns.
-    // so the model can respond after executing a tool (e.g. tool_library -> summarise).
-    // Agent mode gets the full autonomous turn budget.
-    const maxTurns = this.mode.kind === 'chat'
+    // Turn budget is evaluated each iteration so a mid-loop switch to agent mode
+    // (via the `mode` tool) gets the full autonomousTurns budget rather than the
+    // smaller chatToolTurns cap that was active when the loop started.
+    const maxTurns = () => this.mode.kind === 'chat'
       ? (this.config.chatToolTurns ?? 5)
       : (this.config.autonomousTurns ?? 16)
 
@@ -555,7 +555,7 @@ export class Orchestrator {
     let loopShouldStop = false
 
     // Label the loop so we can break from inside nested structures if needed
-    outerLoop: for (let turn = 0; turn < maxTurns; turn++) {
+    outerLoop: for (let turn = 0; turn < maxTurns(); turn++) {
       // Check abort signal
       if (this.abortController.signal.aborted) break
 
