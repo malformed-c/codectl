@@ -4,6 +4,7 @@ import { parse, makeTurn } from './template'
 import type { Message, TextTemplate, ParsedTurn } from './template'
 import type { ToolDefinition } from './tool'
 import { OpenAIChatAdapter } from './openai'
+import { withRetry } from './utils/retry'
 
 // ---------------------------------------------------------------------------
 // Shared config
@@ -61,20 +62,22 @@ export class GeminiNativeAdapter {
 
   async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
     const cfg = this.config
-    const response = await this.client.models.generateContent({
-      model: cfg.model,
-      contents: messagesToSDKContents(messages),
-      config: {
-        systemInstruction: extractSystem(messages),
-        maxOutputTokens: cfg.maxTokens ?? 4096,
-        temperature: cfg.temperature ?? 0.7,
-        topP: cfg.topP ?? 0.95,
-        ...(tools?.length ? { tools: [{ functionDeclarations: toFunctionDeclarations(tools) }] } : {}),
-        ...(cfg.thinking || cfg.thinkingLevel
-          ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
-          : {}),
-      },
-    })
+    const response = await withRetry(() =>
+      this.client.models.generateContent({
+        model: cfg.model,
+        contents: messagesToSDKContents(messages),
+        config: {
+          systemInstruction: extractSystem(messages),
+          maxOutputTokens: cfg.maxTokens ?? 4096,
+          temperature: cfg.temperature ?? 0.7,
+          topP: cfg.topP ?? 0.95,
+          ...(tools?.length ? { tools: [{ functionDeclarations: toFunctionDeclarations(tools) }] } : {}),
+          ...(cfg.thinking || cfg.thinkingLevel
+            ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
+            : {}),
+        },
+      })
+    )
     const candidate = response.candidates?.[0]
     consola.debug('[gemini] finishReason:', (candidate as any)?.finishReason, 'parts:', candidate?.content?.parts?.length)
     return parseSDKResponse(candidate?.content?.parts ?? [])
@@ -139,9 +142,12 @@ export class GeminiInteractionsAdapter {
   resetSession(): void { this.previousInteractionId = undefined }
 
   async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
-    const interaction = await (this.client.interactions as any).create(
-      this.buildParams(messages, false, tools),
-    ) as any
+    const interaction = await withRetry(() =>
+      (this.client.interactions as any).create(
+        this.buildParams(messages, false, tools),
+      ) as Promise<any>,
+      { label: 'gemini interactions generate' },
+    )
 
     if (this.config.store !== false) {
       this.previousInteractionId = interaction.id

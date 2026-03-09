@@ -395,8 +395,9 @@ export class TelegramDoor {
       } catch (err) {
         consola.error('Error handling Telegram message:', err)
 
+        const msg = err instanceof Error ? err.message : String(err)
         try {
-          await ctx.reply('Something went wrong. Please try again.', { parse_mode: 'HTML' })
+          await ctx.reply(`⚠️ Error: <code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' })
         } catch { /* best effort */ }
       }
     }

@@ -1,6 +1,10 @@
 import consola from 'consola'
 import { render, renderFim, parse } from './template'
 import type { Message, TextTemplate, FimRequest, ParsedTurn } from './template'
+import { withRetry } from './utils/retry'
+import { withRetry } from './utils/retry'
+import { withRetry } from './utils/retry'
+import { withRetry } from './utils/retry'
 
 // --- Types ---
 
@@ -64,9 +68,6 @@ function normalizeServer(server: string): string {
     : server
 }
 
-async function delay(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms))
-}
 
 // --- Adapter ---
 
@@ -183,50 +184,32 @@ export class KoboldAdapter {
 
   // --- Internals ---
 
-  private async complete(prompt: string, retries = 3): Promise<string> {
+  private async complete(prompt: string): Promise<string> {
     const body = this.buildPayload(prompt, false)
     const url = `${this.server}/v1/generate`
 
-    for (let i = 0; i < retries; i++) {
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
+    return withRetry(async () => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
 
-        if (!response.ok) {
-          const text = await response.text()
-          let message = text
+      if (!response.ok) {
+        const text = await response.text()
+        let message = text
 
-          try {
-            const json = JSON.parse(text) as { detail?: { msg?: string } }
-            message = json?.detail?.msg ?? text
-          } catch { /* use raw text */ }
+        try {
+          const json = JSON.parse(text) as { detail?: { msg?: string } }
+          message = json?.detail?.msg ?? text
+        } catch { /* use raw text */ }
 
-          throw new KoboldError(message, response.status)
-        }
-
-        const data = await response.json() as { results?: Array<{ text: string }> }
-        return data.results?.[0]?.text ?? ''
-
-      } catch (err) {
-        if (err instanceof KoboldError) {
-          // Don't retry client errors
-          if (err.status && err.status < 500) throw err
-        }
-
-        if (i < retries - 1) {
-          await delay(2500)
-
-          continue
-        }
-
-        throw err
+        throw new KoboldError(message, response.status)
       }
-    }
 
-    throw new KoboldError('Max retries exceeded')
+      const data = await response.json() as { results?: Array<{ text: string }> }
+      return data.results?.[0]?.text ?? ''
+    }, { label: 'kobold generate' })
   }
 
   private buildPayload(prompt: string, streaming: boolean): Record<string, unknown> {
