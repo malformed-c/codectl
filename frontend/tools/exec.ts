@@ -34,6 +34,10 @@ export class PersistentShell {
   private buf = ''
   private readonly initialCwd: string
 
+  private get stdin(): import('bun').FileSink {
+    return this.proc.stdin as import('bun').FileSink
+  }
+
   // Serialise all exec() calls: each one awaits the previous chain entry.
   private lockChain: Promise<void> = Promise.resolve()
 
@@ -59,8 +63,8 @@ export class PersistentShell {
     })
     this.buf = ''
     this.generation++
-    this.reader    = (this.proc.stdout as ReadableStream<Uint8Array>).getReader()
-    this.errReader = (this.proc.stderr as ReadableStream<Uint8Array>).getReader()
+    this.reader    = (this.proc.stdout as ReadableStream<Uint8Array>).getReader() as any
+    this.errReader = (this.proc.stderr as ReadableStream<Uint8Array>).getReader() as any
   }
 
   restart(): void {
@@ -134,8 +138,8 @@ export class PersistentShell {
 
     // Write command + sentinel probe to stdin
     const sentinelCmd = `\nprintf '\\n${SENTINEL} %d %s\\n' $? "$(pwd)"\n`
-    this.proc.stdin!.write(encoder.encode(command + sentinelCmd))
-    await this.proc.stdin!.flush()
+    this.stdin.write(encoder.encode(command + sentinelCmd))
+    await this.stdin.flush()
 
     // Read stdout until sentinel appears, bailing if the deadline fires
     let timedOut = false
@@ -152,10 +156,10 @@ export class PersistentShell {
     if (timedOut) {
       const recoveryBy = Date.now() + RECOVERY_TIMEOUT_MS
       try {
-        this.proc.stdin!.write(
+        this.stdin.write(
           encoder.encode(`\x03\nprintf '\\n${SENTINEL} %d %s\\n' 130 "$(pwd)"\n`)
         )
-        await this.proc.stdin!.flush()
+        await this.stdin.flush()
 
         while (!this.buf.includes(SENTINEL)) {
           const chunk = await readChunk(this.reader, recoveryBy)

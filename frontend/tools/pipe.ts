@@ -1,4 +1,5 @@
-import type { ToolDefinition, ToolResult, ToolHandler } from '../orchestrator'
+import type { ToolDefinition, ToolResult } from '../tool'
+import type { ToolHandler } from '../orchestrator'
 import { ok, err } from '../tool'
 import consola from 'consola'
 

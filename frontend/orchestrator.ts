@@ -5,7 +5,7 @@ import type { KoboldAdapter } from './kobold'
 import type { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
 import type { GeminiNativeAdapter, GeminiInteractionsAdapter } from './gemini'
 import type { ParsedTurn, TextTemplate } from './template'
-import { turnContent, turnThink, turnToolCalls } from './template'
+import { turnContent, turnThink, turnToolCalls, Profiles } from './template'
 import type { StoredToolCall, StoredToolResult } from './types'
 import {
   type ToolDefinition,
@@ -827,7 +827,7 @@ export class Orchestrator {
     const history = [this._enrichedSystemRound, ...this.fsm.getRenderableHistory()]
     const budget = this.config.contextBudget ?? 128_000
 
-    const { text } = renderHistory(history, this.versionedMemory, this.profile, {
+    const { text } = renderHistory(history, this.versionedMemory, this.profile ?? Profiles.qwen, {
       budget,
       cache: this.renderCache,
     })

@@ -359,10 +359,10 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
           ? { value: args.text as string }
           : { error: "Provide 'text' or 'key'" }
 
-    if ('error' in src) return err(src.error)
+    if ('error' in src) return err((src as { error: string }).error)
 
     let parsed: unknown
-    try { parsed = JSON.parse(src.value) }
+    try { parsed = JSON.parse((src as any).value) }
     catch { return err('Input is not valid JSON') }
 
     const persist = (root: unknown) => {

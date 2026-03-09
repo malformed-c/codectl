@@ -241,10 +241,10 @@ const TS_CLASSES_QUERY_STRING = `
 function pyImportInsertLine(lines: string[], parser: Parser): number {
   let start = 0
   if (lines[0]?.startsWith("#!")) start = 1
-  if (lines[start] && /^#\s*-\*-\s*coding:/.test(lines[start])) start += 1
+  if (lines[start] && /^#\s*-\*-\s*coding:/.test(lines[start]!)) start += 1
 
   const joined = lines.join("\n")
-  const tmpTree = parser.parse(joined)
+  const tmpTree = parser.parse(joined)!
   const root = tmpTree.rootNode
   const children = root.children.filter(
     (c) => c.type !== "comment" && c.type !== "\n"
@@ -270,7 +270,7 @@ function pyImportInsertLine(lines: string[], parser: Parser): number {
 
 function tsImportInsertLine(lines: string[], parser: Parser): number {
   const joined = lines.join("\n")
-  const tmpTree = parser.parse(joined)
+  const tmpTree = parser.parse(joined)!
   const root = tmpTree.rootNode
 
   let importEnd = 0
@@ -403,7 +403,7 @@ export class Codeq {
   static fromSource(source: string, path = "<FILE>", lang?: LangConfig): Codeq {
     const l = lang ?? langConfigForPath(path)
     const buf = Buffer.from(source, "utf8")
-    const tree = l.parser.parse(source)
+    const tree = l.parser.parse(source)!
 
     return new Codeq(tree, buf, l, path)
   }
@@ -544,7 +544,7 @@ export class Codeq {
     if (source.endsWith("\n") && !newSource.endsWith("\n")) newSource += "\n"
 
     this.sourceBytes = Buffer.from(newSource, "utf8")
-    this.tree = this.lang.parser.parse(newSource)
+    this.tree = this.lang.parser.parse(newSource)!
 
     return true
   }
@@ -627,7 +627,7 @@ export class Codeq {
       Buffer.from(prepared, "utf8")
     )
 
-    this.tree = this.lang.parser.parse(this.sourceBytes.toString("utf8"))
+    this.tree = this.lang.parser.parse(this.sourceBytes.toString("utf8"))!
   }
 
   // --- Query internals ---
@@ -752,11 +752,11 @@ export class Codeq {
 
     if (candidates.length === 0) return null
 
-    if (candidates.length === 1) return candidates[0].captures
+    if (candidates.length === 1) return candidates[0]!.captures
 
     const uniqueFqns = [...new Set(candidates.map((c) => c.fqn))]
 
-    if (uniqueFqns.length === 1) return candidates[0].captures
+    if (uniqueFqns.length === 1) return candidates[0]!.captures
 
     throw new AmbiguousTargetError(
       `Ambiguous ${kind} target '${target}'. Matches: ${uniqueFqns.join(", ")}. ` +
@@ -794,7 +794,7 @@ export class Codeq {
     if (!targetNodes) {
       const available = [...captures.keys()]
         .map((k) => k.split(".")[1])
-        .filter(Boolean)
+        .filter((x): x is string => x !== undefined)
 
       if (available.includes("body")) available.push("logic")
 
@@ -804,7 +804,7 @@ export class Codeq {
       )
     }
 
-    const node = targetNodes[0]
+    const node = targetNodes[0]!
     return {
       start: node.startIndex,
       end: node.endIndex,

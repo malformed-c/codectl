@@ -65,7 +65,7 @@ export class GeminiNativeAdapter {
     const response = await withRetry(() =>
       this.client.models.generateContent({
         model: cfg.model,
-        contents: messagesToSDKContents(messages),
+        contents: messagesToSDKContents(messages) as any,
         config: {
           systemInstruction: extractSystem(messages),
           maxOutputTokens: cfg.maxTokens ?? 4096,
@@ -75,12 +75,12 @@ export class GeminiNativeAdapter {
           ...(cfg.thinking || cfg.thinkingLevel
             ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
             : {}),
-        },
+        } as any,
       })
     )
     const candidate = response.candidates?.[0]
     consola.debug('[gemini] finishReason:', (candidate as any)?.finishReason, 'parts:', candidate?.content?.parts?.length)
-    return parseSDKResponse(candidate?.content?.parts ?? [])
+    return parseSDKResponse((candidate?.content?.parts ?? []) as SDKPart[])
   }
 
   async generateRaw(prompt: string): Promise<ParsedTurn> {
@@ -91,7 +91,7 @@ export class GeminiNativeAdapter {
     const cfg = this.config
     const stream = await this.client.models.generateContentStream({
       model: cfg.model,
-      contents: messagesToSDKContents(messages),
+      contents: messagesToSDKContents(messages) as any,
       config: {
         systemInstruction: extractSystem(messages),
         maxOutputTokens: cfg.maxTokens ?? 4096,
@@ -101,7 +101,7 @@ export class GeminiNativeAdapter {
         ...(cfg.thinking || cfg.thinkingLevel
           ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
           : {}),
-      },
+      } as any,
     })
     for await (const chunk of stream) {
       const parts = (chunk.candidates?.[0]?.content?.parts ?? []) as SDKPart[]

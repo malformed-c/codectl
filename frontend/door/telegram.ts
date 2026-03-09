@@ -15,6 +15,8 @@ export type TelegramDoorConfig = {
   adapter: LLMAdapter
   /** Base directory for per-room checkpoints. Each room gets its own subdirectory. */
   checkpointDir?: string
+  /** Max checkpoints to keep per room (oldest pruned). */
+  checkpointKeep?: number
   /** Extra orchestrator config per room (adapter is injected, do not set here). */
   orchestratorConfig?: Omit<OrchestratorConfig, 'adapter'>
   /** Max message length before splitting (Telegram limit: 4096 for text, 1024 for media captions). */
