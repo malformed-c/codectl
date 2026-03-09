@@ -260,7 +260,7 @@ export async function findGitRoot(startDir: string): Promise<string | null> {
 
 export class Orchestrator {
   private readonly adapter: LLMAdapter
-  private readonly profile: TextTemplate
+  private readonly profile: TextTemplate | null
   readonly config: OrchestratorConfig
   private readonly handlers = new Map<string, ToolHandler>()
   private readonly tools: ToolDefinition[] = []
@@ -283,7 +283,7 @@ export class Orchestrator {
   constructor(config: OrchestratorConfig) {
     this.adapter = config.adapter
     this.config = config
-    this.profile = config.adapter.config.template
+    this.profile = (config.adapter as any).config?.template ?? null
     this.checkpointStore = config.checkpointDir
       ? new CheckpointStore(config.checkpointDir, config.checkpointKeep)
       : null

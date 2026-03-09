@@ -264,9 +264,9 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
       // Gemini requires strict user/model alternation so we can't inject a bare
       // user turn — instead append to the last user/tool_result part if possible.
       if (out.length === 0) continue
-      const last = out[out.length - 1]
-      if (last && (last.role === 'user')) {
-        last.parts = [...last.parts, { text: `\n[System: ${m.content}]` }]
+      const lastUser = [...out].reverse().find(c => c.role === 'user')
+      if (lastUser) {
+        lastUser.parts = [...lastUser.parts, { text: `\n[System: ${m.content}]` }]
       }
       continue
     }

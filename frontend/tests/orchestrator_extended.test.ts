@@ -81,7 +81,7 @@ describe('memory tool integration', () => {
     const results = await runAndCollectResults(orch, 'test memory')
     const getResult = results.find((r, i) => r.name === 'memory' && i > 0)
     expect(getResult).toBeTruthy()
-    expect((getResult!.value as any)?.content).toBe('hello')
+    expect((getResult!.value as any)).toBe('hello')
   })
 })
 
