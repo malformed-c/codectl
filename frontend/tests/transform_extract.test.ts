@@ -27,7 +27,7 @@ describe('extract tool turn offsets', () => {
     const out = await handler({ method: 'json', turn: 0, path: 'users.0.name', save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
-    expect(out.value).toBe('Alice')
+    expect(memory.get('result')).toBe('Alice')
   })
 
   test('json path "." returns full root object', async () => {
@@ -45,7 +45,7 @@ describe('extract tool turn offsets', () => {
     const out = await handler({ method: 'json', turn: 0, path: '.', save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
-    const parsed = JSON.parse(out.value as string)
+    const parsed = JSON.parse(memory.get('result') as string)
     expect(parsed).toHaveProperty('codePlan')
     expect(parsed.codePlan[0].kind).toBe('Ansible')
   })
@@ -84,7 +84,7 @@ describe('extract tool turn offsets', () => {
     const out = await handler({ method: 'codeblocks', turn: 0, lang: 'json', index: 0, save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
-    expect(out.value).toContain('"timeout": 30')
+    expect(memory.get('result')).toContain('"timeout": 30')
   })
 })
 
@@ -104,6 +104,6 @@ describe('extract tool bracket notation', () => {
     const out = await handler({ method: 'json', turn: 0, path: 'codePlan[0].spec.tasks[0].args.dest', save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
-    expect(out.value).toBe('/tmp/hello.txt')
+    expect(memory.get('result')).toBe('/tmp/hello.txt')
   })
 })
