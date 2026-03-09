@@ -298,6 +298,11 @@ export class Orchestrator {
         ? this.tools.filter(t => t.name.startsWith(prefix))
         : this.tools
 
+      if (!prefix) {
+        const names = tools.map(t => t.name).join(', ')
+        return ok(`Available tools: ${names}\n\nUse tool_library(prefix) to get full documentation for a group, e.g. tool_library("codeq") or tool_library("bash").`)
+      }
+
       const rendered = renderTools(tools, this.config.toolFormat ?? 'json')
       const wrapped = this.profile.availableTools
         ? `${this.profile.availableTools[0]}${rendered}${this.profile.availableTools[1]}`

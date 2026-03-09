@@ -108,29 +108,32 @@ function looksLikeJsonPayload(text: string): boolean {
 export const ExtractTool: ToolDefinition = {
   name: 'extract',
   description:
-    'Extract a value from a user message turn or memory key. ' +
-    'Methods: json (dot-path), regex, lines, codeblocks. ' +
-    'Source: turn (user message offset - 0 = latest). ' +
-    'Optionally save result to memory with save_to.',
+    'Extract a value from a source (user turn or memory key) using a method, and save the result to memory. ' +
+    'Source: turn (user message offset, 0 = latest) or key (memory key to read from). ' +
+    'Methods: json (dot-path into parsed JSON), regex (first capture group or full match), ' +
+    'lines (line range, 1-indexed), codeblocks (all or one block by index/lang). ' +
+    'Result is always saved to save_to — reference it later with $save_to.',
   parameters: {
     type: 'object',
     properties: {
-      turn: { type: 'number', description: 'User message offset (0 = latest, 1 = second-latest, ...). Default: 0.' },
       method: { type: 'string', enum: ['json', 'regex', 'lines', 'codeblocks'], description: 'Extraction strategy.' },
+      save_to: { type: 'string', description: 'Memory key to store the extracted result under. Required.' },
+      turn: { type: 'number', description: 'User message offset to read from (0 = latest). Use this OR key.' },
+      key: { type: 'string', description: 'Memory key to read input from. Use this OR turn.' },
       path: { type: 'string', description: 'For json: dot-notation path, e.g. "a.b.0.c".' },
       pattern: { type: 'string', description: 'For regex: JS regex string. First capture group (or full match) returned.' },
       from: { type: 'number', description: 'For lines: 1-indexed start line (inclusive).' },
       to: { type: 'number', description: 'For lines: 1-indexed end line (inclusive, default = same as from).' },
       index: { type: 'number', description: 'For codeblocks: return only this block (0-indexed). Omit to return all blocks as JSON.' },
       lang: { type: 'string', description: 'For codeblocks: filter by language tag (e.g. "python", "json").' },
-      save_to: { type: 'string', description: 'Store result in this memory key.' },
     },
-    required: ['method'],
+    required: ['method', 'save_to'],
   },
   returns: {
     type: 'object',
     properties: {
-      value: { type: 'string', description: 'The extracted value (or JSON array for codeblocks without index).' },
+      saved_to: { type: 'string', description: 'The memory key the result was saved under.' },
+      length: { type: 'number', description: 'Character length of the extracted value.' },
     },
   },
 }
@@ -138,18 +141,20 @@ export const ExtractTool: ToolDefinition = {
 export function createExtractHandler(memory: MemoryAccess, history: HistoryAccess): ToolHandler {
   return async (args) => {
     const method = args.method as string
-    const saveTo = args.save_to as string | undefined
+    const saveTo = args.save_to as string
+    if (!saveTo) return err("'save_to' is required")
 
+    const keyArg = args.key as string | undefined
     // codeblocks defaults to turn:0 if no source specified
     const turnArg = args.turn as number | undefined
     const effectiveTurn =
-      method === 'codeblocks' && turnArg === undefined
+      !keyArg && method === 'codeblocks' && turnArg === undefined
         ? 0
         : turnArg
 
     const src = resolveSource(
       undefined,
-      undefined,
+      keyArg,
       effectiveTurn,
       memory,
       history,
@@ -241,11 +246,10 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       return err(`Unknown method '${method}'. Use json, regex, lines, or codeblocks.`)
     }
 
-    if (saveTo && extracted !== null) {
-      memory.set(saveTo, extracted)
-    }
+    if (extracted === null) return err(`Extraction returned no result`)
 
-    return ok(extracted)
+    memory.set(saveTo, extracted)
+    return ok({ saved_to: saveTo, length: extracted.length })
   }
 }
 
