@@ -1,4 +1,5 @@
 import { consola } from "consola"
+import { AgentEntropyTracker } from './agent-entropy'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
 import type { KoboldAdapter } from './kobold'
@@ -47,15 +48,12 @@ import { CheckpointStore, restoreLatest, type RestoredSession } from './checkpoi
 
 export type Mode =
   | { kind: 'chat' }
-  | { kind: 'agent'; gitRoot: string; consecutiveFailures: number }
+  | { kind: 'agent'; gitRoot: string }
 
 type PlanValidationState = {
   lastPlan?: CodePlan
   validationErrors: string[]
 }
-
-/** How many consecutive tool errors before the agent is ejected to chat mode. */
-const AGENT_MAX_CONSECUTIVE_FAILURES = 3
 
 export type ToolHandler = (
   args: Record<string, unknown>
@@ -274,6 +272,7 @@ export class Orchestrator {
   private _enrichedSystemRound: Round = makeSystemRound('')  // cached: _systemRound + tools block
   private mode: Mode = { kind: 'chat' }
   private _ejectedThisTurn = false
+  private _entropyTracker = new AgentEntropyTracker()
   private planValidationState: PlanValidationState = { validationErrors: [] }
   private abortController: AbortController | null = null
   private readonly checkpointStore: CheckpointStore | null
@@ -464,7 +463,7 @@ export class Orchestrator {
 
     // Restore mode
     if (session.modeKind === 'agent' && this.mode.kind !== 'agent') {
-      this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
+      this.mode = { kind: 'agent', gitRoot: '' }
     }
 
     this.rebuildSystemMessage()
@@ -486,7 +485,7 @@ export class Orchestrator {
    */
   async *run(goal: string): AsyncGenerator<OrchestratorEvent, TurnResult> {
     if (this.mode.kind !== 'agent') {
-      this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
+      this.mode = { kind: 'agent', gitRoot: '' }
     }
 
     // Reset FSM, inject goal into system message - no user turn
@@ -540,6 +539,7 @@ export class Orchestrator {
   private async *runLoop(): AsyncGenerator<OrchestratorEvent, TurnResult> {
     this.abortController = new AbortController()
     this._ejectedThisTurn = false
+    this._entropyTracker.reset()
 
     const toolsExecuted: TurnResult['toolsExecuted'] = []
 
@@ -635,7 +635,7 @@ export class Orchestrator {
             'opening token, and no tool calls could be recovered. ' +
             'Always start tool calls with the opening token [TOOL_CALLS].'
           )
-          this.recordToolFailure()
+          this.recordToolResult('__parse__', {}, false)
         }
       }
 
@@ -724,16 +724,11 @@ export class Orchestrator {
               : null,
           })
 
-          // Track agent-mode failure ejection
-          // #22: Count explicit errors AND null results (handler returned nothing useful) as failures.
-          if (!result.ok || result.value === null) {
-            this.recordToolFailure()
-
-            if (this.wasEjected()) { loopShouldStop = true; break }
-
-          } else {
-            this.resetToolFailures()
-          }
+          // Track entropy: success/failure + call novelty drives ejection score.
+          // #22: Count explicit errors AND null results as failures.
+          const callSuccess = result.ok && result.value !== null
+          this.recordToolResult(call.name, call.arguments, callSuccess)
+          if (this.wasEjected()) { loopShouldStop = true; break }
         }
 
         // Combine immediate parse errors with executed tool results to match storedCalls length
@@ -789,34 +784,33 @@ export class Orchestrator {
     )
   }
 
-  /** Called after a tool error in agent mode; ejects to chat if threshold hit. */
-  private recordToolFailure(): void {
+  /**
+   * Record a tool result against the entropy tracker.
+   * Ejects to chat mode if the score crosses the threshold.
+   */
+  private recordToolResult(name: string, args: Record<string, unknown>, success: boolean): void {
     if (this.mode.kind !== 'agent') return
-    this.mode = { ...this.mode, consecutiveFailures: this.mode.consecutiveFailures + 1 }
-    if (this.mode.consecutiveFailures >= AGENT_MAX_CONSECUTIVE_FAILURES) {
-
-      consola.warn(`Agent hit ${AGENT_MAX_CONSECUTIVE_FAILURES} consecutive failures - ejecting to chat mode`)
-
+    const shouldEject = this._entropyTracker.record(name, args, success)
+    if (shouldEject) {
+      consola.warn(
+        `[entropy] score=${this._entropyTracker.currentScore.toFixed(1)} — ` +
+        `agent ejected to chat (spinning or failing without progress)`
+      )
       this.mode = { kind: 'chat' }
       this._ejectedThisTurn = true
       this.rebuildSystemMessage()
+    } else {
+      consola.debug(`[entropy] score=${this._entropyTracker.currentScore.toFixed(1)} tool=${name} success=${success}`)
     }
   }
 
-  /** Returns true if we were just ejected from agent mode (i.e. we were agent, now chat). */
+  /** Returns true if we were just ejected from agent mode this turn. */
   private wasEjected(): boolean {
-    // consecutiveFailures is only tracked in agent mode; if we just hit the threshold
-    // recordToolFailure switches mode to chat. A bare mode.kind === 'chat' check would
-    // always fire in chat mode and break the loop after every tool error.
     return this.mode.kind === 'chat' && this._ejectedThisTurn
   }
 
   private resetToolFailures(): void {
-    if (this.mode.kind !== 'agent') return
-
-    if (this.mode.consecutiveFailures > 0) {
-      this.mode = { ...this.mode, consecutiveFailures: 0 }
-    }
+    // No-op: entropy tracker handles state via recordToolResult / reset in runLoop.
   }
 
   // --- Internals ---
@@ -1019,7 +1013,7 @@ export class Orchestrator {
     }
 
     if (targetMode === 'agent') {
-      this.mode = { kind: 'agent', gitRoot: '', consecutiveFailures: 0 }
+      this.mode = { kind: 'agent', gitRoot: '' }
       this.rebuildSystemMessage()
 
       return ok({ switched: 'agent', cwd: this.shell.getCwd() })

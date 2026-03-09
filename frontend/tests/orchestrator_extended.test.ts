@@ -119,18 +119,40 @@ describe('malformed tool call handling', () => {
     expect(turnContent(result.turn)).toBe('done')
   })
 
-  test('3 consecutive tool failures eject agent to chat mode', async () => {
+  test('5 consecutive tool failures eject agent to chat mode', async () => {
     const orch = new Orchestrator({
       adapter: new ScriptedAdapter([
         makeTurn({ toolCalls: [{ name: 'mode', arguments: { mode: 'agent' } }] }),
         makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: {} }] }),
         makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: {} }] }),
         makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: {} }] }),
+        makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: {} }] }),
+        makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: {} }] }),
         makeTurn({ content: 'done' }),
       ]),
+      chatToolTurns: 8,  // enough room for mode switch + 5 failure turns
     })
     await toPromise(orch.chat('test ejection'))
     expect(orch.getMode().kind).toBe('chat')
+  })
+
+  test('successful unique calls reduce entropy and prevent ejection', async () => {
+    // 4 failures (score=8) then 2 unique successes (score=8-3=-1 -> floor 0) — should not eject
+    const orch = new Orchestrator({
+      adapter: new ScriptedAdapter([
+        makeTurn({ toolCalls: [{ name: 'mode', arguments: { mode: 'agent' } }] }),
+        makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: { n: 1 } }] }),
+        makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: { n: 2 } }] }),
+        makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: { n: 3 } }] }),
+        makeTurn({ toolCalls: [{ name: 'nonexistent_tool', arguments: { n: 4 } }] }),
+        // memory tool succeeds and is unique — drives score down
+        makeTurn({ toolCalls: [{ name: 'memory', arguments: { action: 'list' } }] }),
+        makeTurn({ toolCalls: [{ name: 'memory', arguments: { action: 'list' } }] }),
+        makeTurn({ content: 'recovered' }),
+      ]),
+    })
+    await toPromise(orch.chat('test entropy recovery'))
+    expect(orch.getMode().kind).toBe('agent')
   })
 })
 
