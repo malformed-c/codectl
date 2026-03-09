@@ -1,4 +1,5 @@
 import destr from 'destr'
+import { ok, err } from '../tool'
 
 /**
  * Parse a raw plan value (string or object) into a plain object,
@@ -25,13 +26,13 @@ export function parsePlan(raw: unknown): { ok: true; value: unknown } | { ok: fa
     } catch {
       parsed = destr(raw)
       if (typeof parsed === 'string') {
-        return { ok: false, error: `Invalid JSON: could not parse plan string` }
+        return err(`Invalid JSON: could not parse plan string`)
       }
     }
   }
 
   // 2. Recursive unwrap
-  return { ok: true, value: unwrap(parsed) }
+  return ok(unwrap(parsed))
 }
 
 function maybeParseString(v: unknown): unknown {
