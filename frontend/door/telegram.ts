@@ -367,26 +367,21 @@ export class TelegramDoor {
               ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
               : `✅ <b>${escapeHtml(call.name)}</b>`
 
-            // Unwrap common single-value object shapes for cleaner display:
-            //   { stdout, ... } → stdout   (bash/exec)
-            //   { value }       → value    (cache get, extract)
-            //   { output }      → output
-            //   { done: true }  → (omit — sentinel, nothing to show)
-            const unwrapValue = (v: unknown): unknown => {
-              if (v === null || typeof v !== 'object' || Array.isArray(v)) return v
-              const o = v as Record<string, unknown>
-              if (typeof o.stdout === 'string') return o.stdout
-              if (typeof o.value  === 'string') return o.value
-              if (typeof o.output === 'string') return o.output
-              if (Object.keys(o).length === 1 && o.done === true) return null
+            // Unwrap { value: x } wrapper that some tools add — show x directly.
+            const displayValue = (v: unknown): unknown => {
+              if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+                const o = v as Record<string, unknown>
+                if (Object.keys(o).length === 1 && 'value' in o) return o.value
+              }
               return v
             }
 
             const resultStr = !result.ok
               ? null
-              : typeof result.value === 'string'
-                ? result.value
-                : (() => { const u = unwrapValue(result.value); return u == null ? null : typeof u === 'string' ? u : JSON.stringify(u, null, 2) })()
+              : (() => {
+                  const v = displayValue(result.value)
+                  return v == null ? null : typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+                })()
 
             const preview = resultStr && resultStr.length > 300
               ? resultStr.slice(0, 300) + '\n...'
