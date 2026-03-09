@@ -255,8 +255,12 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 export const JsonTool: ToolDefinition = {
   name: 'json',
   description:
-    'Parse, query, or mutate JSON. Source is inline text or a memory key. ' +
-    'Mutations (set, append, delete) write result back to the same memory key.',
+    'Parse, query, or mutate a JSON value at a specific path. ' +
+    'Source must be a memory key (already stored via memory tool) or inline text. ' +
+    'get/set/delete/append operate on a dot-notation path within the JSON object. ' +
+    'Mutations write the updated JSON back to the same memory key. ' +
+    'To store a fresh JSON blob, use the memory tool first, then use json to query or mutate it. ' +
+    'Do NOT use json to store a whole document — use memory(set) for that.',
   parameters: {
     type: 'object',
     properties: {
@@ -327,6 +331,12 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     if (action === 'set' || action === 'append' || action === 'delete') {
       const path = args.path as string | undefined
+
+      // set with no path + a key = store the whole parsed document (convenience alias for memory set)
+      if (!path && action === 'set' && memKey) {
+        return persist(parsed)
+      }
+
       if (!path) return err(`'path' required for ${action}`)
 
       const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
