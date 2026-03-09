@@ -1,18 +1,20 @@
 # codectl
 
-A TypeScript LLM orchestration framework for local and cloud models, controlled over Telegram.
-
-Run an AI agent on your own machine — no cloud dependency, no API costs — using any model supported by [KoboldCpp](https://github.com/LostRuins/koboldcpp). Or route to OpenAI/Gemini when you need more power. Chat and issue commands from Telegram from anywhere.
+A TypeScript LLM orchestration framework. Run an AI agent on your own machine using any model supported by [KoboldCpp](https://github.com/LostRuins/koboldcpp), or route to OpenAI/Gemini when you need more power. Chat and issue commands over Telegram from anywhere.
 
 ## What it does
 
 - **Chat and agent modes** — conversational chat or fully autonomous multi-step agent runs with a configurable turn budget
 - **FSM-based conversation state** — strict call/result pairing prevents orphaned tool calls and malformed history
-- **Tool system** — composable primitives the model can chain: `memory`, `extract`, `json`, `bash`, `codeq_*`, `run_plan`, `validate_plan`, `subagent`, and more
-- **Memory variable interpolation** — store a value with `memory`, reference it in any subsequent tool call as `$key`
-- **Graph memory** — persistent cross-session memory with FTS5+graph hybrid search and Ebbinghaus decay
-- **Subagents** — spawn child orchestrators for parallel or isolated subtasks
+- **Entropy-based ejection** — agent auto-ejects when spinning or failing; unique successes lower entropy, failures and repeated calls raise it
+- **Tool system** — composable primitives: `bash`, `memory`, `memory_graph`, `extract`, `json`, `codeq_*`, `run_plan`, `validate_plan`, `subagent`, `pipe`, and more
+- **Memory variable interpolation** — store a value with `memory(set, key, value)`, reference it in any tool arg as `$key` or `${key}`
+- **Graph memory** — persistent cross-session memory with FTS5 + graph BFS hybrid search and Ebbinghaus decay
+- **Subagents** — spawn child orchestrators for parallel or isolated subtasks with `ask`/`message` communication
 - **Telegram door** — Telegram bot as the primary interface; streaming tool call notifications in real time
+- **CLI door** — built-in REPL for local testing (no Telegram required)
+- **ModelRouter** — config-driven adapter factory; switch models per-agent in `config.yaml`
+- **Checkpoint/restore** — full conversation state persists across restarts
 
 ## Example: agent mode with Ansible
 
@@ -41,8 +43,6 @@ malf:   ⏳ mode({"mode":"agent"})
 
 ## Example: Gemini native tool calling
 
-Running on `gemini-3.1-flash-lite-preview` via the native function-calling API:
-
 ```
 User:   Can you write your own Ansible plan then and run it
 
@@ -50,14 +50,7 @@ malf:   ⏳ validate_plan({...})
         ✅ validate_plan  {"valid": true, "message": "CodePlan is valid and ready for execution."}
 
         ⏳ run_plan({...})
-        ✅ run_plan
-        {
-          "ok": true,
-          "results": [
-            { "name": "Create directory",  "status": "changed" },
-            { "name": "Create status file","status": "changed" }
-          ]
-        }
+        ✅ run_plan  {"ok": true, "results": [{"name":"Create directory","status":"changed"}, ...]}
 
         ⏳ bash({"command":"cat /tmp/codectl_test/status.txt"})
         ✅ bash  Codectl test successful!
@@ -65,11 +58,9 @@ malf:   ⏳ validate_plan({...})
         I have successfully created and executed my own Ansible plan.
 ```
 
-Set `API_TYPE=gemini-native` (or `gemini-interactions`) with a `GEMINI_API_KEY` to use Gemini models. Tools are passed as function declarations — no prompt engineering required.
+Set `API_TYPE=gemini-native` with a `GEMINI_API_KEY`. Tools are passed as function declarations — no prompt engineering required. `gemini-interactions` is also supported for stateful server-side sessions.
 
-
-
-Memory variable substitution and multiple tool calls in a single turn:
+## Example: memory variable interpolation
 
 ```
 User:   Pretty print the plan, get the destination path, and add author metadata
@@ -78,49 +69,53 @@ malf:   ⏳ json({"action":"pretty","key":"plan"})
         ⏳ json({"action":"get","key":"plan","path":"codePlan[0].spec.tasks[0].args.dest"})
         ⏳ json({"action":"set","key":"plan","path":"codePlan[0].metadata.author","value":"\"malf\""})
 
-        ✅ json
-        { "codePlan": [ ... ] }
-
-        ✅ json
-        /tmp/hello.txt
-
-        ✅ json
-        (updated)
+        ✅ json  { "codePlan": [ ... ] }
+        ✅ json  /tmp/hello.txt
+        ✅ json  (updated)
 
         Destination is /tmp/hello.txt. Author field added to metadata.
 ```
 
 ## Stack
 
-- **Frontend** — Bun + TypeScript: orchestrator, FSM, adapters, tools, Telegram door
-- **Backend** — Python + uv: CLI tooling, AST/code-edit operations, Ansible bridge
-- **Model adapters** — KoboldCpp (local), OpenAI, Gemini
+- **Frontend** — Bun + TypeScript: orchestrator, FSM, adapters, tools, Telegram/CLI doors
+- **Backend** — Python + uv: Codeq AST/code-edit bridge, Ansible runner
+- **Model adapters** — KoboldCpp (local), OpenAI-compatible, Gemini (native + interactions)
 
 ## Repository layout
 
 ```
 frontend/
-  index.ts          entrypoint
-  orchestrator.ts   core loop, tool dispatch, mode management
-  fsm.ts            conversation state machine
-  template.ts       prompt templating, model profiles, turn parsing
-  kobold.ts         KoboldCpp adapter
-  openai.ts         OpenAI adapter
-  renderer.ts       history rendering with budget-aware compression
-  memory/           graph memory (SQLite, FTS5, Ebbinghaus decay)
-  tools/            built-in tool definitions and handlers
-  door/telegram.ts  Telegram bot interface
+  index.ts             entrypoint — Telegram door + inline CLI door
+  orchestrator.ts      core turn loop, tool dispatch, mode management
+  agent-entropy.ts     entropy-based ejection tracker
+  fsm.ts               conversation FSM (idle / chat / agent)
+  template.ts          prompt templating, model profiles, turn parsing
+  renderer.ts          history rendering with budget-aware age compression
+  round.ts             Round types (chat / tool / agent / system / error)
+  checkpoint.ts        checkpoint save/restore
+  room.ts              Room abstraction (orchestrator + metadata)
+  kobold.ts            KoboldCpp adapter
+  openai.ts            OpenAI-compatible adapter (chat + text)
+  gemini.ts            Gemini native + interactions adapters
+  native_messages.ts   Message conversion for native tool-calling APIs
+  llm/                 ModelRouter, provider protocol, builtin providers
+  memory/              Graph memory (SQLite FTS5, Ebbinghaus decay, RRF search)
+  tools/               Built-in tool definitions and handlers
+  door/telegram.ts     Telegram bot interface
+  events/              EventBus, journal, topic subscriptions
+  utils/               withRetry and shared utilities
 
 backend/
-  main.py           Typer CLI entrypoint, Ansible bridge
+  main.py              Typer CLI entrypoint
+  codeq/               Python Codeq AST/code-edit implementation
 ```
 
 ## Prerequisites
 
 - **Bun 1.3.9+**
-- **Python 3.14+**
-- **uv**
-- A running [KoboldCpp](https://github.com/LostRuins/koboldcpp) instance, or OpenAI/Gemini API keys
+- **Python 3.11+** with **uv**
+- A running [KoboldCpp](https://github.com/LostRuins/koboldcpp) instance, **or** OpenAI / Gemini API keys
 
 ## Setup
 
@@ -128,19 +123,67 @@ backend/
 # Frontend
 cd frontend
 bun install
-cp .env.example .env   # add TELEGRAM_TOKEN, KOBOLD_URL or API keys
-bun run index.ts
+cp env.sample .env      # fill in tokens and API keys
+bun run index.ts        # starts Telegram bot + CLI
 
-# Backend
+# Backend (Ansible bridge — only needed for run_plan)
 cd backend
 uv sync
 uv run codectl --help
 ```
 
+## Configuration
+
+`frontend/config.yaml`:
+
+```yaml
+api_type: koboldcpp          # koboldcpp | openai-chat | openai-text | gemini-native | gemini-interactions
+api_server: http://127.0.0.1:5001
+default_model: my-model
+available_models:
+  - models/my-model.yaml
+
+tool_format: typescript      # json | typescript | python
+checkpoint_path: ./checkpoints
+checkpoint_keep: 20
+graph_memory_path: ./memory.db
+```
+
+`frontend/models/<name>.yaml` — per-model prompt format:
+
+```yaml
+name: my-model
+markers:
+  systemOpen: "[SYSTEM_PROMPT]"
+  systemClose: "[/SYSTEM_PROMPT]\n"
+  userOpen: "[INST]"
+  userClose: "[/INST]\n"
+  modelOpen: ""
+  modelClose: "</s>\n"
+  reasoningOpen: "[THINK]"
+  reasoningClose: "[/THINK]"
+  stopSequence: "</s>"
+parameters:
+  temperature: 0.7
+  top_p: 0.95
+  max_length: 4096
+```
+
+`.env`:
+
+```
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ALLOWED_USERS=123456789,987654321
+BASE_URL=http://127.0.0.1:5001
+OPENAI_API_KEY=...
+GEMINI_API_KEY=...
+API_TYPE=koboldcpp           # overrides config.yaml
+```
+
 ## Tests
 
 ```bash
-# Frontend (192 tests)
+# Frontend (224 tests)
 cd frontend && bun test
 
 # Backend
@@ -149,4 +192,4 @@ cd backend && uv run run-tests -q
 
 ## Status
 
-Active development. The Codeq interface is being aligned across stacks — you may see temporary breakage while frontend and backend APIs converge.
+Active development. Core orchestration, tool system, and Telegram door are stable. Backend Codeq alignment is ongoing.
