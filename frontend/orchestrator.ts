@@ -311,14 +311,14 @@ export class Orchestrator {
           return `${t.name}(${params})`
         }).join('\n')
         const body = `${signatures}\n\nUse tool_library(prefix) for full docs, e.g. tool_library("bash").`
-        const wrapped = this.profile.availableTools
+        const wrapped = this.profile?.availableTools
           ? `${this.profile.availableTools[0]}${body}${this.profile.availableTools[1]}`
           : body
         return ok(wrapped)
       }
 
       const rendered = renderTools(tools, this.config.toolFormat ?? 'json')
-      const wrapped = this.profile.availableTools
+      const wrapped = this.profile?.availableTools
         ? `${this.profile.availableTools[0]}${rendered}${this.profile.availableTools[1]}`
         : rendered
 
@@ -854,7 +854,7 @@ export class Orchestrator {
           const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
           const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
           const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
-          const toolsBlock = this.profile.availableTools
+          const toolsBlock = this.profile?.availableTools
             ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
             : ''
           return joinWithBoundaryNormalization([sysContent, toolsBlock])
