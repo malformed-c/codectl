@@ -100,7 +100,7 @@ export class EventJournal {
     const cutoff = Date.now() - staleMs
     const stale = this.db.prepare(`
       SELECT id, retry_count FROM events
-      WHERE  status = 'processing' AND created_at < ?
+      WHERE  status = 'processing' AND created_at <= ?
     `).all(cutoff) as any[]
 
     let reset = 0, dead = 0

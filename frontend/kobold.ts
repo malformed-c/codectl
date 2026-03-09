@@ -2,9 +2,6 @@ import consola from 'consola'
 import { render, renderFim, parse } from './template'
 import type { Message, TextTemplate, FimRequest, ParsedTurn } from './template'
 import { withRetry } from './utils/retry'
-import { withRetry } from './utils/retry'
-import { withRetry } from './utils/retry'
-import { withRetry } from './utils/retry'
 
 // --- Types ---
 

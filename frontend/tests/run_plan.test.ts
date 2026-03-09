@@ -92,7 +92,7 @@ describe('createRunPlanHandler success path', () => {
           apiVersion: 'codectl/v1',
           kind: 'Ansible',
           metadata: { description: 'test', order: 1 },
-          spec: { hosts: 'localhost', tasks: [] },
+          spec: { hosts: 'localhost', tasks: [{ name: 'ping', module: 'ping', args: {} }] },
         }],
       },
     }

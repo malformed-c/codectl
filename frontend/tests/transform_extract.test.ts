@@ -24,7 +24,7 @@ describe('extract tool turn offsets', () => {
     ]
 
     const handler = createExtractHandler(memory, { getCommitted: () => history })
-    const out = await handler({ method: 'json', turn: 0, path: 'users.0.name' })
+    const out = await handler({ method: 'json', turn: 0, path: 'users.0.name', save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
     expect(out.value).toBe('Alice')
@@ -42,7 +42,7 @@ describe('extract tool turn offsets', () => {
     ]
 
     const handler = createExtractHandler(memory, { getCommitted: () => history })
-    const out = await handler({ method: 'json', turn: 0, path: '.' })
+    const out = await handler({ method: 'json', turn: 0, path: '.', save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
     const parsed = JSON.parse(out.value as string)
@@ -81,7 +81,7 @@ describe('extract tool turn offsets', () => {
     ]
 
     const handler = createExtractHandler(memory, { getCommitted: () => history })
-    const out = await handler({ method: 'codeblocks', turn: 0, lang: 'json', index: 0 })
+    const out = await handler({ method: 'codeblocks', turn: 0, lang: 'json', index: 0, save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
     expect(out.value).toContain('"timeout": 30')
@@ -101,7 +101,7 @@ describe('extract tool bracket notation', () => {
     ]
 
     const handler = createExtractHandler(memory, { getCommitted: () => history })
-    const out = await handler({ method: 'json', turn: 0, path: 'codePlan[0].spec.tasks[0].args.dest' })
+    const out = await handler({ method: 'json', turn: 0, path: 'codePlan[0].spec.tasks[0].args.dest', save_to: 'result' })
 
     expect((out.ok ? undefined : out.error)).toBeUndefined()
     expect(out.value).toBe('/tmp/hello.txt')
