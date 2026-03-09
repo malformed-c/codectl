@@ -62,10 +62,42 @@ export class GeminiNativeAdapter {
 
   async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
     const cfg = this.config
-    const response = await withRetry(() =>
-      this.client.models.generateContent({
+    const call = () => this.client.models.generateContent({
+      model: cfg.model,
+      contents: messagesToSDKContents(messages) as any,
+      config: {
+        systemInstruction: extractSystem(messages),
+        maxOutputTokens: cfg.maxTokens ?? 4096,
+        temperature: cfg.temperature ?? 0.7,
+        topP: cfg.topP ?? 0.95,
+        ...(tools?.length ? { tools: [{ functionDeclarations: toFunctionDeclarations(tools) }] } : {}),
+        ...(cfg.thinking || cfg.thinkingLevel
+          ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
+          : {}),
+      } as any,
+    })
+
+    const response = await withRetry(call)
+    const candidate = response.candidates?.[0]
+    const finishReason = (candidate as any)?.finishReason
+    consola.debug('[gemini] finishReason:', finishReason, 'parts:', candidate?.content?.parts?.length)
+
+    // MALFORMED_FUNCTION_CALL: model produced a tool call with invalid JSON arguments.
+    // Inject a correction as a system message and retry once — Gemini's non-determinism
+    // usually recovers on the second attempt.
+    if (finishReason === 'MALFORMED_FUNCTION_CALL') {
+      consola.warn('[gemini] MALFORMED_FUNCTION_CALL — injecting correction and retrying')
+      const corrected: Message[] = [
+        ...messages,
+        {
+          role: 'system',
+          content: 'Your last function call had malformed JSON arguments and was rejected. ' +
+                   'Please retry the same operation with valid JSON.',
+        },
+      ]
+      const retry = await withRetry(() => this.client.models.generateContent({
         model: cfg.model,
-        contents: messagesToSDKContents(messages) as any,
+        contents: messagesToSDKContents(corrected) as any,
         config: {
           systemInstruction: extractSystem(messages),
           maxOutputTokens: cfg.maxTokens ?? 4096,
@@ -76,10 +108,12 @@ export class GeminiNativeAdapter {
             ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
             : {}),
         } as any,
-      })
-    )
-    const candidate = response.candidates?.[0]
-    consola.debug('[gemini] finishReason:', (candidate as any)?.finishReason, 'parts:', candidate?.content?.parts?.length)
+      }))
+      const retryCandidate = retry.candidates?.[0]
+      consola.debug('[gemini] retry finishReason:', (retryCandidate as any)?.finishReason, 'parts:', retryCandidate?.content?.parts?.length)
+      return parseSDKResponse((retryCandidate?.content?.parts ?? []) as SDKPart[])
+    }
+
     return parseSDKResponse((candidate?.content?.parts ?? []) as SDKPart[])
   }
 
