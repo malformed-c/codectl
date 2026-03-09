@@ -299,8 +299,18 @@ export class Orchestrator {
         : this.tools
 
       if (!prefix) {
-        const names = tools.map(t => t.name).join(', ')
-        return ok(`Available tools: ${names}\n\nUse tool_library(prefix) to get full documentation for a group, e.g. tool_library("codeq") or tool_library("bash").`)
+        const signatures = tools.map(t => {
+          const { properties, required = [] } = t.parameters
+          const req = new Set(required)
+          const params = Object.entries(properties)
+            .map(([name, prop]) => {
+              const type = prop.enum ? prop.enum.join('|') : prop.type
+              return req.has(name) ? `${name}: ${type}` : `${name}?: ${type}`
+            })
+            .join(', ')
+          return `${t.name}(${params})`
+        }).join('\n')
+        return ok(`${signatures}\n\nUse tool_library(prefix) for full docs, e.g. tool_library("bash").`)
       }
 
       const rendered = renderTools(tools, this.config.toolFormat ?? 'json')
