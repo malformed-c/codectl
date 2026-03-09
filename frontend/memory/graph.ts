@@ -11,6 +11,7 @@
  */
 
 import { Database } from 'bun:sqlite'
+import { humanId } from 'human-id'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -114,9 +115,8 @@ export function decayedConfidence(
 // ID generation
 // ---------------------------------------------------------------------------
 
-let _seq = 0
 function newId(prefix: string): string {
-  return `${prefix}_${Date.now()}_${++_seq}`
+  return `${prefix}:${humanId({ separator: '', capitalize: true })}`
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ export class GraphMemory {
     tags?:       string[]
     confidence?: number
   }): string {
-    const id   = newId(opts.kind[0]!)
+    const id   = newId(opts.kind)
     const now  = Date.now()
     const tags = JSON.stringify(opts.tags ?? [])
 
@@ -172,7 +172,7 @@ export class GraphMemory {
    * The old node is soft-deleted so it no longer appears in searches.
    */
   link(fromId: string, toId: string, kind: EdgeKind, weight = 1.0): string {
-    const id  = newId('e')
+    const id  = newId('edge')
     const now = Date.now()
 
     this.db.run(
