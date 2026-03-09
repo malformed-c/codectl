@@ -199,7 +199,7 @@ export function toolRound(
       if (content) out.push(modelSpan(content))
 
       out.push(toolCallSpan(calls, callText))
-      out.push(toolResultSpan(results, resultText))
+      if (results.length > 0) out.push(toolResultSpan(results, resultText))
 
       return out
     },
