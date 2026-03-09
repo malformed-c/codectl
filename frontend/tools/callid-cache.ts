@@ -31,7 +31,7 @@ export function createCallIdCacheHandler(cache: Map<string, string>): ToolHandle
         const stored = cache.get(id)
         if (stored === undefined) return err(`No entry for key '${id}'. Use call_cache(set, ${id}, <value>) to store it first.`)
 
-        return ok({ value: stored})
+        return ok(stored)
       }
 
       case 'delete': {

@@ -367,21 +367,11 @@ export class TelegramDoor {
               ? `❌ <b>${escapeHtml(call.name)}</b>\n<code>${escapeHtml(result.error)}</code>`
               : `✅ <b>${escapeHtml(call.name)}</b>`
 
-            // Unwrap { value: x } wrapper that some tools add — show x directly.
-            const displayValue = (v: unknown): unknown => {
-              if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-                const o = v as Record<string, unknown>
-                if (Object.keys(o).length === 1 && 'value' in o) return o.value
-              }
-              return v
-            }
-
             const resultStr = !result.ok
               ? null
-              : (() => {
-                  const v = displayValue(result.value)
-                  return v == null ? null : typeof v === 'string' ? v : JSON.stringify(v, null, 2)
-                })()
+              : typeof result.value === 'string'
+                ? result.value
+                : JSON.stringify(result.value, null, 2)
 
             const preview = resultStr && resultStr.length > 300
               ? resultStr.slice(0, 300) + '\n...'
