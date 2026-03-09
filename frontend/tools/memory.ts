@@ -50,7 +50,9 @@ export function createMemoryHandler(memory: MemoryStore): ToolHandler {
 
       case 'get':
         if (!key) return err('Key is required for get action')
-        return ok({ content: memory.get(key) ?? null })
+        const val = memory.get(key)
+        if (val === undefined) return err(`Key '${key}' not found. Use memory(set, ${key}, <value>) to store it first.`)
+        return ok({ content: val })
 
       case 'append':
         if (!key) return err('Key is required for append action')

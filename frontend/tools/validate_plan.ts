@@ -68,7 +68,7 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
 
       if (result.success) {
         onValidated(result.data, [])
-        return ok({ valid: true, message: 'CodePlan is valid and ready for execution.'})
+        return ok({ valid: true, message: 'CodePlan is valid. Call run_plan with this plan to execute it.' })
       }
 
       const issues = result.error?.issues ?? []
@@ -77,7 +77,7 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
         : [`Validation failed: ${JSON.stringify(result.error)}`]
 
       onValidated(undefined, errors)
-      return ok({ valid: false, errors})
+      return ok({ valid: false, errors, tip: 'Fix the errors above and call validate_plan again before running.' })
 
     } catch (e) {
       return err(`Schema validation failed: ${e}`)

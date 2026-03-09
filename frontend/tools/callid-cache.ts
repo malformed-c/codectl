@@ -29,7 +29,7 @@ export function createCallIdCacheHandler(cache: Map<string, string>): ToolHandle
         if (!id) return err("'id' is required for 'get'")
 
         const stored = cache.get(id)
-        if (stored === undefined) return err(`No entry for key '${id}'`)
+        if (stored === undefined) return err(`No entry for key '${id}'. Use call_cache(set, ${id}, <value>) to store it first.`)
 
         return ok({ value: stored})
       }

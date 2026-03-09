@@ -35,7 +35,7 @@ function resolveSource(
 
   if (key) {
     const val = memory.get(key)
-    if (val === undefined) return { error: `Memory key '${key}' not found` }
+    if (val === undefined) return { error: `Memory key '${key}' not found. Use memory(set, ${key}, <value>) to store it.` }
 
     return { value: val }
   }
@@ -285,7 +285,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     const src =
       memKey
-        ? (() => { const v = memory.get(memKey); return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found` } })()
+        ? (() => { const v = memory.get(memKey); return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found. Use memory(set, ${memKey}, <value>) to store it.` } })()
         : args.text !== undefined
           ? { value: args.text as string }
           : { error: "Provide 'text' or 'key'" }

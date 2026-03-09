@@ -57,7 +57,7 @@ export function createRunPlanHandler(
       const issues = validated.error.issues ?? []
       const errors = issues.map(e => `${e.path.join('.')}: ${e.message}`)
 
-      return err(`Plan failed schema validation:\n${errors.join('\n')}`)
+      return err(`Plan failed schema validation:\n${errors.join('\n')}\nTip: call validate_plan first to catch schema errors before running.`)
     }
 
     const plan = validated.data as CodePlan
