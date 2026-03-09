@@ -310,7 +310,11 @@ export class Orchestrator {
             .join(', ')
           return `${t.name}(${params})`
         }).join('\n')
-        return ok(`${signatures}\n\nUse tool_library(prefix) for full docs, e.g. tool_library("bash").`)
+        const body = `${signatures}\n\nUse tool_library(prefix) for full docs, e.g. tool_library("bash").`
+        const wrapped = this.profile.availableTools
+          ? `${this.profile.availableTools[0]}${body}${this.profile.availableTools[1]}`
+          : body
+        return ok(wrapped)
       }
 
       const rendered = renderTools(tools, this.config.toolFormat ?? 'json')
