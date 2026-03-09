@@ -698,7 +698,11 @@ export class Orchestrator {
           storedResults.push({
             callId: result.callId,
             error: result.ok ? undefined : result.error,
-            value: result.ok ? result.value : null,
+            value: result.ok
+              ? (result.value === undefined || result.value === null || result.value === ''
+                  ? { done: true }
+                  : result.value)
+              : null,
           })
 
           // Track agent-mode failure ejection
