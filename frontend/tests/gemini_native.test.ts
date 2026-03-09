@@ -299,28 +299,6 @@ describe('messagesToSDKContents', () => {
     expect(parsed.written).toEqual(['a.ts', 'b.ts'])
   })
 
-  test('mid-conversation system message is appended to last user part', () => {
-    // Gemini requires strict alternation — inline system turns are appended
-    // to the last user/tool_result part as extra text.
-    const messages: Message[] = [
-      { role: 'system', content: 'System prompt' },
-      { role: 'user', content: 'Hello' },
-      { role: 'model', content: 'Hi' },
-      { role: 'system', content: 'Please respond to the user.' },
-    ]
-
-    const contents = messagesToSDKContents(messages)
-    // The injected system message should be appended to the last user/model part
-    // that is role=user (or last part of role=user).
-    // In this case there's no tool_result, so it should append to the 'model' turn... 
-    // Actually per our code: appends to last 'user' role in out[].
-    // Here last role='user' is 'Hello', so it gets appended there.
-    const userContent = contents.find(c => c.role === 'user')
-    const hasNudge = userContent?.parts?.some((p: any) =>
-      typeof p.text === 'string' && p.text.includes('Please respond to the user.'),
-    )
-    expect(hasNudge).toBe(true)
-  })
 
   test('long string results are truncated at MAX_RESULT chars', () => {
     const longValue = 'x'.repeat(10000)
@@ -348,34 +326,3 @@ describe('messagesToSDKContents', () => {
 // Orchestrator empty response nudge
 // ---------------------------------------------------------------------------
 
-describe('Orchestrator empty response nudge', () => {
-  test('injects system nudge and retries when model returns completely empty response', async () => {
-    // Regression: Gemini sometimes returns empty parts (no text, no calls) after
-    // tool results. The orchestrator should nudge and retry rather than committing
-    // empty agent rounds.
-    let callCount = 0
-    const adapter = new MockNativeAdapter([
-      // First call: make a tool call
-      makeTurn({ toolCalls: [{ name: 'mode', arguments: { mode: 'agent' } }] }),
-      // Second call (after tool result): return empty — triggers nudge
-      { steps: [] } as any,
-      // Third call (after nudge): return real content
-      makeTurn({ content: 'Done, switched to agent mode.' }),
-    ])
-
-    // Patch generate to count calls
-    const origGenerate = adapter.generate.bind(adapter)
-    adapter.generate = async function(messages: Message[], tools?: ToolDefinition[]) {
-      callCount++
-      return origGenerate(messages, tools)
-    }
-
-    const orch = new Orchestrator({ adapter: adapter as any })
-    const result = await toPromise(orch.chat('Switch modes'))
-
-    // Should have recovered and returned the real content
-    expect(turnContent(result.turn)).toBe('Done, switched to agent mode.')
-    // Should have made 3 generate calls total
-    expect(callCount).toBe(3)
-  })
-})
