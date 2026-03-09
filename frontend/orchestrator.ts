@@ -580,14 +580,14 @@ export class Orchestrator {
       }
 
       // Detect completely empty response (no think, no content, no calls).
-      // Can happen with native models after a function response — inject a nudge.
+      // This indicates a problem: bad stop token, context overflow, or a model
+      // that failed to generate anything. Treat as an error and abort.
       const isEmpty = !think && !content && !calls.length
       if (isEmpty) {
-        consola.warn('[empty] model returned empty response - injecting nudge')
-
-        this.fsm.onSystem('Please respond to the user based on the tool results above.')
-
-        continue
+        consola.error('[empty] model returned empty response - aborting turn')
+        this.fsm.onError('Model returned an empty response. This may indicate a context overflow, bad stop token, or inference error.')
+        void this._saveCheckpoint()
+        break outerLoop
       }
 
       // Stop if no tools called - commit ChatRound via FSM
@@ -936,6 +936,12 @@ export class Orchestrator {
 
     try {
       const result = await handler(resolvedArgs)
+
+      // Guard against handlers that forget to return a value
+      if (result == null) {
+        consola.warn(`Tool '${call.name}' returned ${result} — treating as ok({ done: true })`)
+        return ok({ done: true })
+      }
 
       // Ensure callId is preserved if not returned by handler
       if (!result.callId && call.callId) {
