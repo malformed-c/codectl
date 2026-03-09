@@ -86,7 +86,7 @@ function extractCodeBlocks(text: string): Array<{ lang: string; code: string }> 
 
 /**
  * Parse a dot/bracket path into segments.
- * Supports: "a.b.0.c", "a[0].b[1].c", "a.b[2].c.d[3]"
+ * Supports: "a.b.0.c", "a[0].b[1].c", "a.b[2].c.d[3]", "a.*.b" (wildcard)
  * "." or "" returns an empty segment list (identity).
  */
 function parsePath(path: string): string[] {
@@ -94,6 +94,71 @@ function parsePath(path: string): string[] {
   // Normalise bracket notation to dot notation: a[0].b -> a.0.b
   const normalised = path.replace(/\[(\w+)\]/g, '.$1')
   return normalised.split('.').filter(k => k !== '')
+}
+
+/** Get a value at a path, supporting * wildcard to map over arrays/objects. */
+function pathGet(root: unknown, keys: string[]): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (keys.length === 0) return { ok: true, value: root }
+
+  const [head, ...tail] = keys
+  if (head === '*') {
+    if (Array.isArray(root)) {
+      const results: unknown[] = []
+      for (const item of root) {
+        const r = pathGet(item, tail)
+        if (!r.ok) return r
+        results.push(r.value)
+      }
+      return { ok: true, value: results }
+    }
+    if (root !== null && typeof root === 'object') {
+      const results: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(root as Record<string, unknown>)) {
+        const r = pathGet(v, tail)
+        if (!r.ok) return r
+        results[k] = r.value
+      }
+      return { ok: true, value: results }
+    }
+    return { ok: false, error: `Cannot apply wildcard to non-object/array` }
+  }
+
+  if (root === null || typeof root !== 'object') return { ok: false, error: `Cannot traverse into '${head}'` }
+  const next = Array.isArray(root)
+    ? root[parseInt(head!, 10)]
+    : (root as Record<string, unknown>)[head!]
+  if (next === undefined) return { ok: false, error: `Key '${head}' not found` }
+  return pathGet(next, tail)
+}
+
+/** Set/delete a value at a path, array-aware. Returns mutated root. */
+function pathSet(root: unknown, keys: string[], value: unknown, del = false): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (keys.length === 0) return del ? { ok: false, error: 'Cannot delete root' } : { ok: true, value }
+
+  const clone = Array.isArray(root) ? [...root] : { ...(root as Record<string, unknown>) }
+  const [head, ...tail] = keys
+
+  const idx = Array.isArray(clone) ? parseInt(head!, 10) : NaN
+  const key = isNaN(idx) ? head! : idx
+
+  if (tail.length === 0) {
+    if (del) {
+      if (Array.isArray(clone)) clone.splice(idx, 1)
+      else delete (clone as Record<string, unknown>)[head!]
+    } else {
+      ;(clone as Record<string, unknown>)[key as string] = value
+    }
+    return { ok: true, value: clone }
+  }
+
+  const child = (clone as Record<string, unknown>)[key as string]
+  const childClone = child === undefined || child === null
+    ? (isNaN(parseInt(tail[0]!, 10)) ? {} : [])
+    : child
+  const result = pathSet(childClone, tail, value, del)
+  if (!result.ok) return result
+  ;(clone as Record<string, unknown>)[key as string] = result.value
+  return { ok: true, value: clone }
 }
 
 function looksLikeJsonPayload(text: string): boolean {
@@ -275,7 +340,7 @@ export const JsonTool: ToolDefinition = {
       },
       text: { type: 'string', description: 'Inline JSON string to operate on.' },
       key: { type: 'string', description: 'Memory key to read (and write back) JSON from.' },
-      path: { type: 'string', description: 'Dot-notation path for get/set/delete, e.g. "response.items.0.name".' },
+      path: { type: 'string', description: 'Path for get/set/delete. Dot or bracket notation: "a.b[1].c". Use * as wildcard for get: "tasks.*.name" maps over all items.' },
       value: { type: 'string', description: 'For set/append: new value (parsed as JSON if valid, else string).' },
     },
     required: ['action'],
@@ -302,10 +367,8 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     const persist = (root: unknown) => {
       const out = JSON.stringify(root)
-
       if (memKey) memory.set(memKey, out)
-
-      return ok(out)
+      return out
     }
 
     if (action === 'pretty') return ok(JSON.stringify(parsed, null, 2))
@@ -314,50 +377,34 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
         return err('keys requires a JSON object at the root')
       }
-
       return ok(Object.keys(parsed as object).join(', '))
     }
 
     if (action === 'get') {
       const path = args.path as string | undefined
       if (!path) return err("'path' required for get")
-
-      let cur: unknown = parsed
-      for (const k of parsePath(path)) {
-        if (cur === null || typeof cur !== 'object') return err(`Cannot traverse into '${k}'`)
-
-        cur = (cur as Record<string, unknown>)[k]
-        if (cur === undefined) return err(`Key '${k}' not found`)
-      }
-
-      return ok(typeof cur === 'string' ? cur : JSON.stringify(cur))
+      const result = pathGet(parsed, parsePath(path))
+      if (!result.ok) return err(result.error)
+      return ok(typeof result.value === 'string' ? result.value : JSON.stringify(result.value))
     }
 
     if (action === 'set' || action === 'append' || action === 'delete') {
       const path = args.path as string | undefined
 
-      // set with no path + a key = store the whole parsed document (convenience alias for memory set)
+      // set with no path + a key = store the whole parsed document
       if (!path && action === 'set' && memKey) {
-        return persist(parsed)
+        persist(parsed)
+        return ok({ updated: memKey, action: 'replaced root' })
       }
 
       if (!path) return err(`'path' required for ${action}`)
-
-      const root = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>
       const keys = parsePath(path)
-      let cur: Record<string, unknown> = root
-      for (let i = 0; i < keys.length - 1; i++) {
-        const k = keys[i]!
-        if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {}
-        cur = cur[k] as Record<string, unknown>
-      }
-
-      const lastKey = keys[keys.length - 1]!
 
       if (action === 'delete') {
-        delete cur[lastKey]
-
-        return persist(root)
+        const result = pathSet(parsed, keys, undefined, true)
+        if (!result.ok) return err(result.error)
+        persist(result.value)
+        return ok({ deleted: path, ...(memKey ? { key: memKey } : {}) })
       }
 
       const val = args.value as string | undefined
@@ -366,22 +413,18 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       try { newVal = JSON.parse(val) } catch { newVal = val }
 
       if (action === 'append') {
-        const existing = cur[lastKey]
-        if (Array.isArray(existing)) {
-          existing.push(newVal)
-
-        } else if (typeof existing === 'string' && typeof newVal === 'string') {
-          cur[lastKey] = existing + newVal
-
-        } else {
-          cur[lastKey] = newVal
+        const cur = pathGet(parsed, keys)
+        if (cur.ok && Array.isArray(cur.value)) {
+          newVal = [...cur.value, newVal]
+        } else if (cur.ok && typeof cur.value === 'string' && typeof newVal === 'string') {
+          newVal = cur.value + newVal
         }
-
-      } else {
-        cur[lastKey] = newVal
       }
 
-      return persist(root)
+      const result = pathSet(parsed, keys, newVal)
+      if (!result.ok) return err(result.error)
+      persist(result.value)
+      return ok({ updated: path, ...(memKey ? { key: memKey } : {}) })
     }
 
     return err(`Unknown action '${action}'`)
