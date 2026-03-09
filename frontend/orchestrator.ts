@@ -128,7 +128,7 @@ export type TurnResult = {
 export type OrchestratorEvent =
   | { kind: 'call'; call: ToolCall; rawArguments: Record<string, unknown>; pending: true }
   | { kind: 'call_result'; call: ToolCall; result: ToolResult }
-  | { kind: 'turn'; turn: ParsedTurn; toolsExecuted: TurnResult['toolsExecuted']; final: boolean }
+  | { kind: 'turn'; turn: ParsedTurn; toolsExecuted: TurnResult['toolsExecuted'] }
 
 /**
  * Drain an orchestrator generator to completion, ignoring intermediate events.
@@ -502,13 +502,20 @@ export class Orchestrator {
 
   /**
    * Search graph memory for nodes relevant to `query` and inject the result
-   * as a system round so the model sees it before its first turn.
+   * by temporarily augmenting the enriched system round for the upcoming turn.
    * No-ops when graph memory is not configured or returns no results.
+   *
+   * Uses the system round rather than fsm.onSystem() to avoid committing a
+   * stray system round into history in chat state (which causes an offset bug
+   * where the memory block attaches to the wrong turn).
    */
   private _injectMemoryContext(query: string): void {
     if (!this.graphMemory) return
     const block = this.graphMemory.recallForPrompt(query)
-    if (block) this.fsm.onSystem(block)
+    if (!block) return
+    // Append memory context to the enriched system round for this turn.
+    const current = (this._enrichedSystemRound.serialize() as any).message as string
+    this._enrichedSystemRound = makeSystemRound(current + '\n\n' + block)
   }
 
   private async *runLoop(): AsyncGenerator<OrchestratorEvent, TurnResult> {
@@ -588,7 +595,7 @@ export class Orchestrator {
         this.fsm.onModel(think, content, [])
         void this._saveCheckpoint()
 
-        yield { kind: 'turn', turn: parsed, toolsExecuted: [], final: true }
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
 
         break outerLoop
       }
@@ -652,7 +659,7 @@ export class Orchestrator {
         // Yield model text FIRST so the UI can display it before tool notifications.
         // toolsExecuted is empty here; callers that need full results use call_result events
         // or the TurnResult returned from the generator.
-        yield { kind: 'turn', turn: parsed, toolsExecuted: [], final: false }
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
 
         // Yield 'call' (pending) events AFTER the turn so tool notifications
         // appear below the model's text in the UI, not above it.
@@ -724,7 +731,7 @@ export class Orchestrator {
         // Failsafe: had tool_call steps but storedCalls is 0, FSM must not be locked.
         this.fsm.onModel(think, content, [])
 
-        yield { kind: 'turn', turn: parsed, toolsExecuted: [], final: true }
+        yield { kind: 'turn', turn: parsed, toolsExecuted: [] }
 
         break outerLoop
       }
