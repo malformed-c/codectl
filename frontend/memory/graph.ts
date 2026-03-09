@@ -361,6 +361,22 @@ export class GraphMemory {
     return results.slice(0, limit)
   }
 
+  /**
+   * Soft-delete a node by id. Also removes it from the FTS index.
+   * Returns true if the node existed and was deleted, false if not found.
+   */
+  remove(id: string): boolean {
+    const existing = this.db.query<{ id: string }, [string]>(
+      `SELECT id FROM memory_nodes WHERE id = ? AND deleted = 0`,
+    ).get(id)
+
+    if (!existing) return false
+
+    this.db.run(`UPDATE memory_nodes SET deleted = 1 WHERE id = ?`, [id])
+    this.db.run(`DELETE FROM memory_fts WHERE node_id = ?`, [id])
+    return true
+  }
+
   /** Get a single node by id. Returns null if not found or deleted. */
   get(id: string): MemoryNode | null {
     type NodeRow = {

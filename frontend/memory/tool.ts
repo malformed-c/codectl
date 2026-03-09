@@ -18,6 +18,7 @@ Actions:
   search  - Full-text + graph search, returns top matches with scores
   get     - Retrieve a single node by id
   list    - List recent nodes, optionally filtered by kind
+  remove  - Soft-delete a node by id
 
 Node kinds:
   episodic   - Specific events or observations ("User mentioned they prefer TypeScript")
@@ -35,7 +36,7 @@ Edge kinds:
     properties: {
       action: {
         type: 'string',
-        enum: ['add', 'upsert', 'link', 'search', 'get', 'list'],
+        enum: ['add', 'upsert', 'link', 'search', 'get', 'list', 'remove'],
         description: 'Action to perform.',
       },
       // add / upsert fields
@@ -162,6 +163,15 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
           tags:       n.tags,
           confidence: n.confidence,
         })))
+      }
+
+      case 'remove': {
+        const id = args.id as string
+        if (!id) return err('"id" is required for remove')
+
+        const removed = memory.remove(id)
+        if (!removed) return err(`Node ${id} not found`)
+        return ok({ removed: id })
       }
 
       default:

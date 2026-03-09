@@ -313,3 +313,34 @@ describe('GraphMemory - runDecayAndPrune', () => {
     expect(gm.get(id)).not.toBeNull()
   })
 })
+
+describe('GraphMemory - remove', () => {
+  let gm: GraphMemory
+  beforeEach(() => { gm = freshDb() })
+  afterEach(() => { gm.close() })
+
+  test('remove soft-deletes a node', () => {
+    const id = gm.add({ kind: 'semantic', content: 'to be removed' })
+    expect(gm.get(id)).not.toBeNull()
+    expect(gm.remove(id)).toBe(true)
+    expect(gm.get(id)).toBeNull()
+  })
+
+  test('remove returns false for unknown id', () => {
+    expect(gm.remove('nonexistent:FakeId')).toBe(false)
+  })
+
+  test('removed node does not appear in search', () => {
+    const id = gm.add({ kind: 'semantic', content: 'unique pineapple content' })
+    gm.remove(id)
+    const results = gm.searchFts('pineapple')
+    expect(results.find(r => r.node.id === id)).toBeUndefined()
+  })
+
+  test('removed node does not appear in list', () => {
+    const id = gm.add({ kind: 'semantic', content: 'to be listed then removed' })
+    expect(gm.list().find(n => n.id === id)).toBeDefined()
+    gm.remove(id)
+    expect(gm.list().find(n => n.id === id)).toBeUndefined()
+  })
+})
