@@ -344,3 +344,43 @@ describe('GraphMemory - remove', () => {
     expect(gm.list().find(n => n.id === id)).toBeUndefined()
   })
 })
+
+describe('GraphMemory - ID collision resistance', () => {
+  let gm: GraphMemory
+
+  beforeEach(() => { gm = freshDb() })
+  afterEach(() => { gm.close(); if (existsSync(DB_PATH)) unlinkSync(DB_PATH) })
+
+  test('bulk inserts produce no duplicate IDs', () => {
+    const ids = Array.from({ length: 200 }, (_, i) =>
+      gm.add({ kind: 'episodic', content: `event ${i}` })
+    )
+    const unique = new Set(ids)
+    expect(unique.size).toBe(200)
+  })
+
+  test('edge IDs are unique across many links', () => {
+    const a = gm.add({ kind: 'semantic', content: 'node a' })
+    const b = gm.add({ kind: 'semantic', content: 'node b' })
+    const c = gm.add({ kind: 'semantic', content: 'node c' })
+    const edgeIds = [
+      gm.link(a, b, 'causal'),
+      gm.link(b, c, 'temporal'),
+      gm.link(a, c, 'derived_from'),
+    ]
+    expect(new Set(edgeIds).size).toBe(3)
+  })
+
+  test('node and edge IDs never collide with each other', () => {
+    const nodeIds = Array.from({ length: 50 }, (_, i) =>
+      gm.add({ kind: 'procedural', content: `step ${i}` })
+    )
+    // Link each consecutive pair
+    const edgeIds: string[] = []
+    for (let i = 0; i < nodeIds.length - 1; i++) {
+      edgeIds.push(gm.link(nodeIds[i]!, nodeIds[i + 1]!, 'temporal'))
+    }
+    const all = [...nodeIds, ...edgeIds]
+    expect(new Set(all).size).toBe(all.length)
+  })
+})

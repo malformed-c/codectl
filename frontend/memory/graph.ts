@@ -112,14 +112,6 @@ export function decayedConfidence(
 }
 
 // ---------------------------------------------------------------------------
-// ID generation
-// ---------------------------------------------------------------------------
-
-function newId(prefix: string): string {
-  return `${prefix}:${humanId({ separator: '', capitalize: true })}`
-}
-
-// ---------------------------------------------------------------------------
 // GraphMemory
 // ---------------------------------------------------------------------------
 
@@ -136,6 +128,23 @@ export class GraphMemory {
     this.db.close()
   }
 
+  /**
+   * Generate a unique human-readable ID with collision resistance.
+   * Retries on the (astronomically rare) chance the ID already exists.
+   */
+  private newId(prefix: string): string {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const id = `${prefix}:${humanId({ separator: '', capitalize: true })}`
+      const table = prefix === 'edge' ? 'memory_edges' : 'memory_nodes'
+      const exists = this.db.query<{ id: string }, [string]>(
+        `SELECT id FROM ${table} WHERE id = ?`,
+      ).get(id)
+      if (!exists) return id
+    }
+    // Fallback: append timestamp to guarantee uniqueness
+    return `${prefix}:${humanId({ separator: '', capitalize: true })}${Date.now()}`
+  }
+
   // --- Write ---
 
   /**
@@ -147,7 +156,7 @@ export class GraphMemory {
     tags?:       string[]
     confidence?: number
   }): string {
-    const id   = newId(opts.kind)
+    const id   = this.newId(opts.kind)
     const now  = Date.now()
     const tags = JSON.stringify(opts.tags ?? [])
 
@@ -172,7 +181,7 @@ export class GraphMemory {
    * The old node is soft-deleted so it no longer appears in searches.
    */
   link(fromId: string, toId: string, kind: EdgeKind, weight = 1.0): string {
-    const id  = newId('edge')
+    const id  = this.newId('edge')
     const now = Date.now()
 
     this.db.run(
