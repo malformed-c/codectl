@@ -67,7 +67,9 @@ async function withKeyRotation<T>(
   for (let i = 0; i < attempts; i++) {
     try {
       const client = pool.buildClient()
-      return await withRetry(() => fn(client), { label, maxAttempts: 2 })
+      // maxAttempts:1 = no retries inside here; 429s surface immediately so
+      // key rotation can fire rather than burning the same key twice.
+      return await withRetry(() => fn(client), { label, maxAttempts: 1 })
     } catch (err) {
       const parsed = parseUpstreamError(err)
       if (parsed.status === 429 && i < attempts - 1) {

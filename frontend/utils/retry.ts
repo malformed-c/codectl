@@ -41,6 +41,18 @@ export function parseUpstreamError(err: unknown): UpstreamError {
       }
     }
 
+    // Gemini SDK may throw an object with a nested .error.code (already parsed)
+    if (obj['error'] && typeof obj['error'] === 'object') {
+      const inner = obj['error'] as Record<string, unknown>
+      if (typeof inner['code'] === 'number') {
+        return {
+          status: inner['code'],
+          message: String(inner['message'] ?? err),
+          raw: err,
+        }
+      }
+    }
+
     // Gemini SDK wraps the API body: err.message may be a JSON string like
     // '{"error":{"code":503,"message":"...","status":"UNAVAILABLE"}}'
     // or the SDK may have already parsed it into err.errorDetails / err.status.
