@@ -87,11 +87,12 @@ export class ModelRouter {
     model: string
   }): ModelRouter {
     const router = new ModelRouter()
+    const parts = opts.apiKey.split(',').map(s => s.trim()).filter(Boolean)
     router.registerProviderConfig({
       id: 'default',
       type: opts.apiType,
       baseUrl: opts.apiServer,
-      apiKeyLiteral: opts.apiKey,
+      ...(parts.length > 1 ? { apiKeyLiterals: parts } : { apiKeyLiteral: parts[0] ?? '' }),
     })
     router.registerAgentConfig('default', {
       provider: 'default',
