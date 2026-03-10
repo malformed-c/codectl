@@ -46,7 +46,7 @@ export class OpenAIChatProvider implements ModelProvider {
   build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     return new OpenAIChatAdapter({
       apiServer: config.baseUrl ?? 'https://api.openai.com/v1',
-      apiKey: apiKey ?? '',
+      apiKey: (Array.isArray(apiKey) ? apiKey[0] : apiKey) ?? '',
       model: modelName,
       template: Profiles.qwen,
     })
@@ -72,7 +72,7 @@ export class OpenAITextProvider implements ModelProvider {
   build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     return new OpenAITextAdapter({
       apiServer: config.baseUrl ?? 'https://api.openai.com/v1',
-      apiKey: apiKey ?? '',
+      apiKey: (Array.isArray(apiKey) ? apiKey[0] : apiKey) ?? '',
       model: modelName,
       template: Profiles.qwen,
     })
