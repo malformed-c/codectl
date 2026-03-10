@@ -56,6 +56,36 @@ class KeyPool {
  * On quota exhaustion the pool rotates and the call is retried with a fresh client.
  * Falls through to withRetry for other transient errors.
  */
+/**
+ * Parse the suggested retry delay from a Gemini 429 error.
+ * The error details array contains a RetryInfo entry with a retryDelay like "29s" or "1500ms".
+ * Falls back to defaultMs if not found.
+ */
+function parseRetryDelay(err: unknown, defaultMs = 5_000): number {
+  try {
+    const obj = err as Record<string, unknown>
+    // The error body may be nested: obj.error.details or parsed from obj.message
+    let details: unknown[] | undefined
+    if (obj['error'] && typeof obj['error'] === 'object') {
+      details = ((obj['error'] as Record<string, unknown>)['details'] as unknown[])
+    }
+    if (!details && typeof obj['message'] === 'string') {
+      const parsed = JSON.parse(obj['message'] as string) as { error?: { details?: unknown[] } }
+      details = parsed?.error?.details
+    }
+    if (!Array.isArray(details)) return defaultMs
+    for (const d of details) {
+      const entry = d as Record<string, unknown>
+      if (entry['@type']?.toString().includes('RetryInfo') && typeof entry['retryDelay'] === 'string') {
+        const delay = entry['retryDelay'] as string
+        if (delay.endsWith('ms')) return parseInt(delay, 10)
+        if (delay.endsWith('s'))  return parseFloat(delay) * 1_000
+      }
+    }
+  } catch { /* ignore */ }
+  return defaultMs
+}
+
 async function withKeyRotation<T>(
   pool: KeyPool,
   fn: (client: GoogleGenAI) => Promise<T>,
@@ -73,7 +103,9 @@ async function withKeyRotation<T>(
     } catch (err) {
       const parsed = parseUpstreamError(err)
       if (parsed.status === 429 && i < attempts - 1) {
-        consola.warn(`[key-pool] 429 on key slot ${i + 1}/${attempts} — rotating key`)
+        const delayMs = parseRetryDelay(err)
+        consola.warn(`[key-pool] 429 on key slot ${i + 1}/${attempts} — waiting ${delayMs}ms then rotating key`)
+        await new Promise(r => setTimeout(r, delayMs))
         pool.rotate()
         lastErr = err
         continue
