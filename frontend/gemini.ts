@@ -4,14 +4,15 @@ import { parse, makeTurn } from './template'
 import type { Message, TextTemplate, ParsedTurn } from './template'
 import type { ToolDefinition } from './tool'
 import { OpenAIChatAdapter } from './openai'
-import { withRetry } from './utils/retry'
+import { withRetry, parseUpstreamError } from './utils/retry'
 
 // ---------------------------------------------------------------------------
 // Shared config
 // ---------------------------------------------------------------------------
 
 export type GeminiConfig = {
-  apiKey: string
+  /** One or more API keys. On 429 the pool rotates to the next key automatically. */
+  apiKey: string | string[]
   model: string
   template: TextTemplate
   maxTokens?: number
@@ -19,6 +20,67 @@ export type GeminiConfig = {
   topP?: number
   thinking?: boolean
   thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'
+}
+
+// ---------------------------------------------------------------------------
+// KeyPool — round-robin key rotation with 429-triggered advance
+// ---------------------------------------------------------------------------
+
+class KeyPool {
+  private readonly keys: string[]
+  private idx = 0
+
+  constructor(apiKey: string | string[]) {
+    this.keys = Array.isArray(apiKey) ? [...apiKey] : [apiKey]
+    if (this.keys.length === 0) throw new Error('KeyPool: at least one API key is required')
+  }
+
+  get current(): string { return this.keys[this.idx]! }
+  get size(): number    { return this.keys.length }
+
+  /** Advance to next key (wraps around). Returns the new key. */
+  rotate(): string {
+    this.idx = (this.idx + 1) % this.keys.length
+    consola.info(`[key-pool] rotated to key slot ${this.idx + 1}/${this.keys.length}`)
+    return this.keys[this.idx]!
+  }
+
+  /** Build a fresh GoogleGenAI client for the current key. */
+  buildClient(): GoogleGenAI {
+    return new GoogleGenAI({ apiKey: this.current })
+  }
+}
+
+/**
+ * Wrap a call that creates a GoogleGenAI client and may receive a 429.
+ * On quota exhaustion the pool rotates and the call is retried with a fresh client.
+ * Falls through to withRetry for other transient errors.
+ */
+async function withKeyRotation<T>(
+  pool: KeyPool,
+  fn: (client: GoogleGenAI) => Promise<T>,
+  label = 'gemini call',
+): Promise<T> {
+  const attempts = pool.size
+  let lastErr: unknown
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const client = pool.buildClient()
+      return await withRetry(() => fn(client), { label, maxAttempts: 2 })
+    } catch (err) {
+      const parsed = parseUpstreamError(err)
+      if (parsed.status === 429 && i < attempts - 1) {
+        consola.warn(`[key-pool] 429 on key slot ${i + 1}/${attempts} — rotating key`)
+        pool.rotate()
+        lastErr = err
+        continue
+      }
+      throw err
+    }
+  }
+
+  throw lastErr
 }
 
 // ---------------------------------------------------------------------------
@@ -31,9 +93,10 @@ export class GeminiOpenAIAdapter extends OpenAIChatAdapter {
   readonly supportsNativeTools = false
 
   constructor(config: GeminiConfig) {
+    const pool = new KeyPool(config.apiKey)
     super({
       apiServer: GEMINI_BASE,
-      apiKey: config.apiKey,
+      apiKey: pool.current,
       model: config.model,
       template: config.template,
       maxTokens: config.maxTokens,
@@ -51,18 +114,18 @@ export class GeminiOpenAIAdapter extends OpenAIChatAdapter {
 export class GeminiNativeAdapter {
   readonly supportsNativeTools = true
   readonly config: GeminiConfig
-  private readonly client: GoogleGenAI
+  private readonly pool: KeyPool
 
   constructor(config: GeminiConfig) {
     this.config = config
-    this.client = new GoogleGenAI({ apiKey: config.apiKey })
+    this.pool = new KeyPool(config.apiKey)
   }
 
   async status() { return { model: this.config.model } }
 
-  async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
+  private buildGenerateParams(messages: Message[], tools?: ToolDefinition[]) {
     const cfg = this.config
-    const call = () => this.client.models.generateContent({
+    return {
       model: cfg.model,
       contents: messagesToSDKContents(messages) as any,
       config: {
@@ -75,9 +138,16 @@ export class GeminiNativeAdapter {
           ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
           : {}),
       } as any,
-    })
+    }
+  }
 
-    const response = await withRetry(call)
+  async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
+    const params = this.buildGenerateParams(messages, tools)
+    const response = await withKeyRotation(
+      this.pool,
+      (client) => client.models.generateContent(params),
+      'gemini native generate',
+    )
     const candidate = response.candidates?.[0]
     const finishReason = (candidate as any)?.finishReason
     consola.debug('[gemini] finishReason:', finishReason, 'parts:', candidate?.content?.parts?.length)
@@ -95,20 +165,12 @@ export class GeminiNativeAdapter {
                    'Please retry the same operation with valid JSON.',
         },
       ]
-      const retry = await withRetry(() => this.client.models.generateContent({
-        model: cfg.model,
-        contents: messagesToSDKContents(corrected) as any,
-        config: {
-          systemInstruction: extractSystem(messages),
-          maxOutputTokens: cfg.maxTokens ?? 4096,
-          temperature: cfg.temperature ?? 0.7,
-          topP: cfg.topP ?? 0.95,
-          ...(tools?.length ? { tools: [{ functionDeclarations: toFunctionDeclarations(tools) }] } : {}),
-          ...(cfg.thinking || cfg.thinkingLevel
-            ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
-            : {}),
-        } as any,
-      }))
+      const retryParams = this.buildGenerateParams(corrected, tools)
+      const retry = await withKeyRotation(
+        this.pool,
+        (client) => client.models.generateContent(retryParams),
+        'gemini native generate (malformed retry)',
+      )
       const retryCandidate = retry.candidates?.[0]
       consola.debug('[gemini] retry finishReason:', (retryCandidate as any)?.finishReason, 'parts:', retryCandidate?.content?.parts?.length)
       return parseSDKResponse((retryCandidate?.content?.parts ?? []) as SDKPart[])
@@ -122,21 +184,8 @@ export class GeminiNativeAdapter {
   }
 
   async *stream(messages: Message[], tools?: ToolDefinition[]): AsyncGenerator<string> {
-    const cfg = this.config
-    const stream = await this.client.models.generateContentStream({
-      model: cfg.model,
-      contents: messagesToSDKContents(messages) as any,
-      config: {
-        systemInstruction: extractSystem(messages),
-        maxOutputTokens: cfg.maxTokens ?? 4096,
-        temperature: cfg.temperature ?? 0.7,
-        topP: cfg.topP ?? 0.95,
-        ...(tools?.length ? { tools: [{ functionDeclarations: toFunctionDeclarations(tools) }] } : {}),
-        ...(cfg.thinking || cfg.thinkingLevel
-          ? { thinkingConfig: { thinkingLevel: toThinkingLevel(cfg.thinkingLevel), includeThoughts: true } }
-          : {}),
-      } as any,
-    })
+    const params = this.buildGenerateParams(messages, tools)
+    const stream = await this.pool.buildClient().models.generateContentStream(params)
     for await (const chunk of stream) {
       const parts = (chunk.candidates?.[0]?.content?.parts ?? []) as SDKPart[]
       for (const part of parts) {
@@ -163,12 +212,12 @@ export type GeminiInteractionsConfig = GeminiConfig & {
 export class GeminiInteractionsAdapter {
   readonly supportsNativeTools = true
   readonly config: GeminiInteractionsConfig
-  private readonly client: GoogleGenAI
+  private readonly pool: KeyPool
   private previousInteractionId?: string
 
   constructor(config: GeminiInteractionsConfig) {
     this.config = config
-    this.client = new GoogleGenAI({ apiKey: config.apiKey })
+    this.pool = new KeyPool(config.apiKey)
   }
 
   async status() { return { model: this.config.model } }
@@ -176,11 +225,12 @@ export class GeminiInteractionsAdapter {
   resetSession(): void { this.previousInteractionId = undefined }
 
   async generate(messages: Message[], tools?: ToolDefinition[]): Promise<ParsedTurn> {
-    const interaction = await withRetry(() =>
-      (this.client.interactions as any).create(
+    const interaction = await withKeyRotation(
+      this.pool,
+      (client) => (client.interactions as any).create(
         this.buildParams(messages, false, tools),
       ) as Promise<any>,
-      { label: 'gemini interactions generate' },
+      'gemini interactions generate',
     )
 
     if (this.config.store !== false) {
@@ -195,7 +245,7 @@ export class GeminiInteractionsAdapter {
   }
 
   async *stream(messages: Message[], tools?: ToolDefinition[]): AsyncGenerator<string> {
-    const stream = (await (this.client.interactions as any).create(
+    const stream = (await (this.pool.buildClient().interactions as any).create(
       this.buildParams(messages, true, tools),
     )) as AsyncIterable<any>
 
