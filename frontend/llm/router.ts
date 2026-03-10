@@ -281,7 +281,13 @@ export class ModelRouter {
       const resolved = cfg.apiKeySecrets.map(n => this.secrets(n)).filter((v): v is string => !!v)
       if (resolved.length) return resolved.length === 1 ? resolved[0]! : resolved
     }
-    if (cfg.apiKeySecret) return this.secrets(cfg.apiKeySecret) ?? null
+    if (cfg.apiKeySecret) {
+      const val = this.secrets(cfg.apiKeySecret)
+      if (!val) return null
+      // Comma-separated value → key pool (e.g. GEMINI_API_KEYS=key1,key2,key3)
+      const parts = val.split(',').map(s => s.trim()).filter(Boolean)
+      return parts.length > 1 ? parts : parts[0] ?? null
+    }
     return null
   }
 }
