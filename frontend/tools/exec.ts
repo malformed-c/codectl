@@ -105,6 +105,17 @@ export class PersistentShell {
     const encoder  = new TextEncoder()
     const deadline = Date.now() + timeoutMs
 
+    // Write the command to a temp file and source it rather than writing
+    // directly to stdin. Heredocs fail when bash reads from a pipe (it blocks
+    // waiting for the EOF delimiter because stdin is the same stream as the
+    // command input). Sourcing a file is identical in behaviour — cwd, env
+    // vars, and shell state all persist — but heredoc parsing is reliable.
+    const tmpFile = `/tmp/codectl_${Date.now()}_${Math.random().toString(36).slice(2)}.sh`
+    await Bun.write(tmpFile, command)
+    // Preserve the sourced script's exit code: store it, clean up, then
+    // re-raise it via a subshell so $? is correct when the sentinel reads it.
+    const wrappedCommand = `source ${tmpFile}; _ce=$?; rm -f ${tmpFile}; (exit $_ce)`
+
     // Race a single reader chunk against a deadline (ms).
     // Returns null when the deadline fires, IteratorResult otherwise.
     const readChunk = <T>(
@@ -136,9 +147,9 @@ export class PersistentShell {
       } catch { /* ignore */ }
     })()
 
-    // Write command + sentinel probe to stdin
+    // Write wrapped command + sentinel probe to stdin
     const sentinelCmd = `\nprintf '\\n${SENTINEL} %d %s\\n' $? "$(pwd)"\n`
-    this.stdin.write(encoder.encode(command + sentinelCmd))
+    this.stdin.write(encoder.encode(wrappedCommand + sentinelCmd))
     await this.stdin.flush()
 
     // Read stdout until sentinel appears, bailing if the deadline fires

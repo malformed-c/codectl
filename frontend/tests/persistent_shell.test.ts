@@ -50,4 +50,20 @@ describe('PersistentShell', () => {
     const { stdout } = await sh.exec('for i in 1 2 3; do echo $i; done')
     expect(stdout.trim()).toBe('1\n2\n3')
   })
+  test('heredoc writes file correctly', async () => {
+    const { exitCode } = await sh.exec(
+      'cat > /tmp/codectl_heredoc_test.txt <<EOF\nhello\nworld\nEOF'
+    )
+    expect(exitCode).toBe(0)
+    const { stdout } = await sh.exec('cat /tmp/codectl_heredoc_test.txt; rm /tmp/codectl_heredoc_test.txt')
+    expect(stdout.trim()).toBe('hello\nworld')
+  })
+
+  test('heredoc exit code propagates', async () => {
+    const { exitCode } = await sh.exec(
+      'cat > /tmp/codectl_hd2.txt <<EOF\ndata\nEOF\nfalse'
+    )
+    expect(exitCode).toBe(1)
+    await sh.exec('rm -f /tmp/codectl_hd2.txt')
+  })
 })
