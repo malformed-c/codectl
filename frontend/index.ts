@@ -113,6 +113,11 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
 // --- Main ---
 
+/** Gemini and other large-context adapters support >> 32k tokens input. */
+function isLargeContext(adapter: unknown): boolean {
+  return (adapter as any)?.config?.model?.startsWith('gemini') ?? false
+}
+
 async function main(): Promise<void> {
   const config = await loadConfig()
   const historyStore = new HistoryStore(config.history_path)
@@ -145,6 +150,7 @@ async function main(): Promise<void> {
       orchestratorConfig: {
         toolFormat: (config.tool_format ?? 'json') as any,
         autonomousTurns: 16,
+        contextBudget: config.context_budget ?? (isLargeContext(adapter) ? 2_000_000 : 128_000),
         graphMemoryPath: config.graph_memory_path,
       },
     })
@@ -166,6 +172,7 @@ async function main(): Promise<void> {
       adapter,
       toolFormat: (config.tool_format ?? 'json') as any,
       autonomousTurns: 16,
+      contextBudget: config.context_budget ?? (isLargeContext(adapter) ? 2_000_000 : 128_000),
       checkpointDir: config.checkpoint_path ? `${config.checkpoint_path}/cli-default` : undefined,
       checkpointKeep: config.checkpoint_keep,
       graphMemoryPath: config.graph_memory_path,

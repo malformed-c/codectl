@@ -144,6 +144,7 @@ export type Config = {
   checkpoint_path?: string
   checkpoint_keep?: number
   graph_memory_path?: string
+  context_budget?: number
   default_model: string
   available_models: string[]
   tool_format?: string
