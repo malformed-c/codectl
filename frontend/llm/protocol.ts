@@ -39,6 +39,14 @@ export type ProviderConfig = {
   apiKeySecret?: string
   /** Literal API key — takes priority over apiKeySecret. */
   apiKeyLiteral?: string
+  /**
+   * Multiple env var names for key-pool rotation (e.g. Gemini free-tier quota).
+   * Resolved at build time; all non-empty values are passed to the adapter's KeyPool.
+   * Takes priority over apiKeySecret when present.
+   */
+  apiKeySecrets?: string[]
+  /** Multiple literal keys for key-pool rotation. Takes priority over apiKeySecrets. */
+  apiKeyLiterals?: string[]
   defaultHeaders?: Record<string, string>
   /**
    * Set false for local/third-party providers that don't support OpenAI
@@ -76,14 +84,14 @@ export interface ModelProvider {
    * Build and return a configured LLMAdapter for this provider.
    * Called once per (provider, model) pair and cached by the router.
    */
-  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter
+  build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter
 
   /** Optional liveness check — returns true if the provider is reachable. */
-  healthCheck?(config: ProviderConfig, apiKey: string | null): Promise<boolean>
+  healthCheck?(config: ProviderConfig, apiKey: string | string[] | null): Promise<boolean>
 
   /**
    * Return a capability instance if this provider supports it, else null.
    * cap is a CapabilityKey created with defineCapability<T>().
    */
-  getCapability?<T>(cap: CapabilityKey<T>, config: ProviderConfig, apiKey: string | null): T | null
+  getCapability?<T>(cap: CapabilityKey<T>, config: ProviderConfig, apiKey: string | string[] | null): T | null
 }

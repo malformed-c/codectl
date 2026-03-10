@@ -19,7 +19,7 @@ import { Profiles } from '../../template'
 export class KoboldProvider implements ModelProvider {
   readonly providerType = 'koboldcpp'
 
-  build(config: ProviderConfig, _modelName: string, _apiKey: string | null): LLMAdapter {
+  build(config: ProviderConfig, _modelName: string, _apiKey: string | string[] | null): LLMAdapter {
     return new KoboldAdapter({
       apiServer: config.baseUrl ?? 'http://127.0.0.1:5001/api',
       template: Profiles.mistral,
@@ -43,7 +43,7 @@ export class KoboldProvider implements ModelProvider {
 export class OpenAIChatProvider implements ModelProvider {
   readonly providerType = 'openai-chat'
 
-  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
+  build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     return new OpenAIChatAdapter({
       apiServer: config.baseUrl ?? 'https://api.openai.com/v1',
       apiKey: apiKey ?? '',
@@ -52,7 +52,7 @@ export class OpenAIChatProvider implements ModelProvider {
     })
   }
 
-  async healthCheck(config: ProviderConfig, apiKey: string | null): Promise<boolean> {
+  async healthCheck(config: ProviderConfig, apiKey: string | string[] | null): Promise<boolean> {
     try {
       const url = `${config.baseUrl ?? 'https://api.openai.com/v1'}/models`
       const res = await fetch(url, {
@@ -69,7 +69,7 @@ export class OpenAIChatProvider implements ModelProvider {
 export class OpenAITextProvider implements ModelProvider {
   readonly providerType = 'openai-text'
 
-  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
+  build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     return new OpenAITextAdapter({
       apiServer: config.baseUrl ?? 'https://api.openai.com/v1',
       apiKey: apiKey ?? '',
@@ -86,9 +86,7 @@ export class OpenAITextProvider implements ModelProvider {
 export class GeminiNativeProvider implements ModelProvider {
   readonly providerType = 'gemini-native'
 
-  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
-    // Gemini 3+ models think by default; explicitly enabling ensures correct
-    // thought_signature handling in multi-turn function calling.
+  build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     const isGemini3 = modelName.startsWith('gemini-3') || modelName.startsWith('gemini-2.5')
     return new GeminiNativeAdapter({
       apiKey:        apiKey ?? '',
@@ -103,7 +101,7 @@ export class GeminiNativeProvider implements ModelProvider {
 export class GeminiInteractionsProvider implements ModelProvider {
   readonly providerType = 'gemini-interactions'
 
-  build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
+  build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     return new GeminiInteractionsAdapter({
       apiKey:   apiKey ?? '',
       model:    modelName,

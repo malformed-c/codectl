@@ -30,6 +30,10 @@ type ProviderSettings = {
   base_url?: string
   api_key_secret?: string
   api_key_literal?: string
+  /** List of env var names for key-pool rotation. */
+  api_key_secrets?: string[]
+  /** List of literal keys for key-pool rotation. */
+  api_key_literals?: string[]
   default_headers?: Record<string, string>
   supports_hosted_tools?: boolean
   [key: string]: unknown
@@ -242,6 +246,8 @@ export class ModelRouter {
         baseUrl: pdata.base_url,
         apiKeySecret: pdata.api_key_secret,
         apiKeyLiteral: pdata.api_key_literal,
+        apiKeySecrets: pdata.api_key_secrets,
+        apiKeyLiterals: pdata.api_key_literals,
         defaultHeaders: pdata.default_headers,
         supportsHostedTools: pdata.supports_hosted_tools,
       })
@@ -268,8 +274,13 @@ export class ModelRouter {
     this.registerProvider(new GeminiInteractionsProvider())
   }
 
-  private _resolveKey(cfg: ProviderConfig): string | null {
+  private _resolveKey(cfg: ProviderConfig): string | string[] | null {
+    if (cfg.apiKeyLiterals?.length) return cfg.apiKeyLiterals
     if (cfg.apiKeyLiteral) return cfg.apiKeyLiteral
+    if (cfg.apiKeySecrets?.length) {
+      const resolved = cfg.apiKeySecrets.map(n => this.secrets(n)).filter((v): v is string => !!v)
+      if (resolved.length) return resolved.length === 1 ? resolved[0]! : resolved
+    }
     if (cfg.apiKeySecret) return this.secrets(cfg.apiKeySecret) ?? null
     return null
   }

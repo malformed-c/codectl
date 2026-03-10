@@ -431,20 +431,16 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
   }
 }
 
-// --- append tool ---
+// --- append / prepend tools ---
 
 export const AppendTool: ToolDefinition = {
   name: 'append',
-  description:
-    'Append a value to a JSON array (or concatenate to a string) stored in memory. ' +
-    'Use path to target a nested array inside a JSON object. ' +
-    'Optionally save the result to a different key with save_to.',
+  description: 'Concatenate a string to the end of a memory value. Creates the key if it does not exist.',
   parameters: {
     type: 'object',
     properties: {
       key:     { type: 'string', description: 'Memory key to read and update.' },
-      value:   { type: 'string', description: 'Value to append. Parsed as JSON if valid, else used as string.' },
-      path:    { type: 'string', description: 'Dot-notation path to the array inside the JSON object (e.g. "codePlan"). Omit to append to the root array.' },
+      value:   { type: 'string', description: 'Text to append.' },
       save_to: { type: 'string', description: 'If set, write result here instead of back to key.' },
     },
     required: ['key', 'value'],
@@ -453,59 +449,53 @@ export const AppendTool: ToolDefinition = {
     type: 'object',
     properties: {
       key:    { type: 'string', description: 'Key the result was stored in.' },
-      length: { type: 'number', description: 'New length of the array after append.' },
+      length: { type: 'number', description: 'Length of the resulting string.' },
+    },
+  },
+}
+
+export const PrependTool: ToolDefinition = {
+  name: 'prepend',
+  description: 'Concatenate a string to the beginning of a memory value. Creates the key if it does not exist.',
+  parameters: {
+    type: 'object',
+    properties: {
+      key:     { type: 'string', description: 'Memory key to read and update.' },
+      value:   { type: 'string', description: 'Text to prepend.' },
+      save_to: { type: 'string', description: 'If set, write result here instead of back to key.' },
+    },
+    required: ['key', 'value'],
+  },
+  returns: {
+    type: 'object',
+    properties: {
+      key:    { type: 'string', description: 'Key the result was stored in.' },
+      length: { type: 'number', description: 'Length of the resulting string.' },
     },
   },
 }
 
 export function createAppendHandler(memory: MemoryAccess): ToolHandler {
   return async (args) => {
-    const memKey  = args.key as string
-    const rawVal  = args.value as string
-    const pathStr = args.path as string | undefined
-    const saveTo  = (args.save_to as string | undefined) ?? memKey
+    const memKey = args.key as string
+    const value  = args.value as string
+    const saveTo = (args.save_to as string | undefined) ?? memKey
+    const current = memory.get(memKey) ?? ''
+    const result = current + value
+    memory.set(saveTo, result)
+    return ok({ key: saveTo, length: result.length })
+  }
+}
 
-    const stored = memory.get(memKey)
-    if (stored === undefined) return err(`Memory key '${memKey}' not found`)
-
-    let newVal: unknown
-    try { newVal = JSON.parse(rawVal) } catch { newVal = rawVal }
-
-    // Parse stored value
-    let root: unknown
-    try { root = JSON.parse(stored) } catch { root = stored }
-
-    if (pathStr) {
-      // Navigate to target array inside a JSON object
-      const keys = parsePath(pathStr)
-      const cur = pathGet(root, keys)
-      if (!cur.ok) return err(cur.error)
-
-      const arr = cur.value
-      if (!Array.isArray(arr)) return err(`Value at path '${pathStr}' is not an array`)
-
-      const updated = [...arr, newVal]
-      const setResult = pathSet(root, keys, updated)
-      if (!setResult.ok) return err(setResult.error)
-
-      const out = JSON.stringify(setResult.value)
-      memory.set(saveTo, out)
-      return ok({ key: saveTo, length: updated.length })
-
-    } else {
-      // Root must be an array or string
-      if (Array.isArray(root)) {
-        const updated = [...root, newVal]
-        memory.set(saveTo, JSON.stringify(updated))
-        return ok({ key: saveTo, length: updated.length })
-      }
-      if (typeof root === 'string' && typeof newVal === 'string') {
-        const updated = root + newVal
-        memory.set(saveTo, updated)
-        return ok({ key: saveTo, length: updated.length })
-      }
-      return err(`Root value at '${memKey}' is not an array or string. Use path= to target a nested array.`)
-    }
+export function createPrependHandler(memory: MemoryAccess): ToolHandler {
+  return async (args) => {
+    const memKey = args.key as string
+    const value  = args.value as string
+    const saveTo = (args.save_to as string | undefined) ?? memKey
+    const current = memory.get(memKey) ?? ''
+    const result = value + current
+    memory.set(saveTo, result)
+    return ok({ key: saveTo, length: result.length })
   }
 }
 
@@ -585,13 +575,14 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
   }
 }
 
-export const TransformTools: ToolDefinition[] = [ExtractTool, JsonTool, AppendTool, InstantiateTool]
+export const TransformTools: ToolDefinition[] = [ExtractTool, JsonTool, AppendTool, PrependTool, InstantiateTool]
 
 export function createTransformHandlers(memory: MemoryAccess, history: HistoryAccess): Record<string, ToolHandler> {
   return {
     extract:     createExtractHandler(memory, history),
     json:        createJsonHandler(memory),
     append:      createAppendHandler(memory),
+    prepend:     createPrependHandler(memory),
     instantiate: createInstantiateHandler(memory),
   }
 }
