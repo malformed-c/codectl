@@ -22,11 +22,11 @@
  *    Ansible items:  pipe JSON to `uv run codectl` subprocess, read report.
  */
 
-import { createHash } from "node:crypto"
-import { join, isAbsolute } from "node:path"
-import { readFileSync } from "node:fs"
-import { consola } from "consola"
-import { Codeq, CodeKind, CodePart } from "./codeq/codeq"
+import { createHash } from 'node:crypto'
+import { join, isAbsolute } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { consola } from 'consola'
+import { Codeq, CodeKind, CodePart } from './codeq/codeq'
 import type {
   CodePlan,
   CodeEditItem,
@@ -34,8 +34,8 @@ import type {
   PlanItem,
   Resource,
   FunctionEnsure,
-} from "./codeplan.schema"
-import type { LLMAdapter } from "./orchestrator"
+} from './codeplan.schema'
+import type { LLMAdapter } from './orchestrator'
 
 // ---
 // Types
@@ -55,7 +55,7 @@ export type DryApplyError = {
 
 export type AnsibleTaskResult = {
   name: string
-  status: "ok" | "changed" | "failed" | "skipped" | "unreachable"
+  status: 'ok' | 'changed' | 'failed' | 'skipped' | 'unreachable'
   message: string
 }
 
@@ -68,7 +68,7 @@ export type AnsibleReport = {
 export type PlanRunResult = {
   ok: boolean
   /** Phase that stopped execution (undefined = completed) */
-  failedPhase?: "resolve" | "dry_apply" | "conflict" | "execute"
+  failedPhase?: 'resolve' | 'dry_apply' | 'conflict' | 'execute'
   dryApplyErrors?: DryApplyError[]
   conflictedFiles?: string[]
   ansibleReport?: AnsibleReport
@@ -87,11 +87,12 @@ function resolvePath(gitRoot: string, path: string): string {
 function hashFile(path: string): string {
   try {
     const content = readFileSync(path)
-    return createHash("sha256").update(content).digest("hex")
+
+    return createHash('sha256').update(content).digest('hex')
 
   } catch {
     // File doesn't exist yet - that's fine, hash as empty
-    return ""
+    return ''
   }
 }
 
@@ -116,8 +117,9 @@ async function resolveStreams(
     for (const resource of item.spec.resources) {
 
       const absPath = resolvePath(gitRoot, resource.path)
+
       for (const fn of resource.ensure.functions ?? []) {
-        if (fn.state === "present") {
+        if (fn.state === 'present') {
           jobs.push({ streamID: fn.streamID, name: fn.name, path: absPath })
         }
       }
@@ -131,29 +133,30 @@ async function resolveStreams(
 
   const resolutions = await Promise.all(jobs.map(async (job) => {
     // Build a minimal file map for context
-    let fileContext = ""
+    let fileContext = ''
+
     try {
       const codeq = await Codeq.fromFile(job.path)
-      fileContext = codeq.fileMap().join("\n")
+      fileContext = codeq.fileMap().join('\n')
 
     } catch {
-      fileContext = "(new file)"
+      fileContext = '(new file)'
     }
 
     const prompt = [
       `Implement the function \`${job.name}\` for the file \`${job.path}\`.`,
-      ``,
-      `Current file structure:`,
+      '',
+      'Current file structure:',
       fileContext,
-      ``,
+      '',
       // TODO pass target dynamically
-      `Return ONLY the function body (the code inside the function, not the def line).`,
-      `No markdown, no explanation.`,
-    ].join("\n")
+      'Return ONLY the function body (the code inside the function, not the def line).',
+      'No markdown, no explanation.',
+    ].join('\n')
 
     const parsed = await adapter.generate([
-      { role: "system", content: "You are a code generation assistant. Output only raw code." },
-      { role: "user", content: prompt },
+      { role: 'system', content: 'You are a code generation assistant. Output only raw code.' },
+      { role: 'user', content: prompt },
     ])
 
     return {
@@ -164,6 +167,7 @@ async function resolveStreams(
   }))
 
   const map = new Map<string, StreamResolution>()
+
   for (const r of resolutions) map.set(r.streamID, r)
 
   return map
@@ -173,7 +177,7 @@ async function resolveStreams(
 // Phase 2 --- Dry apply
 // ---
 
-const STUB_BODY = `raise NotImplementedError("not yet implemented")`
+const STUB_BODY = 'raise NotImplementedError("not yet implemented")'
 
 async function dryApply(
   items: CodeEditItem[],
@@ -188,12 +192,13 @@ async function dryApply(
       const absPath = resolvePath(gitRoot, resource.path)
 
       let codeq: Codeq
+
       try {
         codeq = await Codeq.fromFile(absPath)
 
       } catch {
         // File doesn't exist yet --- start from empty
-        codeq = Codeq.fromSource("", resource.path)
+        codeq = Codeq.fromSource('', resource.path)
       }
 
       instances.set(absPath, codeq)
@@ -210,10 +215,11 @@ async function dryApply(
 
       // Functions
       for (const fn of resource.ensure.functions ?? []) {
-        if (fn.state === "absent") {
+        if (fn.state === 'absent') {
           // Dry-check: just verify we can find it (or that it's already gone --- ok either way)
           try {
             const existing = codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node)
+
             if (existing) {
               // Would be removed --- no error
             }
@@ -240,8 +246,9 @@ async function dryApply(
           // Validate that the resolved body at least parses by doing a trial fromSource.
           const resolution = resolutions.get(fn.streamID)
           const body = resolution?.body ?? STUB_BODY
-          const indented = body.split("\n").map(l => `    ${l}`).join("\n")
+          const indented = body.split('\n').map(l => `    ${l}`).join('\n')
           const trial = `def ${fn.name}():\n${indented}\n`
+
           try {
             Codeq.fromSource(trial)
 
@@ -284,7 +291,7 @@ async function writeCodeEdits(
 
       // Functions with state=absent: remove by rebuilding source without them
       for (const fn of resource.ensure.functions ?? []) {
-        if (fn.state === "absent") {
+        if (fn.state === 'absent') {
           const existing = (() => {
             try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node) }
 
@@ -294,8 +301,9 @@ async function writeCodeEdits(
           if (existing) {
             let src = codeq.toSource()
             const idx = src.indexOf(existing)
+
             if (idx !== -1) {
-              const end = idx + existing.length + (src[idx + existing.length] === "\n" ? 1 : 0)
+              const end = idx + existing.length + (src[idx + existing.length] === '\n' ? 1 : 0)
               src = src.slice(0, idx) + src.slice(end)
               codeq = Codeq.fromSource(src, resource.path)
               instances.set(absPath, codeq)
@@ -315,7 +323,7 @@ async function writeCodeEdits(
         if (!nowExists) {
           const resolution = resolutions.get(fn.streamID)
           const body = resolution?.body ?? STUB_BODY
-          const indented = body.split("\n").map(l => `    ${l}`).join("\n")
+          const indented = body.split('\n').map(l => `    ${l}`).join('\n')
           const stub = `\n\ndef ${fn.name}():\n${indented}\n`
           const src = codeq.toSource() + stub
           codeq = Codeq.fromSource(src, resource.path)
@@ -341,11 +349,11 @@ async function runAnsible(
 ): Promise<AnsibleReport> {
   const payload = JSON.stringify({ items })
 
-  const proc = Bun.spawn(["uv", "run", "codectl"], {
+  const proc = Bun.spawn(['uv', 'run', 'codectl'], {
     cwd: backendDir,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
   })
 
   proc.stdin.write(payload)
@@ -392,50 +400,53 @@ export async function runPlan(
   const sorted = [...plan.codePlan].sort(
     (a, b) => (a.metadata.order ?? 0) - (b.metadata.order ?? 0)
   )
-  const codeEditItems = sorted.filter((i): i is CodeEditItem => i.kind === "CodeEdit")
-  const ansibleItems = sorted.filter((i): i is AnsibleItem => i.kind === "Ansible")
+  const codeEditItems = sorted.filter((i): i is CodeEditItem => i.kind === 'CodeEdit')
+  const ansibleItems = sorted.filter((i): i is AnsibleItem => i.kind === 'Ansible')
 
   // Snapshot file hashes before any work begins
   const affected = affectedPaths(codeEditItems, gitRoot)
   const snapshots = new Map(affected.map(p => [p, hashFile(p)]))
 
   // --- Phase 1: Resolve streams ---
-  consola.start("Phase 1: resolving streams")
+  consola.start('Phase 1: resolving streams')
 
   let resolutions: Map<string, StreamResolution>
+
   try {
     resolutions = await resolveStreams(codeEditItems, adapter, gitRoot)
 
   } catch (err) {
-    return { ok: false, failedPhase: "resolve", error: String(err) }
+    return { ok: false, failedPhase: 'resolve', error: String(err) }
   }
 
   consola.success(`Phase 1: ${resolutions.size} stream(s) resolved`)
 
   // --- Phase 2: Dry apply ---
-  consola.start("Phase 2: dry apply")
+  consola.start('Phase 2: dry apply')
   const { errors, codeqInstances } = await dryApply(codeEditItems, resolutions, gitRoot)
+
   if (errors.length > 0) {
     consola.warn(`Phase 2: ${errors.length} error(s)`)
 
-    return { ok: false, failedPhase: "dry_apply", dryApplyErrors: errors }
+    return { ok: false, failedPhase: 'dry_apply', dryApplyErrors: errors }
   }
 
-  consola.success("Phase 2: dry apply clean")
+  consola.success('Phase 2: dry apply clean')
 
   // --- Phase 3: Conflict guard ---
-  consola.start("Phase 3: conflict check")
+  consola.start('Phase 3: conflict check')
   const conflicted = affected.filter(p => hashFile(p) !== snapshots.get(p))
+
   if (conflicted.length > 0) {
     consola.warn(`Phase 3: ${conflicted.length} file(s) changed since plan started`)
 
-    return { ok: false, failedPhase: "conflict", conflictedFiles: conflicted }
+    return { ok: false, failedPhase: 'conflict', conflictedFiles: conflicted }
   }
 
-  consola.success("Phase 3: no conflicts")
+  consola.success('Phase 3: no conflicts')
 
   // --- Phase 4: Execute ---
-  consola.start("Phase 4: executing")
+  consola.start('Phase 4: executing')
   const written: string[] = []
   let ansibleReport: AnsibleReport | undefined
 
@@ -448,7 +459,7 @@ export async function runPlan(
       consola.success(`Phase 4: wrote ${paths.length} file(s)`)
 
     } catch (err) {
-      return { ok: false, failedPhase: "execute", error: String(err), written }
+      return { ok: false, failedPhase: 'execute', error: String(err), written }
     }
   }
 
@@ -459,12 +470,12 @@ export async function runPlan(
     ansibleReport = await runAnsible(ansibleItems, backendDir)
 
     if (!ansibleReport.ok) {
-      consola.warn("Phase 4: Ansible reported failures")
+      consola.warn('Phase 4: Ansible reported failures')
 
-      return { ok: false, failedPhase: "execute", ansibleReport, written }
+      return { ok: false, failedPhase: 'execute', ansibleReport, written }
     }
 
-    consola.success("Phase 4: Ansible ok")
+    consola.success('Phase 4: Ansible ok')
   }
 
   return { ok: true, written, ansibleReport }

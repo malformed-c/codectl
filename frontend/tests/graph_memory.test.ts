@@ -11,6 +11,7 @@ const DB_PATH = '/tmp/test_graph_memory.db'
 
 function freshDb(): GraphMemory {
   if (existsSync(DB_PATH)) unlinkSync(DB_PATH)
+
   return new GraphMemory(DB_PATH)
 }
 
@@ -250,6 +251,7 @@ describe('GraphMemory - search (RRF)', () => {
     gm.add({ kind: 'semantic', content: 'TypeScript compiler checks types.' })
 
     const results = gm.search('TypeScript')
+
     for (let i = 1; i < results.length; i++) {
       expect(results[i - 1]!.score).toBeGreaterThanOrEqual(results[i]!.score)
     }
@@ -298,8 +300,8 @@ describe('GraphMemory - runDecayAndPrune', () => {
     const id = gm.add({ kind: 'episodic', content: 'Ancient event.' })
     const ancient = Date.now() - 365 * 86_400_000   // 1 year ago
     // Directly update last_access via the DB
-    ;(gm as any).db.run(`UPDATE memory_nodes SET last_access = ? WHERE id = ?`, [ancient, id])
-    ;(gm as any).db.run(`UPDATE memory_nodes SET created_at = ? WHERE id = ?`, [ancient, id])
+    ;(gm as any).db.run('UPDATE memory_nodes SET last_access = ? WHERE id = ?', [ancient, id])
+    ;(gm as any).db.run('UPDATE memory_nodes SET created_at = ? WHERE id = ?', [ancient, id])
 
     const pruned = gm.runDecayAndPrune({ ageDays: 1, pruneBelow: 0.5 })
     expect(pruned).toBe(1)
@@ -349,7 +351,9 @@ describe('GraphMemory - ID collision resistance', () => {
   let gm: GraphMemory
 
   beforeEach(() => { gm = freshDb() })
-  afterEach(() => { gm.close(); if (existsSync(DB_PATH)) unlinkSync(DB_PATH) })
+  afterEach(() => { gm.close()
+
+ if (existsSync(DB_PATH)) unlinkSync(DB_PATH) })
 
   test('bulk inserts produce no duplicate IDs', () => {
     const ids = Array.from({ length: 200 }, (_, i) =>
@@ -377,6 +381,7 @@ describe('GraphMemory - ID collision resistance', () => {
     )
     // Link each consecutive pair
     const edgeIds: string[] = []
+
     for (let i = 0; i < nodeIds.length - 1; i++) {
       edgeIds.push(gm.link(nodeIds[i]!, nodeIds[i + 1]!, 'temporal'))
     }

@@ -85,6 +85,7 @@ export class PersistentShell {
     const prev = this.lockChain
     this.lockChain = new Promise<void>(r => { unlock = r })
     await prev
+
     try {
       return await this._exec(command, timeoutMs)
     } finally {
@@ -123,7 +124,9 @@ export class PersistentShell {
       by: number,
     ): Promise<{ value: T | undefined; done: boolean } | null> => {
       const remaining = by - Date.now()
+
       if (remaining <= 0) return Promise.resolve(null)
+
       return Promise.race([
         reader.read() as Promise<{ value: T | undefined; done: boolean }>,
         new Promise<null>(resolve => setTimeout(() => resolve(null), remaining)),
@@ -138,9 +141,12 @@ export class PersistentShell {
         while (this.generation === gen) {
           // Give stderr a little extra time past the command deadline
           const chunk = await readChunk(this.errReader, deadline + 500)
+
           if (chunk === null || chunk.done) break
+
           if (chunk.value) {
             localErr += decoder.decode(chunk.value)
+
             if (this.buf.includes(SENTINEL)) break
           }
         }
@@ -154,10 +160,14 @@ export class PersistentShell {
 
     // Read stdout until sentinel appears, bailing if the deadline fires
     let timedOut = false
+
     while (!this.buf.includes(SENTINEL)) {
       const chunk = await readChunk(this.reader, deadline)
+
       if (chunk === null)    { timedOut = true; break }
+
       if (chunk.done)        { throw new Error('bash process exited unexpectedly') }
+
       if (chunk.value)       { this.buf += decoder.decode(chunk.value) }
     }
 
@@ -166,6 +176,7 @@ export class PersistentShell {
     // -----------------------------------------------------------------------
     if (timedOut) {
       const recoveryBy = Date.now() + RECOVERY_TIMEOUT_MS
+
       try {
         this.stdin.write(
           encoder.encode(`\x03\nprintf '\\n${SENTINEL} %d %s\\n' 130 "$(pwd)"\n`)
@@ -174,23 +185,29 @@ export class PersistentShell {
 
         while (!this.buf.includes(SENTINEL)) {
           const chunk = await readChunk(this.reader, recoveryBy)
+
           if (chunk === null || chunk.done) {
             // Recovery failed — clean restart so next call starts fresh
             this.restart()
+
             throw new Error(`bash command timed out after ${timeoutMs}ms (shell restarted)`)
           }
+
           if (chunk.value) this.buf += decoder.decode(chunk.value)
         }
         // Recovery succeeded — parse the sentinel so buf stays clean, then throw
         this._consumeSentinel()
       } catch (e) {
         await stderrDone
+
         if (String(e).includes('timed out')) throw e
         this.restart()
+
         throw new Error(`bash command timed out after ${timeoutMs}ms (shell restarted)`)
       }
 
       await stderrDone
+
       throw new Error(`bash command timed out after ${timeoutMs}ms`)
     }
 
@@ -223,6 +240,7 @@ export class PersistentShell {
 
     const match = sentinelLine.trim().match(new RegExp(`^${SENTINEL}\\s+(\\d+)\\s+(.+)$`))
     const exitCode = match ? parseInt(match[1]!, 10) : 0
+
     if (match) this.cwd = match[2]!.trim()
 
     return { output, exitCode }
@@ -320,10 +338,12 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
   const bashHandler: ToolHandler = async (args) => {
     if (args.restart) {
       sh.restart()
+
       return ok({ restarted: true, cwd: sh.getCwd() })
     }
 
     let command = args.command as string
+
     if (!command) return err("'command' or 'restart' required")
 
     // background=true: wrap command to detach and return the pid immediately
@@ -335,12 +355,15 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
 
     try {
       const { stdout, stderr, exitCode } = await sh.exec(command, timeout)
+
       if (exitCode !== 0) {
         // Non-zero exit codes are errors — include stdout/stderr so the model
         // sees what went wrong without needing a separate read.
         const detail = [stderr, stdout].filter(Boolean).join('\n').trim()
+
         return err(`exit ${exitCode}${detail ? ': ' + detail : ''}`)
       }
+
       return ok({ stdout, stderr, exitCode, cwd: sh.getCwd() })
     } catch (e) {
       return err(String(e))
@@ -349,11 +372,13 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
 
   const pythonHandler: ToolHandler = async (args) => {
     const code = args.code as string
+
     try {
       const proc = Bun.spawn(['python', '-c', code], { stdout: 'pipe', stderr: 'pipe' })
       const stdout = await new Response(proc.stdout).text()
       const stderr = await new Response(proc.stderr).text()
       await proc.exited
+
       return ok({ stdout, stderr, exitCode: proc.exitCode })
     } catch (e) {
       return err(String(e))
@@ -362,11 +387,13 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
 
   const tsHandler: ToolHandler = async (args) => {
     const code = args.code as string
+
     try {
       const proc = Bun.spawn(['bun', '-e', code], { stdout: 'pipe', stderr: 'pipe' })
       const stdout = await new Response(proc.stdout).text()
       const stderr = await new Response(proc.stderr).text()
       await proc.exited
+
       return ok({ stdout, stderr, exitCode: proc.exitCode })
     } catch (e) {
       return err(String(e))
@@ -376,9 +403,13 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
   const codeHandler: ToolHandler = async (args) => {
     const lang = args.language as string
     const code = args.code as string
+
     if (lang === 'bash' || lang === 'sh' || lang === 'shell') return bashHandler({ command: code })
+
     if (lang === 'python' || lang === 'py') return pythonHandler({ code })
+
     if (lang === 'typescript' || lang === 'ts') return tsHandler({ code })
+
     return err(`Unsupported language: ${lang}`)
   }
 

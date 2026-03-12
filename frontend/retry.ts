@@ -21,30 +21,39 @@ function classifyError(err: unknown): { code?: number; status?: string; message:
   if (err instanceof Error) {
     // Google GenAI SDK wraps errors as { error: { code, message, status } }
     const inner = (err as any).error ?? (err as any).errorDetails?.[0]
+
     if (inner?.code !== undefined) {
       return { code: inner.code, status: inner.status, message: inner.message ?? err.message }
     }
+
     // OpenAI-style: err.status
     if ((err as any).status !== undefined) {
       return { code: (err as any).status, message: err.message }
     }
+
     return { message: err.message }
   }
+
   if (typeof err === 'object' && err !== null) {
     const e = err as any
+
     return {
       code: e.error?.code ?? e.code,
       status: e.error?.status ?? e.status,
       message: e.error?.message ?? e.message ?? JSON.stringify(err),
     }
   }
+
   return { message: String(err) }
 }
 
 function isRetryable(err: unknown): boolean {
   const { code, status } = classifyError(err)
+
   if (code !== undefined && RETRYABLE_CODES.has(code)) return true
+
   if (status !== undefined && RETRYABLE_STATUSES.has(status)) return true
+
   return false
 }
 
@@ -67,6 +76,7 @@ export async function withRetry<T>(
   const label = opts.label ?? 'upstream'
 
   let lastErr: unknown
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn()
@@ -76,6 +86,7 @@ export async function withRetry<T>(
 
       if (!isRetryable(err)) {
         consola.error(`[retry:${label}] non-retryable error (code=${code ?? '?'} status=${status ?? '?'}): ${message}`)
+
         throw err
       }
 

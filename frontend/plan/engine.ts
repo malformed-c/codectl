@@ -80,6 +80,7 @@ export class TaskEngine {
     )
 
     consola.debug(`[TaskEngine] created ${taskId} status=${status}`)
+
     return this.get(taskId)!
   }
 
@@ -129,14 +130,16 @@ export class TaskEngine {
   // ---------------------------------------------------------------------------
 
   get(taskId: string): Task | null {
-    const row = this.db.prepare(`SELECT * FROM agent_task WHERE task_id = ?`).get(taskId) as any
+    const row = this.db.prepare('SELECT * FROM agent_task WHERE task_id = ?').get(taskId) as any
+
     return row ? this._rowToTask(row) : null
   }
 
   listPending(agentId?: string): Task[] {
     const rows = agentId
-      ? this.db.prepare(`SELECT * FROM agent_task WHERE status = 'pending' AND agent_id = ? ORDER BY created_at ASC`).all(agentId)
-      : this.db.prepare(`SELECT * FROM agent_task WHERE status = 'pending' ORDER BY created_at ASC`).all()
+      ? this.db.prepare('SELECT * FROM agent_task WHERE status = \'pending\' AND agent_id = ? ORDER BY created_at ASC').all(agentId)
+      : this.db.prepare('SELECT * FROM agent_task WHERE status = \'pending\' ORDER BY created_at ASC').all()
+
     return (rows as any[]).map(this._rowToTask)
   }
 
@@ -146,13 +149,15 @@ export class TaskEngine {
       WHERE  chain_id = ?
       ORDER  BY chain_order ASC NULLS LAST, created_at ASC
     `).all(chainId) as any[]
+
     return rows.map(this._rowToTask)
   }
 
   listAll(limit = 50): Task[] {
     const rows = this.db.prepare(
-      `SELECT * FROM agent_task ORDER BY created_at DESC LIMIT ?`
+      'SELECT * FROM agent_task ORDER BY created_at DESC LIMIT ?'
     ).all(limit) as any[]
+
     return rows.map(this._rowToTask)
   }
 
@@ -228,6 +233,7 @@ export class TaskEngine {
       `).all(...currentIds) as any[]
 
       const nextIds = rows.map(r => r.task_id)
+
       for (const id of nextIds) {
         this.db.prepare(`
           UPDATE agent_task SET status = 'cancelled', error = ?, updated_at = ?
@@ -241,12 +247,13 @@ export class TaskEngine {
     if (total) {
       consola.info(`[TaskEngine] cancelled ${total} downstream task(s) of ${taskId}`)
     }
+
     return total
   }
 
   private _updateStatus(taskId: string, status: TaskStatus): void {
     this.db.prepare(
-      `UPDATE agent_task SET status = ?, updated_at = ? WHERE task_id = ?`
+      'UPDATE agent_task SET status = ?, updated_at = ? WHERE task_id = ?'
     ).run(status, Date.now(), taskId)
   }
 

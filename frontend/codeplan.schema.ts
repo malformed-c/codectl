@@ -1,4 +1,4 @@
-import z from "zod"
+import z from 'zod'
 
 // ---
 // Shared
@@ -14,16 +14,16 @@ const metaSchema = z.object({
 // CodeEdit - handled by Bun / Codeq
 // ---
 
-const functionEnsureSchema = z.discriminatedUnion("state", [
+const functionEnsureSchema = z.discriminatedUnion('state', [
   z.object({
     name: z.string(),
-    state: z.literal("present"),
+    state: z.literal('present'),
     /** Stream ID for lazy body generation via model */
     streamID: z.string(),
   }),
   z.object({
     name: z.string(),
-    state: z.literal("absent"),
+    state: z.literal('absent'),
   }),
 ])
 
@@ -36,8 +36,8 @@ const resourceSchema = z.object({
 })
 
 const codeEditSchema = z.object({
-  apiVersion: z.literal("codectl/v1"),
-  kind: z.literal("CodeEdit"),
+  apiVersion: z.literal('codectl/v1'),
+  kind: z.literal('CodeEdit'),
   metadata: metaSchema,
   spec: z.object({
     resources: z.array(resourceSchema).min(1),
@@ -70,11 +70,11 @@ const ansibleHandlerSchema = z.object({
 })
 
 const ansibleSchema = z.object({
-  apiVersion: z.literal("codectl/v1"),
-  kind: z.literal("Ansible"),
+  apiVersion: z.literal('codectl/v1'),
+  kind: z.literal('Ansible'),
   metadata: metaSchema,
   spec: z.object({
-    hosts: z.union([z.string(), z.array(z.string())]).default("localhost"),
+    hosts: z.union([z.string(), z.array(z.string())]).default('localhost'),
     tasks: z.array(ansibleTaskSchema).min(1),
     handlers: z.array(ansibleHandlerSchema).optional(),
   }),
@@ -84,7 +84,7 @@ const ansibleSchema = z.object({
 // Unified CodePlan
 // ---
 
-const planItemSchema = z.discriminatedUnion("kind", [
+const planItemSchema = z.discriminatedUnion('kind', [
   codeEditSchema,
   ansibleSchema,
 ])
@@ -98,9 +98,15 @@ export const codePlanSchema = z.object({
 // ---
 
 export type CodePlan = z.infer<typeof codePlanSchema>
+
 export type PlanItem = z.infer<typeof planItemSchema>
+
 export type CodeEditItem = z.infer<typeof codeEditSchema>
+
 export type AnsibleItem = z.infer<typeof ansibleSchema>
+
 export type AnsibleTask = z.infer<typeof ansibleTaskSchema>
+
 export type Resource = z.infer<typeof resourceSchema>
+
 export type FunctionEnsure = z.infer<typeof functionEnsureSchema>

@@ -20,13 +20,15 @@ import { ok, err } from '../tool'
 export function parsePlan(raw: unknown): { ok: true; value: unknown } | { ok: false; error: string } {
   // 1. Parse strings
   let parsed: unknown = raw
+
   if (typeof raw === 'string') {
     try {
       parsed = JSON.parse(raw)
     } catch {
       parsed = destr(raw)
+
       if (typeof parsed === 'string') {
-        return err(`Invalid JSON: could not parse plan string`)
+        return err('Invalid JSON: could not parse plan string')
       }
     }
   }
@@ -37,16 +39,22 @@ export function parsePlan(raw: unknown): { ok: true; value: unknown } | { ok: fa
 
 function maybeParseString(v: unknown): unknown {
   if (typeof v !== 'string') return v
+
   try { return JSON.parse(v) } catch { return v }
 }
 
 function unwrap(v: unknown): unknown {
   if (Array.isArray(v)) return { codePlan: v }
+
   if (!v || typeof v !== 'object') return v
 
   const o = v as Record<string, unknown>
+
   if (o.codePlan) return v
+
   if ('plan'  in o) return unwrap(maybeParseString(o.plan))
+
   if ('value' in o) return unwrap(maybeParseString(o.value))
+
   return v
 }

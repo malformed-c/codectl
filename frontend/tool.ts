@@ -1,8 +1,8 @@
-import { join } from "node:path"
-import { readdirSync } from "node:fs"
-import { YAML } from "bun"
+import { join } from 'node:path'
+import { readdirSync } from 'node:fs'
+import { YAML } from 'bun'
 
-import consola from "consola"
+import consola from 'consola'
 
 // --- Types ---
 
@@ -18,7 +18,7 @@ export type JsonSchemaProperty = {
 }
 
 export type ToolParameters = {
-  type: "object"
+  type: 'object'
   properties: Record<string, JsonSchemaProperty>
   required?: string[]
 }
@@ -42,9 +42,10 @@ export type ToolResult =
 
 /** Convenience constructors */
 export const ok  = (value: unknown, callId?: string): ToolResult => ({ ok: true,  value, callId })
+
 export const err = (error: string,  callId?: string): ToolResult => ({ ok: false, error, callId })
 
-export type ToolFormat = "json" | "typescript" | "python" | "xml" | "prose"
+export type ToolFormat = 'json' | 'typescript' | 'python' | 'xml' | 'prose'
 
 // --- YAML loader ---
 
@@ -67,7 +68,7 @@ export async function loadTool(filePath: string): Promise<ToolDefinition> {
  * Load all tools from a directory of YAML files.
  */
 export async function loadToolsDir(dirPath: string): Promise<ToolDefinition[]> {
-  const files = readdirSync(dirPath).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
+  const files = readdirSync(dirPath).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'))
 
   return Promise.all(files.map((f) => loadTool(join(dirPath, f))))
 }
@@ -78,13 +79,13 @@ export async function loadToolsDir(dirPath: string): Promise<ToolDefinition[]> {
  * Render tool definitions to a string in the specified format.
  * This string goes inside the availableTools template pair.
  */
-export function renderTools(tools: ToolDefinition[], format: ToolFormat = "json"): string {
+export function renderTools(tools: ToolDefinition[], format: ToolFormat = 'json'): string {
   switch (format) {
-    case "json": return renderJson(tools)
-    case "typescript": return renderTypeScript(tools)
-    case "python": return renderPython(tools)
-    case "xml": return renderXml(tools)
-    case "prose": return renderProse(tools)
+    case 'json': return renderJson(tools)
+    case 'typescript': return renderTypeScript(tools)
+    case 'python': return renderPython(tools)
+    case 'xml': return renderXml(tools)
+    case 'prose': return renderProse(tools)
   }
 }
 
@@ -111,38 +112,38 @@ function renderJson(tools: ToolDefinition[]): string {
 // --- Type mapping helpers ---
 
 function jsonTypeToTs(prop: JsonSchemaProperty, inline = false): string {
-  if (prop.enum) return prop.enum.map((v) => JSON.stringify(v)).join(" | ")
+  if (prop.enum) return prop.enum.map((v) => JSON.stringify(v)).join(' | ')
 
   switch (prop.type) {
-    case "string": return "string"
-    case "number":
-    case "integer": return "number"
-    case "boolean": return "boolean"
-    case "array": return prop.items ? `${jsonTypeToTs(prop.items)}[]` : "unknown[]"
-    case "object": {
-      if (!prop.properties) return "Record<string, unknown>"
+    case 'string': return 'string'
+    case 'number':
+    case 'integer': return 'number'
+    case 'boolean': return 'boolean'
+    case 'array': return prop.items ? `${jsonTypeToTs(prop.items)}[]` : 'unknown[]'
+    case 'object': {
+      if (!prop.properties) return 'Record<string, unknown>'
       // Render as inline type literal: { key: type; key2: type }
       const fields = Object.entries(prop.properties).map(([k, v]) => `${k}: ${jsonTypeToTs(v)}`)
 
-      return inline ? `{ ${fields.join("; ")} }` : `{\n${fields.map((f) => `  ${f}`).join("\n")}\n}`
+      return inline ? `{ ${fields.join('; ')} }` : `{\n${fields.map((f) => `  ${f}`).join('\n')}\n}`
     }
 
-    default: return "unknown"
+    default: return 'unknown'
   }
 }
 
 function jsonTypeToPy(prop: JsonSchemaProperty): string {
-  if (prop.enum) return `Literal[${prop.enum.map((v) => JSON.stringify(v)).join(", ")}]`
+  if (prop.enum) return `Literal[${prop.enum.map((v) => JSON.stringify(v)).join(', ')}]`
 
   switch (prop.type) {
-    case "string": return "str"
-    case "number": return "float"
-    case "integer": return "int"
-    case "boolean": return "bool"
-    case "array": return prop.items ? `list[${jsonTypeToPy(prop.items)}]` : "list"
-    case "object": return "dict"
+    case 'string': return 'str'
+    case 'number': return 'float'
+    case 'integer': return 'int'
+    case 'boolean': return 'bool'
+    case 'array': return prop.items ? `list[${jsonTypeToPy(prop.items)}]` : 'list'
+    case 'object': return 'dict'
 
-    default: return "Any"
+    default: return 'Any'
   }
 }
 
@@ -158,35 +159,36 @@ function renderTypeScript(tools: ToolDefinition[]): string {
       ` * ${tool.description}`,
       ' *',
       ...Object.entries(properties).map(([name, prop]) => {
-        const desc = prop.description ? ` - ${prop.description}` : ""
+        const desc = prop.description ? ` - ${prop.description}` : ''
 
         return ` * @param ${name}${desc}`
       }),
       ' *',
       ...Object.entries(tool.returns?.properties ?? []).map(([name, prop]) => {
-        const desc = prop.description ? ` - ${prop.description}` : ""
+        const desc = prop.description ? ` - ${prop.description}` : ''
 
         return ` * @returns ${name}${desc}`
       }),
     ]
 
-    const jsdoc = ["/**", ...jsdocLines, " */"].join("\n")
+    const jsdoc = ['/**', ...jsdocLines, ' */'].join('\n')
 
     // Signature
     const params = Object.entries(properties).map(([name, prop], i, arr) => {
-      const comma = i < arr.length - 1 ? "," : ""
-      return `  ${name}${req.has(name) ? "" : "?"}: ${jsonTypeToTs(prop, true)}${comma}`
+      const comma = i < arr.length - 1 ? ',' : ''
+
+      return `  ${name}${req.has(name) ? '' : '?'}: ${jsonTypeToTs(prop, true)}${comma}`
     })
 
-    const returnType = tool.returns ? jsonTypeToTs(tool.returns, true) : "void"
+    const returnType = tool.returns ? jsonTypeToTs(tool.returns, true) : 'void'
 
     return [
       jsdoc,
       `function ${tool.name}(`,
       ...params,
       `): ${returnType}`,
-    ].join("\n")
-  }).join("\n\n")
+    ].join('\n')
+  }).join('\n\n')
 }
 
 // --- Python ---
@@ -197,10 +199,10 @@ function renderPython(tools: ToolDefinition[]): string {
     ...tools.flatMap((t) => t.returns?.properties ? Object.values(t.returns.properties) : []),
   ]
   const typings = [
-    ...(allProps.some((p) => p.enum) ? ["Literal"] : []),
-    ...(allProps.some((p) => p.type === "object") ? ["Any"] : []),
+    ...(allProps.some((p) => p.enum) ? ['Literal'] : []),
+    ...(allProps.some((p) => p.type === 'object') ? ['Any'] : []),
   ]
-  const header = typings.length ? [`from typing import ${typings.join(", ")}`, ""] : []
+  const header = typings.length ? [`from typing import ${typings.join(', ')}`, ''] : []
 
   const fns = tools.map((tool) => {
     const { properties, required = [] } = tool.parameters
@@ -214,41 +216,41 @@ function renderPython(tools: ToolDefinition[]): string {
         return req.has(name) ? `${name}: ${pyType}` : `${name}: ${pyType} = None`
       })
 
-    const returnType = tool.returns ? jsonTypeToPy(tool.returns) : "None"
+    const returnType = tool.returns ? jsonTypeToPy(tool.returns) : 'None'
 
     // Google-style docstring
     const docLines = [`    """${tool.description}`]
 
     const argLines = Object.entries(properties).map(([name, prop]) => {
-      const desc = prop.description ?? ""
+      const desc = prop.description ?? ''
 
       return `        ${name}: ${desc}`
     })
 
     if (argLines.length) {
-      docLines.push("    Args:", ...argLines)
+      docLines.push('    Args:', ...argLines)
     }
 
     if (tool.returns) {
       const retLines = tool.returns.properties
         ? Object.entries(tool.returns.properties).map(([name, prop]) =>
-          `        ${name}: ${prop.description ?? ""}`
+          `        ${name}: ${prop.description ?? ''}`
         )
-        : [`        ${tool.returns.description ?? ""}`]
+        : [`        ${tool.returns.description ?? ''}`]
 
-      docLines.push("    Returns:", ...retLines)
+      docLines.push('    Returns:', ...retLines)
     }
 
-    docLines.push(`    """`)
+    docLines.push('    """')
 
     return [
-      `def ${tool.name}(${params.join(", ")}) -> ${returnType}:`,
+      `def ${tool.name}(${params.join(', ')}) -> ${returnType}:`,
       ...docLines,
-      `    ...`,
-    ].join("\n")
+      '    ...',
+    ].join('\n')
   })
 
-  return [...header, ...fns].join("\n\n")
+  return [...header, ...fns].join('\n\n')
 }
 
 // --- Unimplemented format stubs ---
@@ -282,6 +284,7 @@ export function parseToolCalls(raw: string): ToolCall[] {
 
       // Handle accidental replay of stored tool_call history payloads.
       const historyCalls = parsedObject.calls
+
       if (Array.isArray(historyCalls) && historyCalls.every((item) => item && typeof item === 'object')) {
         return historyCalls.map((item: any) => ({
           callId: item.id ?? item.callId,
@@ -291,6 +294,7 @@ export function parseToolCalls(raw: string): ToolCall[] {
       }
 
       const historyRaw = parsedObject.raw
+
       if (typeof historyRaw === 'string') {
         return parseToolCalls(historyRaw)
       }
@@ -377,6 +381,7 @@ export function parseToolCalls(raw: string): ToolCall[] {
       // Handle accidental replay of stored tool_call history payloads.
       // Example: {"raw":"bash run w && id","calls":[]}
       const historyRaw = (parsed as Record<string, unknown>).raw
+
       if (typeof historyRaw === 'string') {
         return parseToolCalls(historyRaw)
       }
@@ -393,6 +398,7 @@ export function parseToolCalls(raw: string): ToolCall[] {
   } catch (err) {
     // Bare name() with no args — e.g. tool_library()
     const bareCall = text.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*\)\s*$/)
+
     if (bareCall) {
       return [{ name: bareCall[1]!, arguments: {} }]
     }
@@ -400,10 +406,12 @@ export function parseToolCalls(raw: string): ToolCall[] {
     // name(args) function-call syntax — e.g. tool_library("memory") or bash({"command":"ls"})
     // Try to extract the content of the outermost parens and parse it as args.
     const funcCall = text.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([\s\S]*)\)\s*$/)
+
     if (funcCall) {
       const name = funcCall[1]!
       const inner = funcCall[2]!.trim()
       const args = parseArguments(inner)
+
       return [{ name, arguments: args }]
     }
 
@@ -434,6 +442,7 @@ export function resolveArgs(
 
   // Build a reverse alias map: alias -> canonical
   const aliasMap = new Map<string, string>()
+
   for (const [canonical, prop] of Object.entries(properties)) {
     for (const alias of prop.aliases ?? []) {
       aliasMap.set(alias, canonical)
@@ -442,8 +451,10 @@ export function resolveArgs(
 
   // Step 1: remap aliases + collect unrecognised keys
   const unrecognised: [string, unknown][] = []
+
   for (const [key, val] of Object.entries(args)) {
     const canonical = aliasMap.get(key) ?? (properties[key] ? key : null)
+
     if (canonical) {
       resolved[canonical] = val
 
@@ -458,6 +469,7 @@ export function resolveArgs(
   if (unrecognised.length > 0 && missingRequired.length > 0) {
     // If exactly one required and one leftover: always fill it (single-required shorthand)
     const fillCount = Math.min(unrecognised.length, missingRequired.length)
+
     for (let i = 0; i < fillCount; i++) {
       resolved[missingRequired[i]!] = unrecognised[i]![1]
     }
@@ -476,31 +488,31 @@ export function resolveArgs(
 // --- Built-in tools ---
 
 export const ModeTool: ToolDefinition = {
-  name: "mode",
+  name: 'mode',
   description:
-    "Switch the current interaction mode. " +
+    'Switch the current interaction mode. ' +
     "Use 'agent' when you want autonomous tool-driven work. " +
     "Use 'chat' for general conversation.",
   parameters: {
-    type: "object",
+    type: 'object',
     properties: {
       mode: {
-        type: "string",
-        enum: ["chat", "agent"],
-        description: "Target mode to switch to",
+        type: 'string',
+        enum: ['chat', 'agent'],
+        description: 'Target mode to switch to',
       },
       reason: {
-        type: "string",
-        description: "Brief reason for switching modes",
+        type: 'string',
+        description: 'Brief reason for switching modes',
       },
     },
-    required: ["mode"],
+    required: ['mode'],
   },
   returns: {
-    type: "object",
+    type: 'object',
     properties: {
-      switched: { type: "string", description: "The mode that was activated" },
-      error: { type: "string", description: "Error message if switch failed" },
+      switched: { type: 'string', description: 'The mode that was activated' },
+      error: { type: 'string', description: 'Error message if switch failed' },
     },
   },
 }
@@ -510,39 +522,39 @@ export const ModeTool: ToolDefinition = {
  * Lets the model cache expensive results and re-use them across turns.
  */
 export const CallIdCacheTool: ToolDefinition = {
-  name: "call_cache",
+  name: 'call_cache',
   description:
-    "Store or retrieve a value in the call-ID cache. " +
+    'Store or retrieve a value in the call-ID cache. ' +
     "Use 'set' to save a result you want to reference later, 'get' to retrieve it, " +
     "'list' to see all stored keys, and 'delete' to remove one.",
   parameters: {
-    type: "object",
+    type: 'object',
     properties: {
       action: {
-        type: "string",
-        enum: ["set", "get", "delete", "list"],
-        description: "Cache operation to perform.",
-        aliases: ["op", "operation"],
+        type: 'string',
+        enum: ['set', 'get', 'delete', 'list'],
+        description: 'Cache operation to perform.',
+        aliases: ['op', 'operation'],
       },
       id: {
-        type: "string",
-        description: "Cache key (call ID or any label).",
-        aliases: ["key", "call_id", "callId"],
+        type: 'string',
+        description: 'Cache key (call ID or any label).',
+        aliases: ['key', 'call_id', 'callId'],
       },
       value: {
-        type: "string",
+        type: 'string',
         description: "Value to store (only for 'set').",
-        aliases: ["data", "result", "content"],
+        aliases: ['data', 'result', 'content'],
       },
     },
-    required: ["action"],
+    required: ['action'],
   },
   returns: {
-    type: "object",
+    type: 'object',
     properties: {
-      value: { type: "string", description: "Retrieved value (for 'get')." },
-      keys: { type: "string", description: "Comma-separated list of keys (for 'list')." },
-      success: { type: "string", description: "Confirmation message." },
+      value: { type: 'string', description: "Retrieved value (for 'get')." },
+      keys: { type: 'string', description: "Comma-separated list of keys (for 'list')." },
+      success: { type: 'string', description: 'Confirmation message.' },
     },
   },
 }
@@ -550,16 +562,16 @@ export const CallIdCacheTool: ToolDefinition = {
 // --- Smoke test ---
 
 if (import.meta.main) {
-  consola.log("=== json ===")
-  consola.log(renderTools([ModeTool], "json"))
+  consola.log('=== json ===')
+  consola.log(renderTools([ModeTool], 'json'))
 
-  consola.log("\n=== typescript ===")
-  consola.log(renderTools([ModeTool], "typescript"))
+  consola.log('\n=== typescript ===')
+  consola.log(renderTools([ModeTool], 'typescript'))
 
-  consola.log("\n=== python ===")
-  consola.log(renderTools([ModeTool], "python"))
+  consola.log('\n=== python ===')
+  consola.log(renderTools([ModeTool], 'python'))
 
-  consola.log("\n=== parseToolCalls ===")
-  const raw = JSON.stringify([{ name: "mode", arguments: { mode: "agent", reason: "user wants to edit files" } }])
+  consola.log('\n=== parseToolCalls ===')
+  const raw = JSON.stringify([{ name: 'mode', arguments: { mode: 'agent', reason: 'user wants to edit files' } }])
   consola.log(parseToolCalls(raw))
 }

@@ -52,6 +52,7 @@ export class CheckpointStore {
   constructor(checkpointPath: string, keepRecent?: number) {
     this.dir = checkpointPath
     this.keepRecent = keepRecent
+
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true })
   }
 
@@ -103,6 +104,7 @@ export class CheckpointStore {
   /** Load the latest checkpoint. Returns null if no checkpoint exists (fresh session). */
   async loadLatest(): Promise<Checkpoint | null> {
     const file = Bun.file(this.latestPath)
+
     if (!(await file.exists())) return null
 
     try { return await file.json() as Checkpoint }
@@ -113,6 +115,7 @@ export class CheckpointStore {
   /** Load a specific checkpoint by sequence number. */
   async loadBySeq(seq: number): Promise<Checkpoint | null> {
     const file = Bun.file(this.seqPath(seq))
+
     if (!(await file.exists())) return null
 
     try { return await file.json() as Checkpoint }
@@ -130,6 +133,7 @@ export class CheckpointStore {
 
     for await (const file of glob.scan(this.dir)) {
       const m = file.match(/checkpoint-(\d+)\.json$/)
+
       if (m?.[1]) seqs.push(parseInt(m[1], 10))
     }
 

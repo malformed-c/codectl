@@ -16,9 +16,11 @@ export type RenderPass = (spans: AnnotatedText, ctx: RenderContext) => Annotated
 export const extractionPass: RenderPass = (spans, ctx) =>
   spans.map(span => {
     const key = span.meta?.memoryKey
+
     if (!key) return span
 
     const value = ctx.memory.get(key)
+
     if (value === undefined) return span  // key gone; original content visible again
 
     // Replace all occurrences of the stored value within this span's text.
@@ -53,10 +55,12 @@ const AGE1_CHAR_THRESHOLD = 1000  // chars above which results are truncated at 
 export const truncationPass: RenderPass = (spans, ctx) =>
   spans.map(span => {
     if (span.kind !== 'tool_result') return span
+
     if (!span.meta?.truncatable) return span
 
     // If auto-stored to memory, show reference marker (formatPass will not re-render this)
     const storedKey = span.meta.memoryKey
+
     if (storedKey && ctx.memory.has(storedKey)) {
       return { ...span, text: `[Stored as ${storedKey}]`, meta: { ...span.meta, results: undefined } }
     }
@@ -79,6 +83,7 @@ export const truncationPass: RenderPass = (spans, ctx) =>
           if (r.error) return r
 
           const serialized = typeof r.value === 'string' ? r.value : JSON.stringify(r.value)
+
           return serialized.length > perItemLimit
             ? { ...r, value: serialized.slice(0, perItemLimit) + '... (truncated)' }
             : r
@@ -100,6 +105,7 @@ export const truncationPass: RenderPass = (spans, ctx) =>
       const skeletonized = results.map(r =>
         r.error ? r : { ...r, value: collapseValues(r.value) }
       )
+
       return withResults(span, skeletonized)
     }
 
@@ -131,6 +137,7 @@ function collapseValues(val: unknown): unknown {
 
   if (val !== null && typeof val === 'object') {
     const out: Record<string, unknown> = {}
+
     for (const key of Object.keys(val)) out[key] = ''
 
     return out
@@ -167,9 +174,11 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
 
     // Group consecutive spans by turn family
     const groups: { family: TurnFamily; spans: Span[] }[] = []
+
     for (const span of spans) {
       const family = toFamily(span.kind)
       const last = groups.at(-1)
+
       if (last && last.family === family) {
         last.spans.push(span)
 
@@ -188,8 +197,10 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
     )
 
     const mergedGroups: { family: TurnFamily; spans: Span[] }[] = []
+
     for (const group of groups) {
       const prev = mergedGroups.at(-1)
+
       if (
         assistantInlineToolCalls
         && prev
@@ -285,6 +296,7 @@ export function joinWithBoundaryNormalization(parts: string[]): string {
   if (parts.length === 0) return ''
 
   let out = parts[0]!
+
   for (let i = 1; i < parts.length; i++) {
     out = joinBoundary(out, parts[i]!)
   }
@@ -308,6 +320,7 @@ function joinBoundary(left: string, right: string): string {
 
 function countTrailingNewlines(text: string): number {
   let i = text.length - 1
+
   while (i >= 0 && text[i] === '\n') i--
 
   return text.length - 1 - i
@@ -315,6 +328,7 @@ function countTrailingNewlines(text: string): number {
 
 function countLeadingNewlines(text: string): number {
   let i = 0
+
   while (i < text.length && text[i] === '\n') i++
 
   return i

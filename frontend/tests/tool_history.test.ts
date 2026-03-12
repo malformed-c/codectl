@@ -14,6 +14,7 @@ class HistoryAdapter extends KoboldAdapter {
   override async generateRaw(_prompt: string): Promise<ParsedTurn> {
     const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]!
     this.index++
+
     return turn
   }
 }
@@ -70,6 +71,7 @@ describe('tool_call history (Round-based)', () => {
     const chatRound = serialized.find(r => r.kind === 'chat')
 
     expect(chatRound).toBeTruthy()
+
     if (chatRound?.kind === 'chat') {
       expect(chatRound.model).toBe('Hello back!')
     }

@@ -23,6 +23,7 @@ class StubProvider implements ModelProvider {
 
   build(config: ProviderConfig, modelName: string, apiKey: string | null): LLMAdapter {
     this.built.push({ config, modelName, apiKey })
+
     return new KoboldAdapter({ apiServer: 'http://localhost', template: Profiles.mistral })
   }
 
@@ -259,6 +260,7 @@ describe('ModelRouter.registerAgentConfig', () => {
 
 describe('ModelRouter - getCapability', () => {
   interface EmbeddingCap { embed(texts: string[]): number[][] }
+
   const EmbeddingKey = defineCapability<EmbeddingCap>()
 
   test('returns capability when provider supports it', () => {
@@ -269,6 +271,7 @@ describe('ModelRouter - getCapability', () => {
       build: () => new KoboldAdapter({ apiServer: 'http://localhost', template: Profiles.mistral }),
       getCapability: <T>(cap: any, _cfg: any, _key: any): T | null => {
         if (cap === EmbeddingKey) return mockEmbed as T
+
         return null
       },
     }

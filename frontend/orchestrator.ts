@@ -1,47 +1,46 @@
-import { consola } from "consola"
-import { AgentEntropyTracker } from './agent-entropy'
+import { consola } from 'consola'
+import { lstat, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { match } from 'ts-pattern'
-import type { KoboldAdapter } from './kobold'
-import type { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
-import type { GeminiNativeAdapter, GeminiInteractionsAdapter } from './gemini'
-import type { ParsedTurn, TextTemplate } from './template'
-import { turnContent, turnThink, turnToolCalls, Profiles } from './template'
-import type { StoredToolCall, StoredToolResult } from './types'
-import {
-  type ToolDefinition,
-  type ToolCall,
-  type ToolResult,
-  type ToolFormat,
-  ok, err,
-  parseToolCalls,
-  resolveArgs,
-  renderTools,
-  ModeTool,
-  CallIdCacheTool,
-} from './tool'
-import { lstat } from "node:fs/promises"
-import { readFile } from "node:fs/promises"
-import { CodeqTools, createCodeqHandlers } from "./tools/codeq"
-import { ExecTools, createExecHandlers, PersistentShell } from "./tools/exec"
-import { SubagentTool, createSubagentHandler } from "./tools/subagent"
-import { MemoryTool, createMemoryHandler } from "./tools/memory"
-import { GraphMemory, GraphMemoryTool, createGraphMemoryHandler } from "./memory"
-import { AskTool, MessageTool, AskChannel, createAskHandler, createMessageHandler } from "./tools/ask"
-import { createCallIdCacheHandler } from "./tools/callid-cache"
-import { RunPlanTool, createRunPlanHandler } from "./tools/run_plan"
-import { PipeTool, createPipeHandler } from "./tools/pipe"
-import { CodePlanSchemaTool, createCodePlanSchemaHandler } from "./tools/codeplan_schema"
-import { ValidatePlanTool, createValidatePlanHandler } from "./tools/validate_plan"
-import { TransformTools, createTransformHandlers } from "./tools/transform"
-import type { CodePlan } from "./codeplan.schema"
-import { Fsm } from './fsm'
-import { RenderCache, VersionedMemory, renderHistory } from './renderer'
-import { roundsToMessages } from './native_messages'
-import { joinWithBoundaryNormalization } from './pipeline'
-import { userSpan } from './span'
-import { systemRound as makeSystemRound, type Round } from './round'
+import { AgentEntropyTracker } from './agent-entropy'
 import { CheckpointStore, restoreLatest, type RestoredSession } from './checkpoint'
+import type { CodePlan } from './codeplan.schema'
+import { Fsm } from './fsm'
+import type { GeminiInteractionsAdapter, GeminiNativeAdapter } from './gemini'
+import type { KoboldAdapter } from './kobold'
+import { GraphMemory, GraphMemoryTool, createGraphMemoryHandler } from './memory'
+import { roundsToMessages } from './native_messages'
+import type { OpenAIChatAdapter, OpenAITextAdapter } from './openai'
+import { joinWithBoundaryNormalization } from './pipeline'
+import { RenderCache, VersionedMemory, renderHistory } from './renderer'
+import { systemRound as makeSystemRound, type Round } from './round'
+import { userSpan } from './span'
+import type { ParsedTurn, TextTemplate } from './template'
+import { Profiles, turnContent, turnThink, turnToolCalls } from './template'
+import {
+  CallIdCacheTool,
+  ModeTool,
+  err,
+  ok,
+  renderTools,
+  resolveArgs,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolFormat,
+  type ToolResult
+} from './tool'
+import { AskChannel, AskTool, MessageTool, createAskHandler, createMessageHandler } from './tools/ask'
+import { createCallIdCacheHandler } from './tools/callid-cache'
+import { CodePlanSchemaTool, createCodePlanSchemaHandler } from './tools/codeplan_schema'
+import { CodeqTools, createCodeqHandlers } from './tools/codeq'
+import { ExecTools, PersistentShell, createExecHandlers } from './tools/exec'
+import { MemoryTool, createMemoryHandler } from './tools/memory'
+import { PipeTool, createPipeHandler } from './tools/pipe'
+import { RunPlanTool, createRunPlanHandler } from './tools/run_plan'
+import { SubagentTool, createSubagentHandler } from './tools/subagent'
+import { TransformTools, createTransformHandlers } from './tools/transform'
+import { ValidatePlanTool, createValidatePlanHandler } from './tools/validate_plan'
+import type { StoredToolCall, StoredToolResult } from './types'
 
 
 // --- Types ---
@@ -194,13 +193,13 @@ export const LibraryTool: ToolDefinition = {
 
 // --- Helpers ---
 
-async function pathExists(path: string): Promise<false | "file" | "dir"> {
+async function pathExists(path: string): Promise<false | 'file' | 'dir'> {
   try {
     const stat = await lstat(path)
 
-    if (stat.isDirectory()) return "dir"
+    if (stat.isDirectory()) return 'dir'
 
-    if (stat.isFile()) return "file"
+    if (stat.isFile()) return 'file'
 
     return false
 
@@ -215,19 +214,19 @@ export async function findGitRoot(startDir: string): Promise<string | null> {
 
   while (true) {
 
-    const gitPath = join(current, ".git")
+    const gitPath = join(current, '.git')
 
     const type = await pathExists(gitPath)
 
     // normal repo
-    if (type === "dir") {
+    if (type === 'dir') {
       return current
     }
 
     // worktree / submodule
-    if (type === "file") {
+    if (type === 'file') {
 
-      const content = await readFile(gitPath, "utf8")
+      const content = await readFile(gitPath, 'utf8')
 
       const match = content.match(/^gitdir:\s*(.+)$/m)
 
@@ -304,15 +303,18 @@ export class Orchestrator {
           const params = Object.entries(properties)
             .map(([name, prop]) => {
               const type = prop.enum ? prop.enum.join('|') : prop.type
+
               return req.has(name) ? `${name}: ${type}` : `${name}?: ${type}`
             })
             .join(', ')
+
           return `${t.name}(${params})`
         }).join('\n')
         const body = `${signatures}\n\nUse tool_library(prefix) for full docs, e.g. tool_library("bash").`
         const wrapped = this.profile?.availableTools
           ? `${this.profile.availableTools[0]}${body}${this.profile.availableTools[1]}`
           : body
+
         return ok(wrapped)
       }
 
@@ -449,6 +451,7 @@ export class Orchestrator {
     if (!this.checkpointStore) return null
 
     const session = await restoreLatest(this.checkpointStore)
+
     if (!session) return null
 
     // Re-populate FSM history from deserialized rounds
@@ -457,6 +460,7 @@ export class Orchestrator {
 
     // Restore memory
     this.versionedMemory.clear()
+
     for (const [k, v] of session.memory.entries()) {
       this.versionedMemory.set(k, v)
     }
@@ -530,6 +534,7 @@ export class Orchestrator {
   private _injectMemoryContext(query: string): void {
     if (!this.graphMemory) return
     const block = this.graphMemory.recallForPrompt(query)
+
     if (!block) return
     // Append memory context to the enriched system round for this turn.
     const current = (this._enrichedSystemRound.serialize() as any).message as string
@@ -580,11 +585,12 @@ export class Orchestrator {
 
       // Detect think-only output: model produced reasoning but no content and no tool calls.
       // Punish with a system correction so it completes the turn.
-      const think   = turnThink(parsed)
-      const content  = turnContent(parsed)
-      const calls    = turnToolCalls(parsed)
+      const think = turnThink(parsed)
+      const content = turnContent(parsed)
+      const calls = turnToolCalls(parsed)
 
       const isThinkOnly = think && !content && !calls.length
+
       if (isThinkOnly) {
         consola.warn('[think-only] model produced reasoning with no content/tools - injecting correction')
 
@@ -602,6 +608,7 @@ export class Orchestrator {
       // This indicates a problem: bad stop token, context overflow, or a model
       // that failed to generate anything. Treat as an error and abort.
       const isEmpty = !think && !content && !calls.length
+
       if (isEmpty) {
         consola.error('[empty] model returned empty response - aborting turn')
         this.fsm.onError('Model returned an empty response. This may indicate a context overflow, bad stop token, or inference error.')
@@ -702,10 +709,12 @@ export class Orchestrator {
           // rather than opaque tool result JSON.
           if (call.name === 'ask' && result.ok) {
             const answer = (result.value as Record<string, unknown>).answer as string
+
             if (answer) this.fsm.onSystem(`[User]: ${answer}`)
 
           } else if (call.name === 'message' && result.ok) {
             const content = call.arguments.content as string
+
             if (content) this.fsm.onSystem(`[Sent to user]: ${content}`)
           }
 
@@ -719,8 +728,8 @@ export class Orchestrator {
             error: result.ok ? undefined : result.error,
             value: result.ok
               ? (result.value === undefined || result.value === null || result.value === ''
-                  ? { done: true }
-                  : result.value)
+                ? { done: true }
+                : result.value)
               : null,
           })
 
@@ -728,6 +737,7 @@ export class Orchestrator {
           // #22: Count explicit errors AND null results as failures.
           const callSuccess = result.ok && result.value !== null
           this.recordToolResult(call.name, call.arguments, callSuccess)
+
           if (this.wasEjected()) { loopShouldStop = true; break }
         }
 
@@ -791,10 +801,11 @@ export class Orchestrator {
   private recordToolResult(name: string, args: Record<string, unknown>, success: boolean): void {
     if (this.mode.kind !== 'agent') return
     const shouldEject = this._entropyTracker.record(name, args, success)
+
     if (shouldEject) {
       consola.warn(
         `[entropy] score=${this._entropyTracker.currentScore.toFixed(1)} — ` +
-        `agent ejected to chat (spinning or failing without progress)`
+        'agent ejected to chat (spinning or failing without progress)'
       )
       this.mode = { kind: 'chat' }
       this._ejectedThisTurn = true
@@ -845,14 +856,15 @@ export class Orchestrator {
     const fullContent = isNative
       ? sysContent
       : (() => {
-          const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
-          const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
-          const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
-          const toolsBlock = this.profile?.availableTools
-            ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
-            : ''
-          return joinWithBoundaryNormalization([sysContent, toolsBlock])
-        })()
+        const coreToolNames = ['mode', 'done', 'continue', 'tool_library', 'memory']
+        const coreTools = this.tools.filter(t => coreToolNames.includes(t.name))
+        const toolsContent = renderTools(coreTools, this.config.toolFormat ?? 'json')
+        const toolsBlock = this.profile?.availableTools
+          ? `${this.profile.availableTools[0]}${toolsContent}${this.profile.availableTools[1]}`
+          : ''
+
+        return joinWithBoundaryNormalization([sysContent, toolsBlock])
+      })()
 
     this._enrichedSystemRound = makeSystemRound(fullContent)
     this._enrichedSystemRound.count = fullContent.length
@@ -869,8 +881,8 @@ export class Orchestrator {
           : ''
 
         return (
-          `\n\nYou are in AGENT mode. Use tools continuously to accomplish the user's goal. ` +
-          `Call 'done' when finished. Use 'bash' to navigate to a repo (cd) before running plans.` +
+          '\n\nYou are in AGENT mode. Use tools continuously to accomplish the user\'s goal. ' +
+          'Call \'done\' when finished. Use \'bash\' to navigate to a repo (cd) before running plans.' +
           goalPart
         )
       })
@@ -890,11 +902,12 @@ export class Orchestrator {
   }
 
   private async executeToolCall(call: ToolCall): Promise<ToolResult> {
-    consola.trace("Executing tool", call)
+    consola.trace('Executing tool', call)
 
     // Find the handler, falling back to an unknown-tool error.
     // Future: add a middleware wrapper here for logging, timeouts, and per-tool sandboxing.
     const handler = this.handlers.get(call.name)
+
     if (!handler) return err(`Unknown tool: ${call.name}`)
 
     // Find the definition so we can resolve aliases + positional args
@@ -905,6 +918,7 @@ export class Orchestrator {
     for (const [key, val] of Object.entries(resolvedArgs)) {
       if (typeof val === 'string' && this.callIdCache.has(val)) {
         const cachedValue = this.callIdCache.get(val)!
+
         try {
           resolvedArgs[key] = JSON.parse(cachedValue)
         } catch {
@@ -923,11 +937,14 @@ export class Orchestrator {
     for (const [key, val] of Object.entries(resolvedArgs)) {
       if (typeof val === 'string' && val.includes('$')) {
         const singleRef = val.match(/^\$\{([^}]+)\}$|^\$([\w]+)$/)
+
         if (singleRef) {
           const memKey = singleRef[1] ?? singleRef[2]!
           const memVal = this.versionedMemory.get(memKey)
+
           if (memVal !== undefined) {
             consola.debug(`Memory interpolation (single ref): $${memKey} -> (value)`)
+
             try {
               resolvedArgs[key] = JSON.parse(memVal)
             } catch {
@@ -940,6 +957,7 @@ export class Orchestrator {
         resolvedArgs[key] = val.replace(/\$\{([^}]+)\}|\$([\w]+)/g, (_match, braced, bare) => {
           const memKey = braced ?? bare
           const memVal = this.versionedMemory.get(memKey)
+
           if (memVal !== undefined) {
             consola.debug(`Memory interpolation: $${memKey} -> (value)`)
 
@@ -957,6 +975,7 @@ export class Orchestrator {
       // Guard against handlers that forget to return a value
       if (result == null) {
         consola.warn(`Tool '${call.name}' returned ${result} — treating as ok({ done: true })`)
+
         return ok({ done: true })
       }
 
@@ -992,6 +1011,7 @@ export class Orchestrator {
     if (result === undefined) return 'undefined'
 
     const s = typeof result === 'string' ? result : JSON.stringify(result)
+
     if (s.length <= 200) return s
 
     return s.slice(0, 200) + '...'
@@ -1033,37 +1053,37 @@ export class Orchestrator {
     if (isNative) {
       return [
         "You're the orchestrator in the codectl agentic system.",
-        "",
-        "Modes:",
-        "  chat - general conversation (single-turn)",
+        '',
+        'Modes:',
+        '  chat - general conversation (single-turn)',
         "  agent - autonomous tool loop; call 'done' when task is complete.",
-        "Ejected back to chat after 3 consecutive tool failures.",
-        "",
-        "Think through your response carefully before answering.",
-        "Format your response using Markdown. Use LaTeX for mathematical equations.",
-        "Tools are your hands - always acknowledge results.",
-        "You can call multiple tools in one turn.",
+        'Ejected back to chat after 3 consecutive tool failures.',
+        '',
+        'Think through your response carefully before answering.',
+        'Format your response using Markdown. Use LaTeX for mathematical equations.',
+        'Tools are your hands - always acknowledge results.',
+        'You can call multiple tools in one turn.',
       ].join('\n')
     }
 
     return [
       "You're the orchestrator in the codectl agentic system.",
-      "",
-      "Modes:",
-      "  chat - general conversation (single-turn)",
+      '',
+      'Modes:',
+      '  chat - general conversation (single-turn)',
       "  agent - autonomous tool loop; call 'done' when task is complete.",
-      "Ejected back to chat after 3 consecutive tool failures.",
-      "",
-      "# HOW YOU SHOULD THINK AND ANSWER",
-      "",
-      "First draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.",
-      "",
-      "Your thinking process must follow the template below:",
-      "[THINK]Your thoughts or/and draft, like working through an exercise on scratch paper. You must start reasoning with open tag. Be as casual and as long as you want until you are confident to generate the response to the user.[/THINK]",
-      "Here, provide a self-contained response.",
-      "Tools are your hands - always acknowledge results.",
-      "Use token tool-call syntax: [TOOL_CALLS]...[CALL_ID]...[ARGS]",
-      "You can call multiple tools in one turn."
+      'Ejected back to chat after 3 consecutive tool failures.',
+      '',
+      '# HOW YOU SHOULD THINK AND ANSWER',
+      '',
+      'First draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.',
+      '',
+      'Your thinking process must follow the template below:',
+      '[THINK]Your thoughts or/and draft, like working through an exercise on scratch paper. You must start reasoning with open tag. Be as casual and as long as you want until you are confident to generate the response to the user.[/THINK]',
+      'Here, provide a self-contained response.',
+      'Tools are your hands - always acknowledge results.',
+      'Use token tool-call syntax: [TOOL_CALLS]...[CALL_ID]...[ARGS]',
+      'You can call multiple tools in one turn.'
     ].join('\n')
   }
 }
@@ -1082,9 +1102,11 @@ function resolveMemoryVars(
   memory: VersionedMemory,
 ): Record<string, unknown> {
   const resolved: Record<string, unknown> = {}
+
   for (const [k, v] of Object.entries(args)) {
     resolved[k] = typeof v === 'string' ? substituteVars(v, memory) : v
   }
+
   return resolved
 }
 
@@ -1093,6 +1115,7 @@ function substituteVars(text: string, memory: VersionedMemory): string {
   text = text.replace(/\${([^}]+)}/g, (_, key: string) => memory.get(key) ?? `\${${key}}`)
   // $key form — word-char sequence after $
   text = text.replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g, (_, key: string) => memory.get(key) ?? `$${key}`)
+
   return text
 }
 

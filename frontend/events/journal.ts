@@ -45,6 +45,7 @@ export class EventJournal {
       VALUES (?, ?, ?, ?, ?, 'pending')
     `)
     const result = stmt.run(topic, source, JSON.stringify(payload), Date.now(), correlationId ?? null)
+
     return result.lastInsertRowid as number
   }
 
@@ -69,26 +70,27 @@ export class EventJournal {
   }
 
   async markDone(id: number): Promise<void> {
-    this.db.prepare(`UPDATE events SET status = 'done' WHERE id = ?`).run(id)
+    this.db.prepare('UPDATE events SET status = \'done\' WHERE id = ?').run(id)
   }
 
   async markRetry(id: number): Promise<void> {
     this.db.prepare(
-      `UPDATE events SET status = 'pending', retry_count = retry_count + 1 WHERE id = ?`
+      'UPDATE events SET status = \'pending\', retry_count = retry_count + 1 WHERE id = ?'
     ).run(id)
   }
 
   async markDeadLetter(id: number, error: string): Promise<void> {
     this.db.prepare(
-      `UPDATE events SET status = 'dead_letter', error = ? WHERE id = ?`
+      'UPDATE events SET status = \'dead_letter\', error = ? WHERE id = ?'
     ).run(error, id)
   }
 
   /** Reset processing → pending (crash recovery on startup). */
   async resetProcessingToPending(): Promise<number> {
     const result = this.db.prepare(
-      `UPDATE events SET status = 'pending' WHERE status = 'processing'`
+      'UPDATE events SET status = \'pending\' WHERE status = \'processing\''
     ).run()
+
     return result.changes
   }
 
@@ -104,19 +106,21 @@ export class EventJournal {
     `).all(cutoff) as any[]
 
     let reset = 0, dead = 0
+
     for (const row of stale) {
       if (row.retry_count < maxRetries) {
         this.db.prepare(
-          `UPDATE events SET status = 'pending', retry_count = retry_count + 1 WHERE id = ?`
+          'UPDATE events SET status = \'pending\', retry_count = retry_count + 1 WHERE id = ?'
         ).run(row.id)
         reset++
       } else {
         this.db.prepare(
-          `UPDATE events SET status = 'dead_letter', error = 'Stale: exceeded max retries' WHERE id = ?`
+          'UPDATE events SET status = \'dead_letter\', error = \'Stale: exceeded max retries\' WHERE id = ?'
         ).run(row.id)
         dead++
       }
     }
+
     return [reset, dead]
   }
 

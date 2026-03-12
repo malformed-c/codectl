@@ -1,11 +1,16 @@
 import consola from 'consola'
+import {
+  agentRound,
+  chatRound,
+  errorRound,
+  systemRound,
+  toolRound,
+  type History,
+  type Round,
+} from './round'
 import type { Span } from './span'
 import { countSpanChars } from './span'
 import type { StoredToolCall, StoredToolResult } from './types'
-import {
-  chatRound, agentRound, toolRound, systemRound, errorRound,
-  type Round, type History,
-} from './round'
 
 // --- FSM States ---
 //

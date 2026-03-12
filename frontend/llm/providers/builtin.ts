@@ -29,6 +29,7 @@ export class KoboldProvider implements ModelProvider {
   async healthCheck(config: ProviderConfig): Promise<boolean> {
     try {
       const res = await fetch(`${config.baseUrl ?? 'http://127.0.0.1:5001'}/api/v1/info`, { signal: AbortSignal.timeout(3000) })
+
       return res.ok
     } catch {
       return false
@@ -59,6 +60,7 @@ export class OpenAIChatProvider implements ModelProvider {
         headers: { Authorization: `Bearer ${apiKey ?? ''}` },
         signal: AbortSignal.timeout(3000),
       })
+
       return res.ok
     } catch {
       return false
@@ -88,6 +90,7 @@ export class GeminiNativeProvider implements ModelProvider {
 
   build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     const isGemini3 = modelName.startsWith('gemini-3') || modelName.startsWith('gemini-2.5')
+
     return new GeminiNativeAdapter({
       apiKey:        apiKey ?? '',
       model:         modelName,

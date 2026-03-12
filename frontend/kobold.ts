@@ -103,6 +103,7 @@ export class KoboldAdapter {
     }
 
     const raw = await this.complete(prompt)
+
     // FIM response should be raw content - no conversation parsing needed
     return raw.trim()
   }
@@ -158,6 +159,7 @@ export class KoboldAdapter {
 
     while (true) {
       const { done, value } = await reader.read()
+
       if (done) break
 
       const chunk = decoder.decode(value, { stream: true })
@@ -205,6 +207,7 @@ export class KoboldAdapter {
       }
 
       const data = await response.json() as { results?: Array<{ text: string }> }
+
       return data.results?.[0]?.text ?? ''
     }, { label: 'kobold generate' })
   }
@@ -239,7 +242,9 @@ export class KoboldAdapter {
     const toolResultWrap = Array.isArray(toolResult) ? toolResult : toolResult?.wrap
 
     if (toolCallWrap) { addBreaker(toolCallWrap[0]); addBreaker(toolCallWrap[1]) }
+
     if (toolResultWrap) { addBreaker(toolResultWrap[0]); addBreaker(toolResultWrap[1]) }
+
     if (availableTools) { addBreaker(availableTools[0]); addBreaker(availableTools[1]) }
 
     // Mistral rich tokens
@@ -247,6 +252,7 @@ export class KoboldAdapter {
       addBreaker(toolCall.rich.callId)
       addBreaker(toolCall.rich.args)
     }
+
     if (toolResult && !Array.isArray(toolResult) && toolResult.rich) {
       addBreaker(toolResult.rich.callId)
       addBreaker(toolResult.rich.content)

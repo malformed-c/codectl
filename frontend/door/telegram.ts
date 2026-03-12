@@ -1,6 +1,6 @@
 import { Bot, Context } from 'grammy'
-import { hydrate } from "@grammyjs/hydrate"
-import type { HydrateFlavor } from "@grammyjs/hydrate"
+import { hydrate } from '@grammyjs/hydrate'
+import type { HydrateFlavor } from '@grammyjs/hydrate'
 import { consola } from 'consola'
 import { marked } from 'marked'
 import { createRoom, touchRoom, RoomRegistry } from '../room'
@@ -32,6 +32,7 @@ function splitMessage(text: string, maxLen = 4096): string[] {
   while (remaining.length > maxLen) {
     // Try to split at a newline boundary
     let splitAt = remaining.lastIndexOf('\n', maxLen)
+
     if (splitAt === -1) splitAt = maxLen
 
     chunks.push(remaining.slice(0, splitAt))
@@ -39,6 +40,7 @@ function splitMessage(text: string, maxLen = 4096): string[] {
   }
 
   if (remaining) chunks.push(remaining)
+
   return chunks
 }
 
@@ -49,6 +51,7 @@ export function roomIdForChat(chatId: number): string {
 export function checkpointDirForChat(root: string | undefined, chatId: number): string | undefined {
   if (!root) return undefined
   const base = root.replace(/^\.\//, '').replace(/\/$/, '')
+
   return `${base}/${roomIdForChat(chatId)}`
 }
 
@@ -103,6 +106,7 @@ function renderBlock(tokens: any[]): string {
 
 function renderList(tok: any, depth: number): string {
   const indent = '  '.repeat(depth)
+
   return tok.items.map((item: any) => {
     // Separate inline content from nested block content (sub-lists, paragraphs)
     const inlineTokens: any[] = []
@@ -284,12 +288,14 @@ export class TelegramDoor {
     if (room.orchestrator.hasPendingAsk()) {
       consola.debug(`[ask] routing user reply to pending ask for room ${room.meta.id}`)
       room.orchestrator.resolveAsk(text)
+
       return
     }
 
     // Restore from checkpoint if orchestrator is fresh
     if (room.orchestrator.getHistory().length === 0) {
       const restored = await room.orchestrator.restoreCheckpoint()
+
       if (restored) {
         consola.debug(`[checkpoint] restored ${restored.history.length} rounds for room ${room.meta.id}`)
       }
@@ -316,6 +322,7 @@ export class TelegramDoor {
 
     const sendText = async (md: string) => {
       const chunks = splitMessage(md, maxLen)
+
       for (const chunk of chunks) {
         try {
           await ctx.reply(markdownToTelegramHTML(chunk), { parse_mode: 'HTML' })
@@ -330,11 +337,14 @@ export class TelegramDoor {
       try {
         for await (const event of room.orchestrator.chat(text)) {
           if (event.kind === 'turn') {
-            const _tc = turnContent(event.turn); if (_tc) await sendText(_tc)
+            const _tc = turnContent(event.turn)
+
+ if (_tc) await sendText(_tc)
 
           } else if (event.kind === 'call') {
             if (event.call.name === 'ask') {
               const question = event.call.arguments.question as string
+
               try {
                 await ctx.reply(`❓ ${markdownToTelegramHTML(question)}`, { parse_mode: 'HTML' })
 
@@ -348,6 +358,7 @@ export class TelegramDoor {
             if (event.call.name === 'message') continue
 
             const args = JSON.stringify(event.rawArguments)
+
             try {
               await ctx.reply(`⏳ <code>${escapeHtml(event.call.name)}(${escapeHtml(args)})</code>`, { parse_mode: 'HTML' })
 
@@ -398,6 +409,7 @@ export class TelegramDoor {
         consola.error('Error handling Telegram message:', err)
 
         const msg = err instanceof Error ? err.message : String(err)
+
         try {
           await ctx.reply(`⚠️ Error: <code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' })
         } catch { /* best effort */ }

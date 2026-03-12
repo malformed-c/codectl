@@ -46,17 +46,21 @@ export function createMemoryHandler(memory: MemoryStore): ToolHandler {
       case 'set':
         if (!key) return err('Key is required for set action')
         memory.set(key, content ?? '')
+
         return ok({ success: true, key })
 
       case 'get':
         if (!key) return err('Key is required for get action')
         const val = memory.get(key)
+
         if (val === undefined) return err(`Key '${key}' not found. Use memory(set, ${key}, <value>) to store it first.`)
+
         return ok(val)
 
       case 'append':
         if (!key) return err('Key is required for append action')
         memory.append(key, content ?? '')
+
         return ok({ success: true, key, totalLength: (memory.get(key) ?? '').length })
 
       case 'list':
@@ -65,6 +69,7 @@ export function createMemoryHandler(memory: MemoryStore): ToolHandler {
       case 'delete':
         if (!key) return err('Key is required for delete action')
         const deleted = memory.delete(key)
+
         return ok({ success: deleted })
 
       default:

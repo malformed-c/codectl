@@ -24,6 +24,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
   // Restore from checkpoint if available
   const restored = await orchestrator.restoreCheckpoint()
+
   if (restored) {
     consola.info(`[checkpoint] restored ${restored.history.length} rounds`)
   }
@@ -64,6 +65,7 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
 
     if (text === '/history') {
       const metas = await historyStore.list()
+
       if (metas.length === 0) {
         consola.info('No saved rooms')
 
@@ -87,9 +89,13 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
     try {
       for await (const event of orchestrator.chat(text)) {
         if (event.kind === 'turn') {
-          const _think = turnThink(event.turn); if (_think) consola.debug('[think]', _think)
+          const _think = turnThink(event.turn)
 
-          const _content = turnContent(event.turn); if (_content) consola.log(_content)
+ if (_think) consola.debug('[think]', _think)
+
+          const _content = turnContent(event.turn)
+
+ if (_content) consola.log(_content)
 
 
           for (const te of event.toolsExecuted) {

@@ -12,17 +12,20 @@ class ScriptedAdapter extends KoboldAdapter {
   override async generateRaw(_prompt: string): Promise<ParsedTurn> {
     const turn = this.turns[this.index] ?? this.turns[this.turns.length - 1]!
     this.index++
+
     return turn
   }
 }
 
 async function runAndCollectResults(orch: Orchestrator, message: string) {
   const results: Array<{ name: string; value: unknown; error?: string }> = []
+
   for await (const event of orch.chat(message)) {
     if (event.kind === 'call_result') {
       results.push({ name: event.call.name, value: event.result.ok ? event.result.value : null, error: (event.result.ok ? undefined : event.result.error) })
     }
   }
+
   return results
 }
 

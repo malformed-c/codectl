@@ -88,26 +88,32 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
       case 'add': {
         const kind    = args.kind as NodeKind
         const content = args.content as string
+
         if (!kind)    return err('"kind" is required for add')
+
         if (!content) return err('"content" is required for add')
 
         const tags       = parseTags(args.tags as string | string[] | undefined)
         const confidence = parseFloat(String(args.confidence ?? '1.0'))
 
         const id = memory.add({ kind, content, tags, confidence })
+
         return ok({ id})
       }
 
       case 'upsert': {
         const kind    = args.kind as NodeKind
         const content = args.content as string
+
         if (!kind)    return err('"kind" is required for upsert')
+
         if (!content) return err('"content" is required for upsert')
 
         const tags       = parseTags(args.tags as string | string[] | undefined)
         const confidence = parseFloat(String(args.confidence ?? '1.0'))
 
         const result = memory.upsert({ kind, content, tags, confidence })
+
         return ok(result)
       }
 
@@ -115,16 +121,21 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         const fromId   = args.from_id as string
         const toId     = args.to_id   as string
         const edgeKind = args.edge_kind as EdgeKind
+
         if (!fromId)   return err('"from_id" is required for link')
+
         if (!toId)     return err('"to_id" is required for link')
+
         if (!edgeKind) return err('"edge_kind" is required for link')
 
         const edgeId = memory.link(fromId, toId, edgeKind)
+
         return ok({ edge_id: edgeId})
       }
 
       case 'search': {
         const query = args.query as string
+
         if (!query) return err('"query" is required for search')
 
         const anchorId = args.anchor_id as string | undefined
@@ -132,6 +143,7 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         const kinds    = args.kind ? [args.kind as NodeKind] : undefined
 
         const results = memory.search(query, { anchorId, limit, kinds })
+
         return ok(results.map(r => ({
           id:          r.node.id,
           kind:        r.node.kind,
@@ -145,10 +157,13 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
 
       case 'get': {
         const id = args.id as string
+
         if (!id) return err('"id" is required for get')
 
         const node = memory.get(id)
+
         if (!node) return err(`Node ${id} not found`)
+
         return ok(node)
       }
 
@@ -156,6 +171,7 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
         const kind  = args.kind as NodeKind | undefined
         const limit = args.limit ? parseInt(String(args.limit), 10) : 20
         const nodes = memory.list({ kind, limit })
+
         return ok(nodes.map(n => ({
           id:         n.id,
           kind:       n.kind,
@@ -167,10 +183,13 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
 
       case 'remove': {
         const id = args.id as string
+
         if (!id) return err('"id" is required for remove')
 
         const removed = memory.remove(id)
+
         if (!removed) return err(`Node ${id} not found`)
+
         return ok({ removed: id })
       }
 
@@ -186,14 +205,18 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
 
 function parseTags(raw: string | string[] | undefined): string[] {
   if (!raw) return []
+
   if (Array.isArray(raw)) return raw.map(t => t.trim()).filter(Boolean)
   // Model sometimes passes a JSON array as a string
   const trimmed = raw.trim()
+
   if (trimmed.startsWith('[')) {
     try {
       const parsed = JSON.parse(trimmed)
+
       if (Array.isArray(parsed)) return parsed.map((t: unknown) => String(t).trim()).filter(Boolean)
     } catch { /* fall through to comma-split */ }
   }
+
   return trimmed.split(',').map(t => t.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
 }

@@ -45,6 +45,7 @@ export class RoomRegistry {
 
   getOrCreate(id: string, factory: () => Room): Room {
     const existing = this.rooms.get(id)
+
     if (existing) return existing
 
     const room = factory()

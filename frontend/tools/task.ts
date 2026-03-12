@@ -143,6 +143,7 @@ export function createTaskHandlers(engine: TaskEngine): Record<string, ToolHandl
   return {
     async task_create(args): Promise<ToolResult> {
       const goal = args.goal as string
+
       if (!goal) return err("'goal' is required")
 
       const task = await engine.create({
@@ -159,35 +160,44 @@ export function createTaskHandlers(engine: TaskEngine): Record<string, ToolHandl
 
     async task_complete(args): Promise<ToolResult> {
       const taskId = args.taskId as string
+
       if (!taskId) return err("'taskId' is required")
 
       await engine.complete({ taskId, result: args.result })
+
       return ok({ ok: true})
     },
 
     async task_fail(args): Promise<ToolResult> {
       const taskId = args.taskId as string
       const error  = args.error as string
+
       if (!taskId || !error) return err("'taskId' and 'error' are required")
 
       await engine.fail({ taskId, error })
+
       return ok({ ok: true})
     },
 
     async task_cancel(args): Promise<ToolResult> {
       const taskId = args.taskId as string
+
       if (!taskId) return err("'taskId' is required")
 
       await engine.cancel(taskId, args.reason as string | undefined)
+
       return ok({ ok: true})
     },
 
     async task_get(args): Promise<ToolResult> {
       const taskId = args.taskId as string
+
       if (!taskId) return err("'taskId' is required")
 
       const task = engine.get(taskId)
+
       if (!task) return err(`Task ${taskId} not found`)
+
       return ok(task)
     },
 

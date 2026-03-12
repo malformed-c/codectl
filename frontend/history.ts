@@ -17,6 +17,7 @@ export class HistoryStore {
 
   constructor(historyPath: string) {
     this.dir = historyPath
+
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true })
   }
 
@@ -60,6 +61,7 @@ export class HistoryStore {
 
     } else {
       data = await this.load(roomId)
+
       if (data) {
         data.meta.id = archiveId
       }

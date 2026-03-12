@@ -73,6 +73,7 @@ export class ModelRouter {
   ): ModelRouter {
     const router = new ModelRouter(secrets)
     router._load(settings)
+
     return router
   }
 
@@ -98,6 +99,7 @@ export class ModelRouter {
       provider: 'default',
       model: opts.model,
     })
+
     return router
   }
 
@@ -137,6 +139,7 @@ export class ModelRouter {
     if (this.cache.has(agentId)) return this.cache.get(agentId)!
 
     const agentCfg = this.agentConfigs.get(agentId) ?? this.agentConfigs.get('default')
+
     if (!agentCfg) {
       throw new Error(
         `No model config for agent=${agentId} and no 'default' agent in config`
@@ -144,6 +147,7 @@ export class ModelRouter {
     }
 
     const providerCfg = this.providerConfigs.get(agentCfg.provider)
+
     if (!providerCfg) {
       throw new Error(
         `Unknown provider '${agentCfg.provider}' for agent=${agentId}`
@@ -151,6 +155,7 @@ export class ModelRouter {
     }
 
     const provider = this.providers.get(providerCfg.type)
+
     if (!provider) {
       throw new Error(
         `Unknown provider type '${providerCfg.type}' for provider id '${providerCfg.id}'`
@@ -161,6 +166,7 @@ export class ModelRouter {
     const adapter = provider.build(providerCfg, agentCfg.model, apiKey)
 
     this.cache.set(agentId, adapter)
+
     return adapter
   }
 
@@ -170,8 +176,10 @@ export class ModelRouter {
 
   supportsHostedTools(agentId = 'default'): boolean {
     const agentCfg = this.agentConfigs.get(agentId) ?? this.agentConfigs.get('default')
+
     if (!agentCfg) return true
     const providerCfg = this.providerConfigs.get(agentCfg.provider)
+
     return providerCfg?.supportsHostedTools ?? true
   }
 
@@ -193,13 +201,17 @@ export class ModelRouter {
 
     for (const pid of candidates) {
       const pcfg = this.providerConfigs.get(pid)
+
       if (!pcfg) continue
       const provider = this.providers.get(pcfg.type)
+
       if (!provider?.getCapability) continue
       const key = this._resolveKey(pcfg)
       const result = provider.getCapability(cap, pcfg, key)
+
       if (result !== null && result !== undefined) return result
     }
+
     return null
   }
 
@@ -209,10 +221,13 @@ export class ModelRouter {
 
   async healthCheckAll(): Promise<Record<string, boolean>> {
     const results: Record<string, boolean> = {}
+
     for (const [pid, pcfg] of this.providerConfigs) {
       const provider = this.providers.get(pcfg.type)
+
       if (!provider?.healthCheck) { results[pid] = true; continue }
       const key = this._resolveKey(pcfg)
+
       try {
         results[pid] = await provider.healthCheck(pcfg, key)
       } catch (err) {
@@ -220,6 +235,7 @@ export class ModelRouter {
         results[pid] = false
       }
     }
+
     return results
   }
 
@@ -277,18 +293,25 @@ export class ModelRouter {
 
   private _resolveKey(cfg: ProviderConfig): string | string[] | null {
     if (cfg.apiKeyLiterals?.length) return cfg.apiKeyLiterals
+
     if (cfg.apiKeyLiteral) return cfg.apiKeyLiteral
+
     if (cfg.apiKeySecrets?.length) {
       const resolved = cfg.apiKeySecrets.map(n => this.secrets(n)).filter((v): v is string => !!v)
+
       if (resolved.length) return resolved.length === 1 ? resolved[0]! : resolved
     }
+
     if (cfg.apiKeySecret) {
       const val = this.secrets(cfg.apiKeySecret)
+
       if (!val) return null
       // Comma-separated value → key pool (e.g. GEMINI_API_KEYS=key1,key2,key3)
       const parts = val.split(',').map(s => s.trim()).filter(Boolean)
+
       return parts.length > 1 ? parts : parts[0] ?? null
     }
+
     return null
   }
 }

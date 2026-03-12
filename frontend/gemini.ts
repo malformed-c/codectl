@@ -32,6 +32,7 @@ class KeyPool {
 
   constructor(apiKey: string | string[]) {
     this.keys = Array.isArray(apiKey) ? [...apiKey] : [apiKey]
+
     if (this.keys.length === 0) throw new Error('KeyPool: at least one API key is required')
   }
 
@@ -42,6 +43,7 @@ class KeyPool {
   rotate(): string {
     this.idx = (this.idx + 1) % this.keys.length
     consola.info(`[key-pool] rotated to key slot ${this.idx + 1}/${this.keys.length}`)
+
     return this.keys[this.idx]!
   }
 
@@ -66,23 +68,31 @@ function parseRetryDelay(err: unknown, defaultMs = 5_000): number {
     const obj = err as Record<string, unknown>
     // The error body may be nested: obj.error.details or parsed from obj.message
     let details: unknown[] | undefined
+
     if (obj['error'] && typeof obj['error'] === 'object') {
       details = ((obj['error'] as Record<string, unknown>)['details'] as unknown[])
     }
+
     if (!details && typeof obj['message'] === 'string') {
       const parsed = JSON.parse(obj['message'] as string) as { error?: { details?: unknown[] } }
       details = parsed?.error?.details
     }
+
     if (!Array.isArray(details)) return defaultMs
+
     for (const d of details) {
       const entry = d as Record<string, unknown>
+
       if (entry['@type']?.toString().includes('RetryInfo') && typeof entry['retryDelay'] === 'string') {
         const delay = entry['retryDelay'] as string
+
         if (delay.endsWith('ms')) return parseInt(delay, 10)
+
         if (delay.endsWith('s'))  return parseFloat(delay) * 1_000
       }
     }
   } catch { /* ignore */ }
+
   return defaultMs
 }
 
@@ -97,11 +107,13 @@ async function withKeyRotation<T>(
   for (let i = 0; i < attempts; i++) {
     try {
       const client = pool.buildClient()
+
       // maxAttempts:1 = no retries inside here; 429s surface immediately so
       // key rotation can fire rather than burning the same key twice.
       return await withRetry(() => fn(client), { label, maxAttempts: 1 })
     } catch (err) {
       const parsed = parseUpstreamError(err)
+
       if (parsed.status === 429 && i < attempts - 1) {
         const delayMs = parseRetryDelay(err)
         consola.warn(`[key-pool] 429 on key slot ${i + 1}/${attempts} — waiting ${delayMs}ms then rotating key`)
@@ -110,6 +122,7 @@ async function withKeyRotation<T>(
         lastErr = err
         continue
       }
+
       throw err
     }
   }
@@ -159,6 +172,7 @@ export class GeminiNativeAdapter {
 
   private buildGenerateParams(messages: Message[], tools?: ToolDefinition[]) {
     const cfg = this.config
+
     return {
       model: cfg.model,
       contents: messagesToSDKContents(messages) as any,
@@ -207,6 +221,7 @@ export class GeminiNativeAdapter {
       )
       const retryCandidate = retry.candidates?.[0]
       consola.debug('[gemini] retry finishReason:', (retryCandidate as any)?.finishReason, 'parts:', retryCandidate?.content?.parts?.length)
+
       return parseSDKResponse((retryCandidate?.content?.parts ?? []) as SDKPart[])
     }
 
@@ -220,8 +235,10 @@ export class GeminiNativeAdapter {
   async *stream(messages: Message[], tools?: ToolDefinition[]): AsyncGenerator<string> {
     const params = this.buildGenerateParams(messages, tools)
     const stream = await this.pool.buildClient().models.generateContentStream(params)
+
     for await (const chunk of stream) {
       const parts = (chunk.candidates?.[0]?.content?.parts ?? []) as SDKPart[]
+
       for (const part of parts) {
         if (!part.thought && part.text) yield part.text
       }
@@ -284,6 +301,7 @@ export class GeminiInteractionsAdapter {
     )) as AsyncIterable<any>
 
     let interactionId: string | undefined
+
     for await (const chunk of stream) {
       switch (chunk.event_type) {
         case 'interaction.start':   interactionId = chunk.interaction?.id; break
@@ -293,6 +311,7 @@ export class GeminiInteractionsAdapter {
         case 'interaction.complete': interactionId = chunk.interaction?.id ?? interactionId; break
       }
     }
+
     if (this.config.store !== false && interactionId) {
       this.previousInteractionId = interactionId
     }
@@ -375,6 +394,7 @@ function toFunctionDeclarations(tools: ToolDefinition[]): unknown[] {
 
 export function messagesToSDKContents(messages: Message[]): SDKContent[] {
   const out: SDKContent[] = []
+
   for (const m of messages) {
     if (m.role === 'system') {
       // The first system message is already passed as systemInstruction — skip it.
@@ -383,6 +403,7 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
       // user turn — instead append to the last user/tool_result part if possible.
       if (out.length === 0) continue
       const lastUser = [...out].reverse().find(c => c.role === 'user')
+
       if (lastUser) {
         lastUser.parts = [...lastUser.parts, { text: `\n[System: ${m.content}]` }]
       }
@@ -402,6 +423,7 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
             : typeof r.value === 'string'
               ? { output: r.value.length > MAX_RESULT ? r.value.slice(0, MAX_RESULT) + '\n...(truncated)' : r.value }
               : { output: JSON.stringify(r.value) }  // stringify objects — Gemini proto rejects nested arrays
+
           return { functionResponse: { name: callNames[i] ?? `tool_${i}`, response } }
         }),
       })
@@ -412,6 +434,7 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
         role: 'model',
         parts: m.calls.map((c, i) => {
           const { tool, callId, thoughtSignature, ...args } = c
+
           return {
             functionCall: { name: tool, args: args as Record<string, unknown> },
             ...(i === 0 && thoughtSignature ? { thoughtSignature } : {}),
@@ -425,6 +448,7 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
       })
     }
   }
+
   return out
 }
 
@@ -477,6 +501,7 @@ function parseSDKResponse(parts: SDKPart[]): ParsedTurn {
 function parseInteractionOutputs(outputs: Interactions.Content[], template: TextTemplate): ParsedTurn {
   let think = ''
   let content = ''
+
   for (const output of outputs) {
     if (output.type === 'thought') {
       think += (output as Interactions.ThoughtContent).summary?.map((s: any) => s.text ?? '').join('') ?? ''
@@ -485,7 +510,9 @@ function parseInteractionOutputs(outputs: Interactions.Content[], template: Text
     }
   }
   const parsed = parse(content, template)
+
   if (think) parsed.steps.unshift({ kind: 'thought', text: think })
+
   return parsed
 }
 
@@ -512,6 +539,7 @@ if (import.meta.main) {
 
   consola.log('\n=== GeminiNativeAdapter stream ===')
   process.stdout.write('stream: ')
+
   for await (const token of native.stream([{ role: 'user', content: 'Count to 5.' }])) process.stdout.write(token)
   process.stdout.write('\n\n')
 
@@ -535,6 +563,7 @@ if (import.meta.main) {
   consola.log('\n=== GeminiInteractionsAdapter stream ===')
   interactions.resetSession()
   process.stdout.write('stream: ')
+
   for await (const token of interactions.stream([{ role: 'user', content: 'Count to 3.' }])) process.stdout.write(token)
   process.stdout.write('\n')
 }

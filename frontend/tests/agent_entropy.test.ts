@@ -30,6 +30,7 @@ describe('AgentEntropyTracker', () => {
     const t = new AgentEntropyTracker()
     // 5 failures × 2.0 = 10.0 → eject
     let ejected = false
+
     for (let i = 0; i < 4; i++) ejected = t.record('bad', {}, false)
     expect(ejected).toBe(false)
     ejected = t.record('bad', {}, false)
@@ -38,9 +39,11 @@ describe('AgentEntropyTracker', () => {
 
   test('unique successes after failures lower score below threshold', () => {
     const t = new AgentEntropyTracker()
+
     // 4 failures → score 8.0
     for (let i = 0; i < 4; i++) t.record('bad', {}, false)
     expect(t.currentScore).toBe(8.0)
+
     // 6 unique successes × -1.5 = -9.0, floored; score → 0
     for (let i = 0; i < 6; i++) t.record('good', { i }, true)
     expect(t.currentScore).toBe(0)
@@ -49,6 +52,7 @@ describe('AgentEntropyTracker', () => {
 
   test('reset clears score and seen set', () => {
     const t = new AgentEntropyTracker()
+
     for (let i = 0; i < 4; i++) t.record('bad', {}, false)
     t.reset()
     expect(t.currentScore).toBe(0)

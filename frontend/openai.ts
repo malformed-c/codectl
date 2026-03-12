@@ -68,6 +68,7 @@ function toChatMessages(messages: Message[]): ChatMessage[] {
   return messages.map((m) => {
     const role =
       m.role === 'system' ? 'system' : m.role === 'user' ? 'user' : 'assistant'
+
     return { role, content: m.content }
   })
 }
@@ -90,12 +91,14 @@ export class OpenAIChatAdapter {
   async generate(messages: Message[]): Promise<ParsedTurn> {
     const chatMsgs = toChatMessages(messages)
     const raw = await this.chatComplete(chatMsgs)
+
     return parse(raw, this.config.template)
   }
 
   /** generateRaw: send pre-rendered prompt as a single user message. */
   async generateRaw(prompt: string): Promise<ParsedTurn> {
     const raw = await this.chatComplete([{ role: 'user', content: prompt }])
+
     return parse(raw, this.config.template)
   }
 
@@ -136,17 +139,21 @@ export class OpenAIChatAdapter {
 
         if (!response.ok) {
           const text = await response.text()
+
           throw new OpenAIError(text, response.status)
         }
 
         const data = await response.json() as {
           choices?: Array<{ message?: { content?: string } }>
         }
+
         return data.choices?.[0]?.message?.content ?? ''
 
       } catch (err) {
         if (err instanceof OpenAIError && err.status && err.status < 500) throw err
+
         if (i < retries - 1) { await delay(2500); continue }
+
         throw err
       }
     }
@@ -173,6 +180,7 @@ export class OpenAIChatAdapter {
 
     while (true) {
       const { done, value } = await reader.read()
+
       if (done) break
 
       const chunk = decoder.decode(value, { stream: true })
@@ -180,6 +188,7 @@ export class OpenAIChatAdapter {
       for (const line of chunk.split('\n')) {
         if (!line.startsWith('data: ')) continue
         const payload = line.slice(6).trim()
+
         if (payload === '[DONE]') return
 
         try {
@@ -187,6 +196,7 @@ export class OpenAIChatAdapter {
             choices?: Array<{ delta?: { content?: string } }>
           }
           const token = data.choices?.[0]?.delta?.content
+
           if (token) yield token
         } catch { /* malformed SSE line */ }
       }
@@ -212,11 +222,13 @@ export class OpenAITextAdapter {
 
   async generate(messages: Message[]): Promise<ParsedTurn> {
     const prompt = render(messages, this.config.template)
+
     return this.generateRaw(prompt)
   }
 
   async generateRaw(prompt: string): Promise<ParsedTurn> {
     const raw = await this.textComplete(prompt)
+
     return parse(raw, this.config.template)
   }
 
@@ -257,17 +269,21 @@ export class OpenAITextAdapter {
 
         if (!response.ok) {
           const text = await response.text()
+
           throw new OpenAIError(text, response.status)
         }
 
         const data = await response.json() as {
           choices?: Array<{ text?: string }>
         }
+
         return data.choices?.[0]?.text ?? ''
 
       } catch (err) {
         if (err instanceof OpenAIError && err.status && err.status < 500) throw err
+
         if (i < retries - 1) { await delay(2500); continue }
+
         throw err
       }
     }
@@ -294,6 +310,7 @@ export class OpenAITextAdapter {
 
     while (true) {
       const { done, value } = await reader.read()
+
       if (done) break
 
       const chunk = decoder.decode(value, { stream: true })
@@ -301,6 +318,7 @@ export class OpenAITextAdapter {
       for (const line of chunk.split('\n')) {
         if (!line.startsWith('data: ')) continue
         const payload = line.slice(6).trim()
+
         if (payload === '[DONE]') return
 
         try {
@@ -308,6 +326,7 @@ export class OpenAITextAdapter {
             choices?: Array<{ text?: string }>
           }
           const token = data.choices?.[0]?.text
+
           if (token) yield token
         } catch { /* malformed SSE line */ }
       }

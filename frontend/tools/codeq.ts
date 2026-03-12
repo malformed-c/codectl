@@ -12,7 +12,9 @@ function resolvePath(gitRoot: string, path: string): string {
 
 function codeKindFrom(s: string): CodeKind {
   if (s === 'func' || s === 'function') return CodeKind.Func
+
   if (s === 'class') return CodeKind.Class
+
   throw new Error(`Unknown code kind: ${s}. Use 'func' or 'class'.`)
 }
 
@@ -27,7 +29,9 @@ function codePartFrom(s: string): CodePart {
     superclasses: CodePart.Superclasses,
   }
   const part = map[s]
+
   if (!part) throw new Error(`Unknown code part: ${s}. Use: ${Object.keys(map).join(', ')}.`)
+
   return part
 }
 
@@ -47,6 +51,7 @@ async function gitTrackedFiles(gitRoot: string): Promise<string[]> {
   })
   const text = await new Response(proc.stdout).text()
   await proc.exited
+
   return text.split('\n').filter(Boolean)
 }
 
@@ -195,6 +200,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
       // Scope filter
       if (scopeArg) {
         const scopeNorm = scopeArg.replace(/\/$/, '')
+
         if (!relFile.startsWith(scopeNorm + '/') && relFile !== scopeNorm) continue
       }
 
@@ -215,6 +221,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
 
         for (const entry of map) {
           if (entry === '---') continue
+
           for (const line of entry.split('\n')) {
             const truncated = line.length > 100 ? line.slice(0, 97) + '...' : line
             lines.push(`    ${truncated}`)

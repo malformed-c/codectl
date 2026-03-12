@@ -57,9 +57,11 @@ export const ValidatePlanTool: ToolDefinition = {
 export function createValidatePlanHandler(onValidated: PlanValidationCallback): ToolHandler {
   return async (args: Record<string, unknown>) => {
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
+
     if (!raw) return err("'plan' argument is required")
 
     const planResult = parsePlan(raw)
+
     if (!planResult.ok) return err(planResult.error)
     const normalized = planResult.value
 
@@ -68,6 +70,7 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
 
       if (result.success) {
         onValidated(result.data, [])
+
         return ok({ valid: true, message: 'CodePlan is valid. Call run_plan with this plan to execute it.' })
       }
 
@@ -77,6 +80,7 @@ export function createValidatePlanHandler(onValidated: PlanValidationCallback): 
         : [`Validation failed: ${JSON.stringify(result.error)}`]
 
       onValidated(undefined, errors)
+
       return ok({ valid: false, errors, tip: 'Fix the errors above and call validate_plan again before running.' })
 
     } catch (e) {

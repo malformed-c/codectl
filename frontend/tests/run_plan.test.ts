@@ -102,6 +102,7 @@ describe('createRunPlanHandler success path', () => {
     // Must be a proper ToolResult, not a bare object
     expect('ok' in result).toBe(true)
     expect(result.ok).toBe(false)
+
     if (!result.ok) {
       expect(result.error).toContain('git root')
     }

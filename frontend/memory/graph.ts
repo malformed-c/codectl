@@ -18,6 +18,7 @@ import { humanId } from 'human-id'
 // ---------------------------------------------------------------------------
 
 export type NodeKind = 'episodic' | 'semantic' | 'procedural' | 'opinion'
+
 export type EdgeKind = 'temporal' | 'causal' | 'derived_from' | 'supersedes' | 'entity'
 
 export type MemoryNode = {
@@ -108,6 +109,7 @@ export function decayedConfidence(
   const days = Math.max(0, (nowMs - lastAccessMs) / 86_400_000)
   const decayed = baseConfidence * Math.exp(-DECAY_LAMBDA * Math.pow(days, DECAY_POWER))
   const accessBoost = Math.min(0.2, accessCount * 0.02)
+
   return Math.min(1.0, decayed + accessBoost)
 }
 
@@ -139,8 +141,10 @@ export class GraphMemory {
       const exists = this.db.query<{ id: string }, [string]>(
         `SELECT id FROM ${table} WHERE id = ?`,
       ).get(id)
+
       if (!exists) return id
     }
+
     // Fallback: append timestamp to guarantee uniqueness
     return `${prefix}:${humanId({ separator: '', capitalize: true })}${Date.now()}`
   }
@@ -167,7 +171,7 @@ export class GraphMemory {
     )
 
     this.db.run(
-      `INSERT INTO memory_fts (node_id, content, tags) VALUES (?, ?, ?)`,
+      'INSERT INTO memory_fts (node_id, content, tags) VALUES (?, ?, ?)',
       [id, opts.content, (opts.tags ?? []).join(' ')],
     )
 
@@ -191,8 +195,8 @@ export class GraphMemory {
     )
 
     if (kind === 'supersedes') {
-      this.db.run(`UPDATE memory_nodes SET deleted = 1 WHERE id = ?`, [toId])
-      this.db.run(`DELETE FROM memory_fts WHERE node_id = ?`, [toId])
+      this.db.run('UPDATE memory_nodes SET deleted = 1 WHERE id = ?', [toId])
+      this.db.run('DELETE FROM memory_fts WHERE node_id = ?', [toId])
     }
 
     return id
@@ -214,11 +218,12 @@ export class GraphMemory {
 
     if (tags.length > 0) {
       const existing = this.db.query<{ id: string; tags: string }, [string]>(
-        `SELECT id, tags FROM memory_nodes WHERE kind = ? AND deleted = 0`,
+        'SELECT id, tags FROM memory_nodes WHERE kind = ? AND deleted = 0',
       ).all(opts.kind)
 
       for (const row of existing) {
         const existingTags = JSON.parse(row.tags) as string[]
+
         if (tags.some(t => existingTags.includes(t))) {
           superseded = row.id
           break
@@ -281,6 +286,7 @@ export class GraphMemory {
 
     while (queue.length > 0) {
       const item = queue.shift()!
+
       if (visited.has(item.id) || item.hop > maxHops) continue
       visited.set(item.id, item.hop)
 
@@ -295,6 +301,7 @@ export class GraphMemory {
     }
 
     visited.delete(anchorId)
+
     if (visited.size === 0) return []
 
     const ids = [...visited.keys()]
@@ -311,6 +318,7 @@ export class GraphMemory {
     ).all(...(ids as any[]))
 
     const now = Date.now()
+
     return nodes.map(r => ({
       node:       this._rowToNode(r),
       score:      decayedConfidence(r.confidence, r.last_access, r.access_count, now),
@@ -339,6 +347,7 @@ export class GraphMemory {
       this.traverse(opts.anchorId, { maxHops: 2 }).forEach((r, rank) => {
         const entry = merged.get(r.node.id)
         const s = 1 / (60 + rank)
+
         if (entry) entry.scores.push(s)
         else merged.set(r.node.id, { node: r.node, scores: [s] })
       })
@@ -357,6 +366,7 @@ export class GraphMemory {
 
     // Stamp access on returned nodes
     const topIds = results.slice(0, limit).map(r => r.node.id)
+
     if (topIds.length > 0) {
       const now = Date.now()
       const placeholders = topIds.map(() => '?').join(', ')
@@ -376,13 +386,14 @@ export class GraphMemory {
    */
   remove(id: string): boolean {
     const existing = this.db.query<{ id: string }, [string]>(
-      `SELECT id FROM memory_nodes WHERE id = ? AND deleted = 0`,
+      'SELECT id FROM memory_nodes WHERE id = ? AND deleted = 0',
     ).get(id)
 
     if (!existing) return false
 
-    this.db.run(`UPDATE memory_nodes SET deleted = 1 WHERE id = ?`, [id])
-    this.db.run(`DELETE FROM memory_fts WHERE node_id = ?`, [id])
+    this.db.run('UPDATE memory_nodes SET deleted = 1 WHERE id = ?', [id])
+    this.db.run('DELETE FROM memory_fts WHERE node_id = ?', [id])
+
     return true
   }
 
@@ -392,6 +403,7 @@ export class GraphMemory {
       id: string; kind: string; content: string; tags: string
       confidence: number; access_count: number; created_at: number; last_access: number
     }
+
     const row = this.db.query<NodeRow, [string]>(
       `SELECT id, kind, content, tags, confidence, access_count, created_at, last_access
        FROM memory_nodes WHERE id = ? AND deleted = 0`,
@@ -436,20 +448,23 @@ export class GraphMemory {
     const now       = Date.now()
 
     type StaleRow = { id: string; confidence: number; access_count: number; last_access: number }
+
     const stale = this.db.query<StaleRow, [number]>(
       `SELECT id, confidence, access_count, last_access
        FROM memory_nodes WHERE last_access < ? AND deleted = 0`,
     ).all(cutoffMs)
 
     let pruned = 0
+
     for (const r of stale) {
       const decayed = decayedConfidence(r.confidence, r.last_access, r.access_count, now)
+
       if (decayed < threshold) {
-        this.db.run(`UPDATE memory_nodes SET deleted = 1 WHERE id = ?`, [r.id])
-        this.db.run(`DELETE FROM memory_fts WHERE node_id = ?`, [r.id])
+        this.db.run('UPDATE memory_nodes SET deleted = 1 WHERE id = ?', [r.id])
+        this.db.run('DELETE FROM memory_fts WHERE node_id = ?', [r.id])
         pruned++
       } else {
-        this.db.run(`UPDATE memory_nodes SET confidence = ? WHERE id = ?`, [decayed, r.id])
+        this.db.run('UPDATE memory_nodes SET confidence = ? WHERE id = ?', [decayed, r.id])
       }
     }
 
@@ -469,6 +484,7 @@ export class GraphMemory {
    */
   recallForPrompt(query: string, limit = 5): string {
     let results: MemorySearchResult[]
+
     try {
       results = this.search(query, { limit })
     } catch {
@@ -481,6 +497,7 @@ export class GraphMemory {
     const lines = results.map(({ node, score }) => {
       const conf = score.toFixed(2)
       const tags = node.tags.length ? ` [${node.tags.join(', ')}]` : ''
+
       return `• (${node.kind}, conf ${conf})${tags} ${node.content}`
     })
 

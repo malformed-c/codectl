@@ -184,6 +184,7 @@ export const CodePlanSchemaTool: ToolDefinition = {
 export function createCodePlanSchemaHandler(): ToolHandler {
   return async (args) => {
     const includeExample = Boolean(args.include_example)
+
     return ok({
       schema: CODEPLAN_SCHEMA,
       ...(includeExample ? { example: EXAMPLE } : {}),

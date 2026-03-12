@@ -16,11 +16,11 @@
  * A pure spinner hits 10 in ~20 repeated successful calls.
  */
 
-const WEIGHT_SUCCESS_UNIQUE   = -1.5
-const WEIGHT_SUCCESS_REPEATED =  0.5
-const WEIGHT_FAILURE          =  2.0
-const EJECT_THRESHOLD         = 10.0
-const ENTROPY_FLOOR           =  0.0
+const WEIGHT_SUCCESS_UNIQUE = -1.5
+const WEIGHT_SUCCESS_REPEATED = 0.5
+const WEIGHT_FAILURE = 2.0
+const EJECT_THRESHOLD = 10.0
+const ENTROPY_FLOOR = 0.0
 
 /** Stable string key for a tool call — used for repetition detection. */
 function callSignature(name: string, args: Record<string, unknown>): string {
@@ -43,14 +43,19 @@ export class AgentEntropyTracker {
 
     if (!success) {
       this.score += WEIGHT_FAILURE
-    } else if (this.seen.has(sig)) {
+    }
+
+    else if (this.seen.has(sig)) {
       this.score += WEIGHT_SUCCESS_REPEATED
-    } else {
+    }
+
+    else {
       this.seen.add(sig)
       this.score += WEIGHT_SUCCESS_UNIQUE
     }
 
     this.score = Math.max(ENTROPY_FLOOR, this.score)
+
     return this.score >= EJECT_THRESHOLD
   }
 

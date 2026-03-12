@@ -23,6 +23,7 @@ describe('FSM - chat flow', () => {
     fsm.onModel('thought', 'reply', [])
 
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'chat') throw new Error('not chat')
     expect(s.model).toBe('reply')
     expect(s.reasoning).toBe('thought')
@@ -71,6 +72,7 @@ describe('FSM - agent flow', () => {
     fsm.onModel(undefined, 'Done!', [])
 
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.trigger[0]!.text).toBe('do stuff')
     expect(s.response).toBe('Done!')
@@ -84,6 +86,7 @@ describe('FSM - agent flow', () => {
     fsm.onModel(undefined, 'Done!', [])
 
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.rounds).toHaveLength(1)
     expect(s.rounds[0]!.kind).toBe('tool')
@@ -100,6 +103,7 @@ describe('FSM - agent flow', () => {
 
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.rounds).toHaveLength(2)
     expect(s.rounds.every(r => r.kind === 'tool')).toBe(true)
@@ -114,6 +118,7 @@ describe('FSM - agent flow', () => {
 
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.response).toBe('task complete')
   })
@@ -132,6 +137,7 @@ describe('FSM - agent flow', () => {
     // One AgentRound, trigger has the user message
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.trigger[0]!.text).toBe('important question')
   })
@@ -147,9 +153,11 @@ describe('FSM - error handling', () => {
     fsm.onModel(undefined, 'Done', [])
 
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     const err = s.rounds.find(r => r.kind === 'error')
     expect(err).toBeTruthy()
+
     if (err?.kind === 'error') {
       expect(err.message).toBe('Something went wrong')
       expect(err.input).toBe('bad input')
@@ -166,6 +174,7 @@ describe('FSM - error handling', () => {
     fsm.onModel(undefined, 'Done', [])
 
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.rounds.some(r => r.kind === 'error')).toBe(true)
   })
@@ -179,6 +188,7 @@ describe('FSM - error handling', () => {
     fsm.onModel(undefined, 'Done', [])
 
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.rounds.some(r => r.kind === 'system')).toBe(true)
   })
@@ -203,6 +213,7 @@ describe('FSM - abort / force-close', () => {
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
     expect(s.kind).toBe('chat')
+
     if (s.kind === 'chat') expect(s.model).toBe('')
   })
 
@@ -215,6 +226,7 @@ describe('FSM - abort / force-close', () => {
 
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.rounds.some(r => r.kind === 'error')).toBe(true)
     // trigger is preserved even on abort
@@ -231,6 +243,7 @@ describe('FSM - abort / force-close', () => {
 
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.rounds).toHaveLength(1)
     expect(s.rounds[0]!.kind).toBe('tool')
@@ -252,6 +265,7 @@ describe('FSM - headless run (no user turn)', () => {
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
     expect(s.kind).toBe('chat')
+
     if (s.kind === 'chat') {
       expect(s.model).toBe('Hello!')
       expect(s.user).toHaveLength(0)
@@ -266,6 +280,7 @@ describe('FSM - headless run (no user turn)', () => {
 
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.trigger).toHaveLength(0)
   })
@@ -333,6 +348,7 @@ describe('FSM - hydrate (checkpoint restore)', () => {
 
     expect(restored.history).toHaveLength(1)
     const s = restored.history[0]!.serialize()
+
     if (s.kind !== 'agent') throw new Error('not agent')
     expect(s.trigger[0]!.text).toBe('task')
     expect(s.response).toBe('done')
@@ -349,6 +365,7 @@ describe('FSM - consecutive user messages', () => {
 
     expect(fsm.history).toHaveLength(1)
     const s = fsm.history[0]!.serialize()
+
     if (s.kind === 'chat') {
       const userText = s.user.map(sp => sp.text).join('')
       expect(userText).toContain('first')

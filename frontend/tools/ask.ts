@@ -130,7 +130,7 @@ export function createAskHandler(channel: AskChannel): ToolHandler {
     try {
       const answer = await channel.waitForReply(question)
 
-      return ok({ answer})
+      return ok({ answer })
 
     } catch (e) {
       return err(String(e))
@@ -142,6 +142,7 @@ export function createMessageHandler(onParentMessage?: (content: string) => void
   return async (args): Promise<ToolResult> => {
     const content = args.content as string
     onParentMessage?.(content)
+
     return ok({ sent: true })
   }
 }

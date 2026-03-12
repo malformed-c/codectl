@@ -29,6 +29,7 @@ export function createCallIdCacheHandler(cache: Map<string, string>): ToolHandle
         if (!id) return err("'id' is required for 'get'")
 
         const stored = cache.get(id)
+
         if (stored === undefined) return err(`No entry for key '${id}'. Use call_cache(set, ${id}, <value>) to store it first.`)
 
         return ok(stored)
@@ -38,11 +39,13 @@ export function createCallIdCacheHandler(cache: Map<string, string>): ToolHandle
         if (!id) return err("'id' is required for 'delete'")
 
         const existed = cache.delete(id)
+
         return ok({ success: existed ? `Deleted '${id}'` : `Key '${id}' not found` })
       }
 
       case 'list': {
         const keys = Array.from(cache.keys())
+
         return ok({ keys: keys.length ? keys.join(', ') : '(empty)'})
       }
 

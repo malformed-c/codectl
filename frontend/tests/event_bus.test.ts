@@ -126,6 +126,7 @@ describe('EventJournal', () => {
 
   test('claimPending respects limit', async () => {
     const journal = await makeJournal()
+
     for (let i = 0; i < 5; i++) await journal.insert('t', 's', { i })
 
     const batch = await journal.claimPending(3)
@@ -202,6 +203,7 @@ describe('EventBus', () => {
     let attempts = 0
     bus.subscribe('flaky', async () => {
       attempts++
+
       throw new Error('handler blew up')
     }, 'flaky-handler')
 

@@ -49,6 +49,7 @@ export class VersionedMemory {
 
   delete(key: string): boolean {
     const deleted = this._map.delete(key)
+
     if (deleted) this._version++
 
     return deleted
@@ -73,6 +74,7 @@ export class VersionedMemory {
   /** Restore from a plain object (used when replaying checkpoints). */
   static fromRecord(rec: Record<string, string>): VersionedMemory {
     const m = new VersionedMemory()
+
     for (const [k, v] of Object.entries(rec)) m.set(k, v)
 
     return m
@@ -132,6 +134,7 @@ function forwardOneStep(
     // 0 -> 1: drop reasoning, apply age-1 truncation
     return truncationPass(reasoningPass(spans, nextCtx), nextCtx)
   }
+
   // 1 -> 2, 2 -> 3, ...: reasoning already gone; just tighten truncation
   return truncationPass(spans, nextCtx)
 }
@@ -147,6 +150,7 @@ function stateForward(
   ctx: RenderContext,
 ): AnnotatedText {
   let out = spans
+
   for (let age = fromAge; age < toAge; age++) {
     out = forwardOneStep(out, age, { ...ctx, age: age + 1 })
   }
@@ -205,6 +209,7 @@ function renderRound(
 
   // extractionPass and formatPass always run fresh - never cached
   const extracted = extractionPass(compressionOut, ctx)
+
   return makeFormatPass(template)(extracted, ctx)
 }
 
@@ -281,6 +286,7 @@ export function renderHistory(
 
   for (let i = 0; i < history.length; i++) {
     const age = ageMap[i]!
+
     if (age === -1) continue  // trimmed
 
     const round = history[i]!
@@ -288,6 +294,7 @@ export function renderHistory(
 
     const pipelineOut = renderRound(round, template, ctx, cache)
     const text = joinPass(pipelineOut)
+
     if (text) parts.push(text)
   }
 

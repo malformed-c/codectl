@@ -28,6 +28,7 @@ function resolveSource(
 ): { value: string } | { error: string } {
   if (turn !== undefined) {
     const content = getUserTurnText(history.getCommitted(), turn)
+
     if (content === undefined) return { error: `No user turn at offset ${turn}` }
 
     return { value: content }
@@ -35,6 +36,7 @@ function resolveSource(
 
   if (key) {
     const val = memory.get(key)
+
     if (val === undefined) return { error: `Memory key '${key}' not found. Use memory(set, ${key}, <value>) to store it.` }
 
     return { value: val }
@@ -77,6 +79,7 @@ function extractCodeBlocks(text: string): Array<{ lang: string; code: string }> 
   const blocks: Array<{ lang: string; code: string }> = []
   const re = /```([^\n]*)\n([\s\S]*?)```/g
   let m: RegExpExecArray | null
+
   while ((m = re.exec(text)) !== null) {
     blocks.push({ lang: (m[1] ?? '').trim(), code: (m[2] ?? '').trimEnd() })
   }
@@ -93,6 +96,7 @@ function parsePath(path: string): string[] {
   if (path === '.' || path === '') return []
   // Normalise bracket notation to dot notation: a[0].b -> a.0.b
   const normalised = path.replace(/\[(\w+)\]/g, '.$1')
+
   return normalised.split('.').filter(k => k !== '')
 }
 
@@ -101,33 +105,44 @@ function pathGet(root: unknown, keys: string[]): { ok: true; value: unknown } | 
   if (keys.length === 0) return { ok: true, value: root }
 
   const [head, ...tail] = keys
+
   if (head === '*') {
     if (Array.isArray(root)) {
       const results: unknown[] = []
+
       for (const item of root) {
         const r = pathGet(item, tail)
+
         if (!r.ok) return r
         results.push(r.value)
       }
+
       return { ok: true, value: results }
     }
+
     if (root !== null && typeof root === 'object') {
       const results: Record<string, unknown> = {}
+
       for (const [k, v] of Object.entries(root as Record<string, unknown>)) {
         const r = pathGet(v, tail)
+
         if (!r.ok) return r
         results[k] = r.value
       }
+
       return { ok: true, value: results }
     }
-    return { ok: false, error: `Cannot apply wildcard to non-object/array` }
+
+    return { ok: false, error: 'Cannot apply wildcard to non-object/array' }
   }
 
   if (root === null || typeof root !== 'object') return { ok: false, error: `Cannot traverse into '${head}'` }
   const next = Array.isArray(root)
     ? root[parseInt(head!, 10)]
     : (root as Record<string, unknown>)[head!]
+
   if (next === undefined) return { ok: false, error: `Key '${head}' not found` }
+
   return pathGet(next, tail)
 }
 
@@ -148,6 +163,7 @@ function pathSet(root: unknown, keys: string[], value: unknown, del = false): { 
     } else {
       ;(clone as Record<string, unknown>)[key as string] = value
     }
+
     return { ok: true, value: clone }
   }
 
@@ -156,8 +172,10 @@ function pathSet(root: unknown, keys: string[], value: unknown, del = false): { 
     ? (isNaN(parseInt(tail[0]!, 10)) ? {} : [])
     : child
   const result = pathSet(childClone, tail, value, del)
+
   if (!result.ok) return result
   ;(clone as Record<string, unknown>)[key as string] = result.value
+
   return { ok: true, value: clone }
 }
 
@@ -207,6 +225,7 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
   return async (args) => {
     const method = args.method as string
     const saveTo = args.save_to as string
+
     if (!saveTo) return err("'save_to' is required")
 
     const keyArg = args.key as string | undefined
@@ -224,6 +243,7 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       memory,
       history,
     )
+
     if ('error' in src) return err(src.error)
     const text = src.value
 
@@ -231,14 +251,17 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
     if (method === 'json') {
       const path = args.path as string | undefined
+
       if (!path) return err("'path' required for json extraction")
 
       let parsed: unknown
+
       try { parsed = JSON.parse(text) } catch {
         // Text may contain a JSON payload embedded in surrounding prose (e.g. a user
         // message that starts with instructions before the JSON). Find the first
         // { or [ and try to parse from there.
         const jsonStart = text.search(/[{[]/)
+
         if (jsonStart !== -1) {
           try { parsed = JSON.parse(text.slice(jsonStart)) }
           catch { return err('Input is not valid JSON') }
@@ -252,12 +275,14 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       const segments = parsePath(path)
 
       let cur: unknown = parsed
+
       for (const k of segments) {
         if (cur === null || typeof cur !== 'object') {
           return err(`Path segment '${k}' not reachable`)
         }
 
         cur = (cur as Record<string, unknown>)[k]
+
         if (cur === undefined) return err(`Key '${k}' not found`)
       }
 
@@ -265,13 +290,16 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
     } else if (method === 'regex') {
       const pattern = args.pattern as string | undefined
+
       if (!pattern) return err("'pattern' required for regex extraction")
 
       let re: RegExp
+
       try { re = new RegExp(pattern, 's') }
       catch (e) { return err(`Invalid regex: ${e}`) }
 
       const m = re.exec(text)
+
       if (!m) return err('Pattern did not match')
       extracted = m[1] ?? m[0]
 
@@ -292,13 +320,16 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
       // Filter by language if specified
       const langFilter = args.lang as string | undefined
+
       if (langFilter) {
         blocks = blocks.filter(b => b.lang === langFilter || b.lang.startsWith(langFilter + ' '))
       }
 
       const indexArg = args.index as number | undefined
+
       if (indexArg !== undefined) {
         const block = blocks[indexArg]
+
         if (!block) return err(`No code block at index ${indexArg} (found ${blocks.length})`)
         extracted = block.code
 
@@ -311,9 +342,10 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
       return err(`Unknown method '${method}'. Use json, regex, lines, or codeblocks.`)
     }
 
-    if (extracted === null) return err(`Extraction returned no result`)
+    if (extracted === null) return err('Extraction returned no result')
 
     memory.set(saveTo, extracted)
+
     return ok({ saved_to: saveTo, length: extracted.length })
   }
 }
@@ -354,7 +386,9 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     const src =
       memKey
-        ? (() => { const v = memory.get(memKey); return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found. Use memory(set, ${memKey}, <value>) to store it.` } })()
+        ? (() => { const v = memory.get(memKey)
+
+ return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found. Use memory(set, ${memKey}, <value>) to store it.` } })()
         : args.text !== undefined
           ? { value: args.text as string }
           : { error: "Provide 'text' or 'key'" }
@@ -362,12 +396,15 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
     if ('error' in src) return err((src as { error: string }).error)
 
     let parsed: unknown
+
     try { parsed = JSON.parse((src as any).value) }
     catch { return err('Input is not valid JSON') }
 
     const persist = (root: unknown) => {
       const out = JSON.stringify(root)
+
       if (memKey) memory.set(memKey, out)
+
       return out
     }
 
@@ -377,14 +414,18 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
         return err('keys requires a JSON object at the root')
       }
+
       return ok(Object.keys(parsed as object).join(', '))
     }
 
     if (action === 'get') {
       const path = args.path as string | undefined
+
       if (!path) return err("'path' required for get")
       const result = pathGet(parsed, parsePath(path))
+
       if (!result.ok) return err(result.error)
+
       return ok(typeof result.value === 'string' ? result.value : JSON.stringify(result.value))
     }
 
@@ -394,6 +435,7 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       // set with no path + a key = store the whole parsed document
       if (!path && action === 'set' && memKey) {
         persist(parsed)
+
         return ok({ updated: memKey, action: 'replaced root' })
       }
 
@@ -402,18 +444,23 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
       if (action === 'delete') {
         const result = pathSet(parsed, keys, undefined, true)
+
         if (!result.ok) return err(result.error)
         persist(result.value)
+
         return ok({ deleted: path, ...(memKey ? { key: memKey } : {}) })
       }
 
       const val = args.value as string | undefined
+
       if (val === undefined) return err(`'value' required for ${action}`)
       let newVal: unknown
+
       try { newVal = JSON.parse(val) } catch { newVal = val }
 
       if (action === 'append') {
         const cur = pathGet(parsed, keys)
+
         if (cur.ok && Array.isArray(cur.value)) {
           newVal = [...cur.value, newVal]
         } else if (cur.ok && typeof cur.value === 'string' && typeof newVal === 'string') {
@@ -422,8 +469,10 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       }
 
       const result = pathSet(parsed, keys, newVal)
+
       if (!result.ok) return err(result.error)
       persist(result.value)
+
       return ok({ updated: path, ...(memKey ? { key: memKey } : {}) })
     }
 
@@ -483,6 +532,7 @@ export function createAppendHandler(memory: MemoryAccess): ToolHandler {
     const current = memory.get(memKey) ?? ''
     const result = current + value
     memory.set(saveTo, result)
+
     return ok({ key: saveTo, length: result.length })
   }
 }
@@ -495,6 +545,7 @@ export function createPrependHandler(memory: MemoryAccess): ToolHandler {
     const current = memory.get(memKey) ?? ''
     const result = value + current
     memory.set(saveTo, result)
+
     return ok({ key: saveTo, length: result.length })
   }
 }
@@ -546,6 +597,7 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
 
     if (templateName) {
       const tpl = BUILTIN_TEMPLATES[templateName]
+
       if (!tpl) return err(`Unknown template '${templateName}'`)
       rendered = JSON.stringify(tpl, null, 2)
 
@@ -558,6 +610,7 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
         Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : `{{${name}}}`
       )
       const remaining = [...rendered.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1])
+
       if (remaining.length) {
         return err(`Unfilled placeholders: ${remaining.join(', ')}`)
       }
@@ -568,6 +621,7 @@ export function createInstantiateHandler(memory: MemoryAccess): ToolHandler {
 
     if (saveTo) {
       memory.set(saveTo, rendered)
+
       return ok({ saved_to: saveTo})
     }
 

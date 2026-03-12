@@ -137,6 +137,7 @@ export function agentRound(
       // age 2+: children completely collapsed - trigger + response is the whole story
 
       if (responseThink) out.push(reasoningSpan(responseThink))
+
       if (response) out.push(modelSpan(response))
 
       return out
@@ -196,9 +197,11 @@ export function toolRound(
       const out: AnnotatedText = []
 
       if (reasoning) out.push(reasoningSpan(reasoning))
+
       if (content) out.push(modelSpan(content))
 
       out.push(toolCallSpan(calls, callText))
+
       if (results.length > 0) out.push(toolResultSpan(results, resultText))
 
       return out

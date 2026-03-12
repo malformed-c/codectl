@@ -44,6 +44,7 @@ export function parseUpstreamError(err: unknown): UpstreamError {
     // Gemini SDK may throw an object with a nested .error.code (already parsed)
     if (obj['error'] && typeof obj['error'] === 'object') {
       const inner = obj['error'] as Record<string, unknown>
+
       if (typeof inner['code'] === 'number') {
         return {
           status: inner['code'],
@@ -58,8 +59,10 @@ export function parseUpstreamError(err: unknown): UpstreamError {
     // or the SDK may have already parsed it into err.errorDetails / err.status.
     if (typeof obj['message'] === 'string') {
       const msg = obj['message'] as string
+
       try {
         const parsed = JSON.parse(msg) as { error?: { code?: number; message?: string } }
+
         if (parsed?.error?.code) {
           return {
             status: parsed.error.code,
@@ -74,6 +77,7 @@ export function parseUpstreamError(err: unknown): UpstreamError {
       try {
         const strErr = JSON.stringify(err)
         const parsed = JSON.parse(strErr) as { error?: { code?: number; message?: string } }
+
         if (parsed?.error?.code) {
           return {
             status: parsed.error.code,
@@ -96,6 +100,7 @@ export function parseUpstreamError(err: unknown): UpstreamError {
 
 export function isTransientError(err: unknown): boolean {
   const { status } = parseUpstreamError(err)
+
   return status != null && RETRYABLE_STATUS.has(status)
 }
 

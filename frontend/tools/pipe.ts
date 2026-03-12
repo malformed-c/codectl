@@ -36,13 +36,19 @@ export type ExecuteFn = (name: string, args: Record<string, unknown>) => Promise
 function mainValue(result: ToolResult): string {
   if (!result.ok) return ''
   const v = result.value
+
   if (typeof v === 'string') return v
+
   if (v && typeof v === 'object') {
     const obj = v as Record<string, unknown>
+
     if (typeof obj.stdout  === 'string') return obj.stdout   // bash / exec
+
     if (typeof obj.output  === 'string') return obj.output
+
     if (typeof obj.content === 'string') return obj.content  // memory get
   }
+
   return JSON.stringify(v)
 }
 
@@ -69,13 +75,16 @@ function stepVars(result: ToolResult, index: number, as?: string): Record<string
 
   vars[nKey] = main
   vars['_prev'] = main
+
   if (as) vars[as] = main
 
   if (result.ok && result.value && typeof result.value === 'object') {
     const obj = result.value as Record<string, unknown>
+
     for (const [k, v] of Object.entries(obj)) {
       const fieldStr = typeof v === 'string' ? v : JSON.stringify(v)
       vars[`${nKey}.${k}`] = fieldStr
+
       if (as) vars[`${as}.${k}`] = fieldStr
     }
   }
@@ -85,6 +94,7 @@ function stepVars(result: ToolResult, index: number, as?: string): Record<string
   // Only set if not already populated by a native `stdout` field above.
   if (!(`${nKey}.stdout` in vars)) {
     vars[`${nKey}.stdout`] = main
+
     if (as && !(`${as}.stdout` in vars)) vars[`${as}.stdout`] = main
   }
 
@@ -100,13 +110,16 @@ function interpolate(
   scope: Record<string, string>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
+
   for (const [k, v] of Object.entries(args)) {
     if (typeof v !== 'string') { out[k] = v; continue }
     out[k] = v.replace(/\$\{([^}]+)\}|\$([\w.]+)/g, (_m, braced, bare) => {
       const key = braced ?? bare
+
       return key in scope ? scope[key]! : _m
     })
   }
+
   return out
 }
 
@@ -160,6 +173,7 @@ export const PipeTool: ToolDefinition = {
 export function createPipeHandler(execute: ExecuteFn): ToolHandler {
   return async (args) => {
     const steps = args.steps as PipeStep[]
+
     if (!Array.isArray(steps) || steps.length === 0) {
       return err("'steps' must be a non-empty array")
     }
@@ -179,6 +193,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i]!
+
       if (!step.tool) {
         return err(`Step ${i}: missing 'tool'`)
       }
@@ -188,6 +203,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
       const rawArgs = { ...(step.args ?? {}) } as Record<string, unknown>
       const stepAs: string | undefined = step.as
         ?? (typeof rawArgs.as === 'string' ? rawArgs.as : undefined)
+
       if (stepAs) delete rawArgs.as
 
       // Interpolate $-refs from previous step outputs into this step's args
@@ -198,6 +214,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
       const result = await execute(step.tool, resolvedArgs)
 
       const record: StepRecord = { tool: step.tool, ok: result.ok }
+
       if (result.ok) {
         record.value = result.value
       } else {
@@ -211,6 +228,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
       } else {
         failedAt = i
         consola.warn(`[pipe] step ${i} (${step.tool}) failed: ${result.error}`)
+
         if (!continueOnError) break
       }
     }

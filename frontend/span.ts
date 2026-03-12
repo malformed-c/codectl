@@ -1,4 +1,4 @@
-import type { StoredToolCall, StoredToolResult } from "./types"
+import type { StoredToolCall, StoredToolResult } from './types'
 
 export type SpanKind =
   | 'system'

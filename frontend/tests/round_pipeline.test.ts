@@ -23,6 +23,7 @@ describe('round serialize / fromJSON', () => {
     const r = chatRound([userSpan('hello')], 'world', 'thought')
     const s = r.serialize()
     expect(s.kind).toBe('chat')
+
     if (s.kind !== 'chat') return
     expect(s.model).toBe('world')
     expect(s.reasoning).toBe('thought')
@@ -30,6 +31,7 @@ describe('round serialize / fromJSON', () => {
 
     const s2 = fromJSON(s).serialize()
     expect(s2.kind).toBe('chat')
+
     if (s2.kind === 'chat') expect(s2.model).toBe('world')
   })
 
@@ -42,11 +44,13 @@ describe('round serialize / fromJSON', () => {
     )
     const s = r.serialize()
     expect(s.kind).toBe('tool')
+
     if (s.kind !== 'tool') return
     expect(s.calls).toHaveLength(1)
     expect(s.results).toHaveLength(1)
 
     const s2 = fromJSON(s).serialize()
+
     if (s2.kind === 'tool') expect(s2.calls[0]!.tool).toBe('bash')
   })
 
@@ -55,12 +59,14 @@ describe('round serialize / fromJSON', () => {
     const agent = agentRound([], [tool])
     const s = agent.serialize()
     expect(s.kind).toBe('agent')
+
     if (s.kind !== 'agent') return
     expect(s.rounds).toHaveLength(1)
     expect(s.rounds[0]!.kind).toBe('tool')
     expect(s.trigger).toHaveLength(0)
 
     const s2 = fromJSON(s).serialize()
+
     if (s2.kind === 'agent') expect(s2.rounds[0]!.kind).toBe('tool')
   })
 
@@ -68,9 +74,11 @@ describe('round serialize / fromJSON', () => {
     const r = systemRound('system intervention')
     const s = r.serialize()
     expect(s.kind).toBe('system')
+
     if (s.kind === 'system') expect(s.message).toBe('system intervention')
 
     const s2 = fromJSON(s).serialize()
+
     if (s2.kind === 'system') expect(s2.message).toBe('system intervention')
   })
 
@@ -78,6 +86,7 @@ describe('round serialize / fromJSON', () => {
     const r = errorRound('parse failed', 'bad json{')
     const s = r.serialize()
     expect(s.kind).toBe('error')
+
     if (s.kind === 'error') {
       expect(s.message).toBe('parse failed')
       expect(s.input).toBe('bad json{')

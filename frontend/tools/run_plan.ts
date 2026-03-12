@@ -46,13 +46,16 @@ export function createRunPlanHandler(
 ): ToolHandler {
   return async (args) => {
     const raw = args.plan ?? args.json ?? args.codeplan ?? args.value
+
     if (!raw) return err("'plan' argument is required")
 
     const planResult = parsePlan(raw)
+
     if (!planResult.ok) return err(planResult.error)
     const normalized = planResult.value
 
     const validated = codePlanSchema.safeParse(normalized)
+
     if (!validated.success) {
       const issues = validated.error.issues ?? []
       const errors = issues.map(e => `${e.path.join('.')}: ${e.message}`)
@@ -92,6 +95,7 @@ export function formatRunPlanFailure(result: PlanRunResult): string {
     hasConcreteReason = true
 
     parts.push('Dry apply errors:')
+
     for (const e of result.dryApplyErrors) {
       parts.push(`  ${e.resource} / ${e.operation}: ${e.error}`)
     }
@@ -107,6 +111,7 @@ export function formatRunPlanFailure(result: PlanRunResult): string {
     parts.push('Ansible failures:')
 
     let hasTaskFailures = false
+
     for (const r of result.ansibleReport.results) {
       if (r.status === 'failed' || r.status === 'unreachable') {
         hasTaskFailures = true

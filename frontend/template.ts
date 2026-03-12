@@ -125,9 +125,13 @@ export function makeTurn(opts: {
   malformed?: boolean
 }): ParsedTurn {
   const steps: Step[] = []
+
   if (opts.think)   steps.push({ kind: 'thought', text: opts.think })
+
   if (opts.content) steps.push({ kind: 'text',    text: opts.content })
+
   for (const c of opts.toolCalls ?? []) steps.push({ kind: 'tool_call', ...c })
+
   return { steps, malformed: opts.malformed }
 }
 
@@ -248,8 +252,11 @@ export function wrapContent([open, close]: TemplatePair, content: string): strin
   // Normalize newline boundaries between open/content and content/close
   // to prevent double-\n when both sides already carry a newline.
   let middle = content
+
   if (open.endsWith('\n') && middle.startsWith('\n')) middle = middle.slice(1)
+
   if (close.startsWith('\n') && middle.endsWith('\n')) middle = middle.slice(0, -1)
+
   return `${open}${middle}${close}`
 }
 
@@ -309,8 +316,10 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
 
   if (stored.error) {
     const body = JSON.stringify({ error: stored.error })
+
     if (isRich) {
       const rich = (tr as ToolResultsTemplate).rich!
+
       return `${rich.callId}${stored.callId ?? ''}${rich.content}${body}`
     }
 
@@ -326,6 +335,7 @@ export function renderStoredToolResult(stored: StoredToolResult, template: TextT
 
   if (isRich) {
     const rich = (tr as ToolResultsTemplate).rich!
+
     return `${rich.callId}${stored.callId ?? ''}${rich.content}${inner}`
   }
 
@@ -447,6 +457,7 @@ function autofixPair(
   const hasClose = text.includes(close)
 
   if (hasOpen && hasClose) return { text, fixed: false }
+
   if (!hasOpen && !hasClose) return { text, fixed: false }
 
   if (!hasOpen && hasClose) {
@@ -476,12 +487,15 @@ function autofixPair(
  */
 function extractBetween(text: string, [open, close]: TemplatePair): string | null {
   const start = text.indexOf(open)
+
   if (start === -1) return null
 
   const contentStart = start + open.length
+
   if (!close) return text.slice(contentStart).trim()
 
   const end = text.indexOf(close, contentStart)
+
   if (end === -1) return text.slice(contentStart).trim()
 
   return text.slice(contentStart, end).trim()
@@ -496,6 +510,7 @@ function extractAll(text: string, [open, close]: TemplatePair): string[] {
 
   while (true) {
     const start = text.indexOf(open, cursor)
+
     if (start === -1) break
 
     const contentStart = start + open.length
@@ -514,6 +529,7 @@ function extractAll(text: string, [open, close]: TemplatePair): string[] {
     }
 
     const end = text.indexOf(close, contentStart)
+
     if (end === -1) {
       results.push(text.slice(contentStart).trim())
 
@@ -541,11 +557,14 @@ function stripTag(text: string, [open, close]: TemplatePair): string {
   }
 
   let result = text
+
   while (true) {
     const start = result.indexOf(open)
+
     if (start === -1) break
 
     const end = result.indexOf(close, start + open.length)
+
     if (end === -1) {
       result = result.slice(0, start)
 
@@ -573,8 +592,10 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
   if (template.bos && text.startsWith(template.bos)) {
     text = text.slice(template.bos.length)
   }
+
   if (template.eos) {
     const eosIdx = text.indexOf(template.eos)
+
     if (eosIdx !== -1) text = text.slice(0, eosIdx)
   }
 
@@ -582,6 +603,7 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
   if (text.startsWith(template.modelTurn[0])) {
     text = text.slice(template.modelTurn[0].length)
   }
+
   if (template.modelTurn[1] && text.endsWith(template.modelTurn[1])) {
     text = text.slice(0, text.length - template.modelTurn[1].length)
   }
@@ -599,10 +621,12 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
 
     const stopBefore = toolCallOpen ? [toolCallOpen] : []
     const { text: fixed, fixed: thinkFixed } = autofixPair(text, template.think, stopBefore)
+
     if (thinkFixed) malformed = true
     text = fixed
 
     const think = extractBetween(text, template.think)
+
     if (think !== null) {
       steps.push({ kind: 'thought', text: think })
       text = stripTag(text, template.think)
@@ -614,14 +638,17 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
     const pair = resolveWrap(template.toolCall, template.modelTurn)
 
     const { text: fixed, fixed: callFixed } = autofixPair(text, pair)
+
     if (callFixed) malformed = true
     text = fixed
 
     const rawBlocks = extractAll(text, pair)
+
     if (rawBlocks.length > 0) {
       for (const raw of rawBlocks) {
         try {
           const calls = parseToolCalls(raw)
+
           for (const c of calls) {
             steps.push({
               kind: 'tool_call',
@@ -635,11 +662,14 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
           // Strip [ARGS] marker and attempt to parse the remainder as JSON args.
           const inferredName = raw.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1] ?? 'malformed_call'
           let recoveredArgs: Record<string, unknown> = { _raw: raw }
+
           try {
             const argsIdx = raw.indexOf('[ARGS]')
+
             if (argsIdx !== -1) {
               const argsText = raw.slice(argsIdx + 6).trim()
               const parsed = argsText ? JSON.parse(argsText) : {}
+
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 recoveredArgs = parsed as Record<string, unknown>
               }
@@ -655,6 +685,7 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
   }
 
   const content = text.trim()
+
   if (content) steps.push({ kind: 'text', text: content })
 
   return malformed ? { steps, malformed } : { steps }
@@ -666,27 +697,27 @@ if (import.meta.main) {
   const template = Profiles.mistral
 
   const messages: Message[] = [
-    { role: "system", content: "You are a code agent." },
-    { role: "user", content: "Add JWT verification to auth.py" },
-    { role: "tool_result", content: '<file path="src/auth.py">def login(): pass</file>' },
-    { role: "assistant", content: "I will add the verify_token function." },
-    { role: "user", content: "resolve stream_jwt_001" },
+    { role: 'system', content: 'You are a code agent.' },
+    { role: 'user', content: 'Add JWT verification to auth.py' },
+    { role: 'tool_result', content: '<file path="src/auth.py">def login(): pass</file>' },
+    { role: 'assistant', content: 'I will add the verify_token function.' },
+    { role: 'user', content: 'resolve stream_jwt_001' },
   ]
 
-  consola.log("=== render ===")
+  consola.log('=== render ===')
   consola.log(render(messages, template))
 
-  consola.log("\n=== renderFim ===")
+  consola.log('\n=== renderFim ===')
   consola.log(renderFim({
-    prefix: "def verify_token(token: str) -> dict:\n    ",
-    suffix: "\n\ndef login(): pass",
+    prefix: 'def verify_token(token: str) -> dict:\n    ',
+    suffix: '\n\ndef login(): pass',
   }, template))
 
-  consola.log("\n=== parse (mistral) ===")
-  const raw = `[THINK]I need to decode the JWT[/THINK]\nreturn jwt.decode(token, SECRET)`
+  consola.log('\n=== parse (mistral) ===')
+  const raw = '[THINK]I need to decode the JWT[/THINK]\nreturn jwt.decode(token, SECRET)'
   consola.log(parse(raw, template))
 
-  consola.log("\n=== parse (qwen) ===")
-  const rawQwen = `<think>reasoning here</think>\n<|im_start|>assistant\nreturn jwt.decode(token, SECRET)<|im_end|>`
+  consola.log('\n=== parse (qwen) ===')
+  const rawQwen = '<think>reasoning here</think>\n<|im_start|>assistant\nreturn jwt.decode(token, SECRET)<|im_end|>'
   consola.log(parse(rawQwen, Profiles.qwen))
 }

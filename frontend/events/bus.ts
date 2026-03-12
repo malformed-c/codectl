@@ -78,6 +78,7 @@ export class EventBus {
     const id = await this.journal.insert(topic, source, payload, correlationId)
     this.pendingWake = true   // wake the dispatch loop on next tick
     consola.debug(`[EventBus] published topic=${topic} id=${id}`)
+
     return id
   }
 
@@ -92,8 +93,10 @@ export class EventBus {
   /** Unsubscribe a handler by its subscriber id. */
   unsubscribe(topic: string, subscriberId: string): void {
     const list = this.subscribers.get(topic)
+
     if (!list) return
     const next = list.filter(s => s.id !== subscriberId)
+
     if (next.length === 0) {
       this.subscribers.delete(topic)
     } else {
@@ -107,7 +110,9 @@ export class EventBus {
    */
   async recover(): Promise<number> {
     const count = await this.journal.resetProcessingToPending()
+
     if (count) consola.info(`[EventBus] recovered ${count} stale events`)
+
     return count
   }
 
@@ -122,7 +127,9 @@ export class EventBus {
   /** Graceful shutdown: stop accepting new dispatches, drain in-progress. */
   async stop(): Promise<void> {
     this.stopped = true
+
     if (this.dispatchTimer)  { clearTimeout(this.dispatchTimer);  this.dispatchTimer  = null }
+
     if (this.watchdogTimer)  { clearTimeout(this.watchdogTimer);  this.watchdogTimer  = null }
     await this.journal.close()
     consola.info('[EventBus] stopped')
@@ -136,6 +143,7 @@ export class EventBus {
     if (this.stopped) return
     this.dispatchTimer = setTimeout(async () => {
       if (this.stopped) return
+
       try {
         await this._claimAndDeliverBatch()
       } catch (err) {
@@ -148,6 +156,7 @@ export class EventBus {
 
   private async _claimAndDeliverBatch(): Promise<void> {
     const events = await this.journal.claimPending(this.batchSize)
+
     for (const event of events) {
       if (this.stopped) break
       await this._deliver(event)
@@ -156,12 +165,15 @@ export class EventBus {
 
   private async _deliver(event: Event): Promise<void> {
     const subs = this.subscribers.get(event.topic)
+
     if (!subs || subs.length === 0) {
       await this.journal.markDone(event.id)
+
       return
     }
 
     const errors: string[] = []
+
     for (const { handler, id: subId } of subs) {
       try {
         await handler(event)
@@ -193,10 +205,13 @@ export class EventBus {
     if (this.stopped) return
     this.watchdogTimer = setTimeout(async () => {
       if (this.stopped) return
+
       try {
         const [reset, dead] = await this.journal.recoverStale(this.staleTimeoutMs, this.maxRetries)
+
         if (reset || dead) {
           consola.info(`[EventBus] watchdog: reset=${reset} dead=${dead}`)
+
           if (reset) this.pendingWake = true
         }
       } catch (err) {
