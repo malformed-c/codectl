@@ -198,6 +198,7 @@ export class OpenAIChatAdapter {
           const token = data.choices?.[0]?.delta?.content
 
           if (token) yield token
+
         } catch { /* malformed SSE line */ }
       }
     }
@@ -328,6 +329,7 @@ export class OpenAITextAdapter {
           const token = data.choices?.[0]?.text
 
           if (token) yield token
+
         } catch { /* malformed SSE line */ }
       }
     }

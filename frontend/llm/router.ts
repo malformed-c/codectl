@@ -230,6 +230,7 @@ export class ModelRouter {
 
       try {
         results[pid] = await provider.healthCheck(pcfg, key)
+
       } catch (err) {
         consola.debug(`[ModelRouter] healthCheck ${pid} failed:`, err)
         results[pid] = false
@@ -246,6 +247,7 @@ export class ModelRouter {
   invalidate(agentId?: string): void {
     if (agentId) {
       this.cache.delete(agentId)
+
     } else {
       this.cache.clear()
     }

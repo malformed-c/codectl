@@ -198,6 +198,7 @@ export class TaskEngine {
 
         consola.info(`[TaskEngine] unblocked ${row.task_id} (predecessor ${completedTaskId} done)`)
       }
+
     } else {
       // Cascade failure/cancellation
       for (const row of rows) {

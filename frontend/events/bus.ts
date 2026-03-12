@@ -99,6 +99,7 @@ export class EventBus {
 
     if (next.length === 0) {
       this.subscribers.delete(topic)
+
     } else {
       this.subscribers.set(topic, next)
     }
@@ -146,6 +147,7 @@ export class EventBus {
 
       try {
         await this._claimAndDeliverBatch()
+
       } catch (err) {
         consola.error('[EventBus] dispatch error:', err)
       }
@@ -177,6 +179,7 @@ export class EventBus {
     for (const { handler, id: subId } of subs) {
       try {
         await handler(event)
+
       } catch (err) {
         const msg = String(err)
         errors.push(msg)
@@ -186,11 +189,13 @@ export class EventBus {
 
     if (errors.length === 0) {
       await this.journal.markDone(event.id)
+
     } else if (event.retryCount < this.maxRetries) {
       await this.journal.markRetry(event.id)
       consola.warn(
         `[EventBus] retrying event ${event.id} (attempt ${event.retryCount + 1}/${this.maxRetries})`
       )
+
     } else {
       await this.journal.markDeadLetter(event.id, errors.join('; '))
       consola.error(`[EventBus] dead-lettered event ${event.id} after ${event.retryCount} retries`)
@@ -214,6 +219,7 @@ export class EventBus {
 
           if (reset) this.pendingWake = true
         }
+
       } catch (err) {
         consola.error('[EventBus] watchdog error:', err)
       }

@@ -107,7 +107,9 @@ export class CheckpointStore {
 
     if (!(await file.exists())) return null
 
-    try { return await file.json() as Checkpoint }
+    try { return await file.json() as Checkpoint
+
+                                                 }
 
     catch { return null }
   }
@@ -118,7 +120,9 @@ export class CheckpointStore {
 
     if (!(await file.exists())) return null
 
-    try { return await file.json() as Checkpoint }
+    try { return await file.json() as Checkpoint
+
+                                                 }
 
     catch { return null }
   }

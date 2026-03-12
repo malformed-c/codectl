@@ -24,6 +24,7 @@ export function parsePlan(raw: unknown): { ok: true; value: unknown } | { ok: fa
   if (typeof raw === 'string') {
     try {
       parsed = JSON.parse(raw)
+
     } catch {
       parsed = destr(raw)
 
@@ -40,7 +41,9 @@ export function parsePlan(raw: unknown): { ok: true; value: unknown } | { ok: fa
 function maybeParseString(v: unknown): unknown {
   if (typeof v !== 'string') return v
 
-  try { return JSON.parse(v) } catch { return v }
+  try { return JSON.parse(v)
+
+                             } catch { return v }
 }
 
 function unwrap(v: unknown): unknown {

@@ -80,6 +80,7 @@ export async function withRetry<T>(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn()
+
     } catch (err) {
       lastErr = err
       const { code, status, message } = classifyError(err)

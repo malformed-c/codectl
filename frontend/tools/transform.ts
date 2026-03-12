@@ -160,6 +160,7 @@ function pathSet(root: unknown, keys: string[], value: unknown, del = false): { 
     if (del) {
       if (Array.isArray(clone)) clone.splice(idx, 1)
       else delete (clone as Record<string, unknown>)[head!]
+
     } else {
       ;(clone as Record<string, unknown>)[key as string] = value
     }
@@ -256,14 +257,18 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
       let parsed: unknown
 
-      try { parsed = JSON.parse(text) } catch {
+      try { parsed = JSON.parse(text)
+
+                                      } catch {
         // Text may contain a JSON payload embedded in surrounding prose (e.g. a user
         // message that starts with instructions before the JSON). Find the first
         // { or [ and try to parse from there.
         const jsonStart = text.search(/[{[]/)
 
         if (jsonStart !== -1) {
-          try { parsed = JSON.parse(text.slice(jsonStart)) }
+          try { parsed = JSON.parse(text.slice(jsonStart))
+
+                                                           }
           catch { return err('Input is not valid JSON') }
 
         } else {
@@ -295,7 +300,9 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
       let re: RegExp
 
-      try { re = new RegExp(pattern, 's') }
+      try { re = new RegExp(pattern, 's')
+
+                                          }
       catch (e) { return err(`Invalid regex: ${e}`) }
 
       const m = re.exec(text)
@@ -397,7 +404,9 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     let parsed: unknown
 
-    try { parsed = JSON.parse((src as any).value) }
+    try { parsed = JSON.parse((src as any).value)
+
+                                                  }
     catch { return err('Input is not valid JSON') }
 
     const persist = (root: unknown) => {
@@ -456,13 +465,16 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       if (val === undefined) return err(`'value' required for ${action}`)
       let newVal: unknown
 
-      try { newVal = JSON.parse(val) } catch { newVal = val }
+      try { newVal = JSON.parse(val)
+
+                                     } catch { newVal = val }
 
       if (action === 'append') {
         const cur = pathGet(parsed, keys)
 
         if (cur.ok && Array.isArray(cur.value)) {
           newVal = [...cur.value, newVal]
+
         } else if (cur.ok && typeof cur.value === 'string' && typeof newVal === 'string') {
           newVal = cur.value + newVal
         }

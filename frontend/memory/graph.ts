@@ -463,6 +463,7 @@ export class GraphMemory {
         this.db.run('UPDATE memory_nodes SET deleted = 1 WHERE id = ?', [r.id])
         this.db.run('DELETE FROM memory_fts WHERE node_id = ?', [r.id])
         pruned++
+
       } else {
         this.db.run('UPDATE memory_nodes SET confidence = ? WHERE id = ?', [decayed, r.id])
       }
@@ -487,6 +488,7 @@ export class GraphMemory {
 
     try {
       results = this.search(query, { limit })
+
     } catch {
       // FTS can throw on malformed queries (e.g. bare operators); degrade gracefully
       return ''

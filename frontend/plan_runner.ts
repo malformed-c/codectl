@@ -236,7 +236,9 @@ async function dryApply(
         const body = resolution?.body ?? STUB_BODY
 
         const existing = (() => {
-          try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node) }
+          try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node)
+
+                                                                             }
 
           catch { return null }
         })()
@@ -293,7 +295,9 @@ async function writeCodeEdits(
       for (const fn of resource.ensure.functions ?? []) {
         if (fn.state === 'absent') {
           const existing = (() => {
-            try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node) }
+            try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node)
+
+                                                                               }
 
             catch { return null }
           })()
@@ -315,7 +319,9 @@ async function writeCodeEdits(
 
         // state=present: if function didn't exist during dry-apply, append it now
         const nowExists = (() => {
-          try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node) !== null }
+          try { return codeq.retrieve(CodeKind.Func, fn.name, CodePart.Node) !== null
+
+                                                                                      }
 
           catch { return false }
         })()

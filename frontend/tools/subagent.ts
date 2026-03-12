@@ -69,6 +69,7 @@ export function createSubagentHandler(
       const result = await subagent.complete(goal)
 
       return ok({ content: turnContent(result.turn), toolsExecuted: result.toolsExecuted.length })
+
     }
     catch (e) {
       return err(`Subagent failed: ${e}`)

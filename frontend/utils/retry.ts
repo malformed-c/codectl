@@ -70,6 +70,7 @@ export function parseUpstreamError(err: unknown): UpstreamError {
             raw: err,
           }
         }
+
       } catch { /* not JSON */ }
 
       // Try to parse the raw JSON that appears in the log output directly
@@ -85,6 +86,7 @@ export function parseUpstreamError(err: unknown): UpstreamError {
             raw: err,
           }
         }
+
       } catch { /* ignore */ }
 
       return { message: msg, raw: err }
@@ -138,6 +140,7 @@ export async function withRetry<T>(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn()
+
     } catch (err) {
       const parsed = parseUpstreamError(err)
 

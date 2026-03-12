@@ -91,6 +91,7 @@ function parseRetryDelay(err: unknown, defaultMs = 5_000): number {
         if (delay.endsWith('s'))  return parseFloat(delay) * 1_000
       }
     }
+
   } catch { /* ignore */ }
 
   return defaultMs
@@ -111,6 +112,7 @@ async function withKeyRotation<T>(
       // maxAttempts:1 = no retries inside here; 429s surface immediately so
       // key rotation can fire rather than burning the same key twice.
       return await withRetry(() => fn(client), { label, maxAttempts: 1 })
+
     } catch (err) {
       const parsed = parseUpstreamError(err)
 
@@ -427,6 +429,7 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
           return { functionResponse: { name: callNames[i] ?? `tool_${i}`, response } }
         }),
       })
+
     } else if (m.calls?.length) {
       // Model message with function calls.
       // First call carries thoughtSignature (Gemini 3 requirement) — strip it from args.
@@ -441,6 +444,7 @@ export function messagesToSDKContents(messages: Message[]): SDKContent[] {
           }
         }),
       })
+
     } else {
       out.push({
         role: m.role === 'user' ? 'user' : 'model',
@@ -477,6 +481,7 @@ function parseSDKResponse(parts: SDKPart[]): ParsedTurn {
   for (const part of parts) {
     if (part.thought) {
       think += part.text ?? ''
+
     } else if (part.functionCall) {
       const signature = part.thoughtSignature ?? pendingSignature
       toolCalls.push({
@@ -485,6 +490,7 @@ function parseSDKResponse(parts: SDKPart[]): ParsedTurn {
         ...(signature ? { thoughtSignature: signature } : {}),
       })
       pendingSignature = undefined
+
     } else if (part.text) {
       if (part.thoughtSignature) pendingSignature = part.thoughtSignature
       content += part.text
@@ -505,6 +511,7 @@ function parseInteractionOutputs(outputs: Interactions.Content[], template: Text
   for (const output of outputs) {
     if (output.type === 'thought') {
       think += (output as Interactions.ThoughtContent).summary?.map((s: any) => s.text ?? '').join('') ?? ''
+
     } else if (output.type === 'text') {
       content += (output as Interactions.TextContent).text ?? ''
     }

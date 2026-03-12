@@ -31,6 +31,7 @@ export class KoboldProvider implements ModelProvider {
       const res = await fetch(`${config.baseUrl ?? 'http://127.0.0.1:5001'}/api/v1/info`, { signal: AbortSignal.timeout(3000) })
 
       return res.ok
+
     } catch {
       return false
     }
@@ -62,6 +63,7 @@ export class OpenAIChatProvider implements ModelProvider {
       })
 
       return res.ok
+
     } catch {
       return false
     }

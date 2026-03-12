@@ -412,6 +412,7 @@ export class TelegramDoor {
 
         try {
           await ctx.reply(`⚠️ Error: <code>${escapeHtml(msg)}</code>`, { parse_mode: 'HTML' })
+
         } catch { /* best effort */ }
       }
     }

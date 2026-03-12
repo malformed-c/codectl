@@ -575,6 +575,7 @@ export class Orchestrator {
         const messages = roundsToMessages(history.slice(1), systemPrompt)
         consola.debug('[native] turn', 'messages:', messages.length, 'roles:', messages.map(m => m.role))
         parsed = await (this.adapter as any).generate(messages, this.tools)
+
       } else {
         // Template path: full history rendered to a single prompt string
         const prompt = this.buildPrompt()
@@ -634,6 +635,7 @@ export class Orchestrator {
         if (calls.length > 0) {
           // Auto-fixed: calls extracted successfully — continue silently.
           consola.debug('Malformed tool token auto-fixed; calls recovered:', calls.map(c => c.name))
+
         } else {
           // Unrecoverable: no calls extracted despite fix attempt.
           consola.warn('Malformed tool call: token auto-fix produced no calls.')
@@ -810,6 +812,7 @@ export class Orchestrator {
       this.mode = { kind: 'chat' }
       this._ejectedThisTurn = true
       this.rebuildSystemMessage()
+
     } else {
       consola.debug(`[entropy] score=${this._entropyTracker.currentScore.toFixed(1)} tool=${name} success=${success}`)
     }
@@ -921,6 +924,7 @@ export class Orchestrator {
 
         try {
           resolvedArgs[key] = JSON.parse(cachedValue)
+
         } catch {
           resolvedArgs[key] = cachedValue
         }
@@ -947,6 +951,7 @@ export class Orchestrator {
 
             try {
               resolvedArgs[key] = JSON.parse(memVal)
+
             } catch {
               resolvedArgs[key] = memVal // not JSON, use as string
             }

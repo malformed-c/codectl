@@ -217,6 +217,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
 
       if (result.ok) {
         record.value = result.value
+
       } else {
         record.error = result.error
       }
@@ -225,6 +226,7 @@ export function createPipeHandler(execute: ExecuteFn): ToolHandler {
       if (result.ok) {
         // Merge this step's variables into scope for subsequent steps
         Object.assign(scope, stepVars(result, i, stepAs))
+
       } else {
         failedAt = i
         consola.warn(`[pipe] step ${i} (${step.tool}) failed: ${result.error}`)

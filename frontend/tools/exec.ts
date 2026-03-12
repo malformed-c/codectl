@@ -68,7 +68,9 @@ export class PersistentShell {
   }
 
   restart(): void {
-    try { this.proc.kill() } catch { /* already dead */ }
+    try { this.proc.kill()
+
+                           } catch { /* already dead */ }
     this.cwd = this.initialCwd
     this._spawn()
   }
@@ -88,6 +90,7 @@ export class PersistentShell {
 
     try {
       return await this._exec(command, timeoutMs)
+
     } finally {
       unlock()
     }
@@ -150,6 +153,7 @@ export class PersistentShell {
             if (this.buf.includes(SENTINEL)) break
           }
         }
+
       } catch { /* ignore */ }
     })()
 
@@ -197,6 +201,7 @@ export class PersistentShell {
         }
         // Recovery succeeded — parse the sentinel so buf stays clean, then throw
         this._consumeSentinel()
+
       } catch (e) {
         await stderrDone
 
@@ -365,6 +370,7 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
       }
 
       return ok({ stdout, stderr, exitCode, cwd: sh.getCwd() })
+
     } catch (e) {
       return err(String(e))
     }
@@ -380,6 +386,7 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
       await proc.exited
 
       return ok({ stdout, stderr, exitCode: proc.exitCode })
+
     } catch (e) {
       return err(String(e))
     }
@@ -395,6 +402,7 @@ export function createExecHandlers(shell?: PersistentShell): Record<string, Tool
       await proc.exited
 
       return ok({ stdout, stderr, exitCode: proc.exitCode })
+
     } catch (e) {
       return err(String(e))
     }

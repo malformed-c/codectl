@@ -215,6 +215,7 @@ function parseTags(raw: string | string[] | undefined): string[] {
       const parsed = JSON.parse(trimmed)
 
       if (Array.isArray(parsed)) return parsed.map((t: unknown) => String(t).trim()).filter(Boolean)
+
     } catch { /* fall through to comma-split */ }
   }
 

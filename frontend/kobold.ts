@@ -201,6 +201,7 @@ export class KoboldAdapter {
         try {
           const json = JSON.parse(text) as { detail?: { msg?: string } }
           message = json?.detail?.msg ?? text
+
         } catch { /* use raw text */ }
 
         throw new KoboldError(message, response.status)

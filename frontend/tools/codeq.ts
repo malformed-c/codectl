@@ -227,6 +227,7 @@ export function createCodeqHandlers(getGitRoot: () => string): Record<string, To
             lines.push(`    ${truncated}`)
           }
         }
+
       } catch {
         lines.push(`  ${fileName}  (parse error)`)
       }

@@ -113,6 +113,7 @@ export class EventJournal {
           'UPDATE events SET status = \'pending\', retry_count = retry_count + 1 WHERE id = ?'
         ).run(row.id)
         reset++
+
       } else {
         this.db.prepare(
           'UPDATE events SET status = \'dead_letter\', error = \'Stale: exceeded max retries\' WHERE id = ?'

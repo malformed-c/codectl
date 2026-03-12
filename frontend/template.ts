@@ -657,6 +657,7 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
               arguments: c.arguments,
             })
           }
+
         } catch {
           // parseToolCalls threw — try a last-resort recovery before giving up.
           // Strip [ARGS] marker and attempt to parse the remainder as JSON args.
@@ -674,6 +675,7 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
                 recoveredArgs = parsed as Record<string, unknown>
               }
             }
+
           } catch { /* keep _raw fallback */ }
           consola.debug(`[parse] last-resort recovery for "${inferredName}":`, recoveredArgs)
           steps.push({ kind: 'tool_call', name: inferredName, arguments: recoveredArgs })
