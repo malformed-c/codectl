@@ -70,8 +70,7 @@ export function createSubagentHandler(
 
       return ok({ content: turnContent(result.turn), toolsExecuted: result.toolsExecuted.length })
 
-    }
-    catch (e) {
+    } catch (e) {
       return err(`Subagent failed: ${e}`)
     }
 

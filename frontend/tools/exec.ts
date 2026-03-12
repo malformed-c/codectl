@@ -68,7 +68,8 @@ export class PersistentShell {
   }
 
   restart(): void {
-    try { this.proc.kill()
+    try {
+ this.proc.kill()
 
                            } catch { /* already dead */ }
     this.cwd = this.initialCwd

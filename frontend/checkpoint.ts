@@ -107,11 +107,10 @@ export class CheckpointStore {
 
     if (!(await file.exists())) return null
 
-    try { return await file.json() as Checkpoint
+    try {
+ return await file.json() as Checkpoint
 
-                                                 }
-
-    catch { return null }
+                                                 } catch { return null }
   }
 
   /** Load a specific checkpoint by sequence number. */
@@ -120,11 +119,10 @@ export class CheckpointStore {
 
     if (!(await file.exists())) return null
 
-    try { return await file.json() as Checkpoint
+    try {
+ return await file.json() as Checkpoint
 
-                                                 }
-
-    catch { return null }
+                                                 } catch { return null }
   }
 
   /**

@@ -13,6 +13,7 @@ export default [
       local: { rules: { 'newlines': newlines } }
     },
     rules: {
+      '@stylistic/brace-style': ['error', '1tbs', { allowSingleLine: true }],
       '@stylistic/semi': ['error', 'never'],
       '@stylistic/quotes': ['error', 'single', { avoidEscape: true }],
       'local/newlines': 'error',

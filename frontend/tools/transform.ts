@@ -257,7 +257,8 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
       let parsed: unknown
 
-      try { parsed = JSON.parse(text)
+      try {
+ parsed = JSON.parse(text)
 
                                       } catch {
         // Text may contain a JSON payload embedded in surrounding prose (e.g. a user
@@ -266,10 +267,10 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
         const jsonStart = text.search(/[{[]/)
 
         if (jsonStart !== -1) {
-          try { parsed = JSON.parse(text.slice(jsonStart))
+          try {
+ parsed = JSON.parse(text.slice(jsonStart))
 
-                                                           }
-          catch { return err('Input is not valid JSON') }
+                                                           } catch { return err('Input is not valid JSON') }
 
         } else {
           return err('Input is not valid JSON')
@@ -300,10 +301,10 @@ export function createExtractHandler(memory: MemoryAccess, history: HistoryAcces
 
       let re: RegExp
 
-      try { re = new RegExp(pattern, 's')
+      try {
+ re = new RegExp(pattern, 's')
 
-                                          }
-      catch (e) { return err(`Invalid regex: ${e}`) }
+                                          } catch (e) { return err(`Invalid regex: ${e}`) }
 
       const m = re.exec(text)
 
@@ -393,9 +394,11 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     const src =
       memKey
-        ? (() => { const v = memory.get(memKey)
+        ? (() => {
+ const v = memory.get(memKey)
 
- return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found. Use memory(set, ${memKey}, <value>) to store it.` } })()
+ return v !== undefined ? { value: v } : { error: `Memory key '${memKey}' not found. Use memory(set, ${memKey}, <value>) to store it.` } 
+})()
         : args.text !== undefined
           ? { value: args.text as string }
           : { error: "Provide 'text' or 'key'" }
@@ -404,10 +407,10 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
 
     let parsed: unknown
 
-    try { parsed = JSON.parse((src as any).value)
+    try {
+ parsed = JSON.parse((src as any).value)
 
-                                                  }
-    catch { return err('Input is not valid JSON') }
+                                                  } catch { return err('Input is not valid JSON') }
 
     const persist = (root: unknown) => {
       const out = JSON.stringify(root)
@@ -465,7 +468,8 @@ export function createJsonHandler(memory: MemoryAccess): ToolHandler {
       if (val === undefined) return err(`'value' required for ${action}`)
       let newVal: unknown
 
-      try { newVal = JSON.parse(val)
+      try {
+ newVal = JSON.parse(val)
 
                                      } catch { newVal = val }
 

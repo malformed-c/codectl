@@ -351,9 +351,11 @@ describe('GraphMemory - ID collision resistance', () => {
   let gm: GraphMemory
 
   beforeEach(() => { gm = freshDb() })
-  afterEach(() => { gm.close()
+  afterEach(() => {
+ gm.close()
 
- if (existsSync(DB_PATH)) unlinkSync(DB_PATH) })
+ if (existsSync(DB_PATH)) unlinkSync(DB_PATH) 
+})
 
   test('bulk inserts produce no duplicate IDs', () => {
     const ids = Array.from({ length: 200 }, (_, i) =>

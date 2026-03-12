@@ -44,14 +44,10 @@ export class AgentEntropyTracker {
     if (!success) {
       this.score += WEIGHT_FAILURE
 
-    }
-
-    else if (this.seen.has(sig)) {
+    } else if (this.seen.has(sig)) {
       this.score += WEIGHT_SUCCESS_REPEATED
 
-    }
-
-    else {
+    } else {
       this.seen.add(sig)
       this.score += WEIGHT_SUCCESS_UNIQUE
     }

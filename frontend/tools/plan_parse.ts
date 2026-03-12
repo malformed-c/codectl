@@ -41,7 +41,8 @@ export function parsePlan(raw: unknown): { ok: true; value: unknown } | { ok: fa
 function maybeParseString(v: unknown): unknown {
   if (typeof v !== 'string') return v
 
-  try { return JSON.parse(v)
+  try {
+ return JSON.parse(v)
 
                              } catch { return v }
 }
