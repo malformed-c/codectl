@@ -94,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_nodes_access ON memory_nodes(last_access);
 // ---------------------------------------------------------------------------
 
 const DECAY_LAMBDA = 0.1
-const DECAY_POWER  = 0.8
+const DECAY_POWER = 0.8
 
 /**
  * Decayed confidence: confidence × exp(−λ × days^0.8)
@@ -155,13 +155,13 @@ export class GraphMemory {
    * Add a new memory node. Returns the node id.
    */
   add(opts: {
-    kind:        NodeKind
-    content:     string
-    tags?:       string[]
+    kind: NodeKind
+    content: string
+    tags?: string[]
     confidence?: number
   }): string {
-    const id   = this.newId(opts.kind)
-    const now  = Date.now()
+    const id = this.newId(opts.kind)
+    const now = Date.now()
     const tags = JSON.stringify(opts.tags ?? [])
 
     this.db.run(
@@ -185,7 +185,7 @@ export class GraphMemory {
    * The old node is soft-deleted so it no longer appears in searches.
    */
   link(fromId: string, toId: string, kind: EdgeKind, weight = 1.0): string {
-    const id  = this.newId('edge')
+    const id = this.newId('edge')
     const now = Date.now()
 
     this.db.run(
@@ -208,9 +208,9 @@ export class GraphMemory {
    * Returns { id, superseded: oldId | null }.
    */
   upsert(opts: {
-    kind:        NodeKind
-    content:     string
-    tags?:       string[]
+    kind: NodeKind
+    content: string
+    tags?: string[]
     confidence?: number
   }): { id: string; superseded: string | null } {
     const tags = opts.tags ?? []
@@ -265,7 +265,7 @@ export class GraphMemory {
     ).all(query, limit)
 
     return rows.map(r => ({
-      node:  this._rowToNode(r),
+      node: this._rowToNode(r),
       score: r.bm25 * decayedConfidence(r.confidence, r.last_access, r.access_count, now),
     }))
   }
@@ -280,7 +280,7 @@ export class GraphMemory {
     opts: { maxHops?: number; edgeKinds?: EdgeKind[] } = {},
   ): MemorySearchResult[] {
     const maxHops = opts.maxHops ?? 2
-    const kinds   = opts.edgeKinds ?? (['temporal', 'causal', 'derived_from', 'entity'] as EdgeKind[])
+    const kinds = opts.edgeKinds ?? (['temporal', 'causal', 'derived_from', 'entity'] as EdgeKind[])
     const visited = new Map<string, number>()
     const queue: Array<{ id: string; hop: number }> = [{ id: anchorId, hop: 0 }]
 
@@ -320,8 +320,8 @@ export class GraphMemory {
     const now = Date.now()
 
     return nodes.map(r => ({
-      node:       this._rowToNode(r),
-      score:      decayedConfidence(r.confidence, r.last_access, r.access_count, now),
+      node: this._rowToNode(r),
+      score: decayedConfidence(r.confidence, r.last_access, r.access_count, now),
       pathLength: visited.get(r.id),
     }))
   }
@@ -335,9 +335,9 @@ export class GraphMemory {
     query: string,
     opts: { anchorId?: string; limit?: number; kinds?: NodeKind[] } = {},
   ): MemorySearchResult[] {
-    const limit   = opts.limit ?? 8
+    const limit = opts.limit ?? 8
     const ftsHits = this.searchFts(query, limit * 2)
-    const merged  = new Map<string, { node: MemoryNode; scores: number[] }>()
+    const merged = new Map<string, { node: MemoryNode; scores: number[] }>()
 
     ftsHits.forEach((r, rank) => {
       merged.set(r.node.id, { node: r.node, scores: [1 / (60 + rank)] })
@@ -352,6 +352,16 @@ export class GraphMemory {
         else merged.set(r.node.id, { node: r.node, scores: [s] })
       })
     }
+
+    // Support lookups by memory ID fragments (e.g. "SharpApesCarry"), which are
+    // commonly used by tool clients after add/link actions.
+    this.searchById(query, limit * 2).forEach((r, rank) => {
+      const entry = merged.get(r.node.id)
+      const s = 1 / (60 + rank)
+
+      if (entry) entry.scores.push(s)
+      else merged.set(r.node.id, { node: r.node, scores: [s] })
+    })
 
     let results = [...merged.values()].map(({ node, scores }) => ({
       node,
@@ -378,6 +388,38 @@ export class GraphMemory {
     }
 
     return results.slice(0, limit)
+  }
+
+  /**
+   * Search nodes by exact or partial ID match.
+   * Helpful for human-id handles (e.g. "CleanTaxisCough") that aren't in FTS.
+   */
+  private searchById(query: string, limit = 10): MemorySearchResult[] {
+    const trimmed = query.trim()
+
+    if (!trimmed) return []
+
+    const now = Date.now()
+
+    type Row = {
+      id: string; kind: string; content: string; tags: string
+      confidence: number; access_count: number; created_at: number; last_access: number
+    }
+
+    const likeQuery = `%${trimmed}%`
+    const rows = this.db.query<Row, [string, string, number]>(
+      `SELECT id, kind, content, tags, confidence, access_count, created_at, last_access
+       FROM memory_nodes
+       WHERE deleted = 0
+         AND (id = ? OR id LIKE ?)
+       ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, created_at DESC
+       LIMIT ?`,
+    ).all(trimmed, likeQuery, trimmed, limit)
+
+    return rows.map(r => ({
+      node: this._rowToNode(r),
+      score: decayedConfidence(r.confidence, r.last_access, r.access_count, now),
+    }))
   }
 
   /**
@@ -442,10 +484,10 @@ export class GraphMemory {
    * Returns the number of pruned nodes.
    */
   runDecayAndPrune(opts: { ageDays?: number; pruneBelow?: number } = {}): number {
-    const ageDays   = opts.ageDays   ?? 1
+    const ageDays = opts.ageDays ?? 1
     const threshold = opts.pruneBelow ?? 0.05
-    const cutoffMs  = Date.now() - ageDays * 86_400_000
-    const now       = Date.now()
+    const cutoffMs = Date.now() - ageDays * 86_400_000
+    const now = Date.now()
 
     type StaleRow = { id: string; confidence: number; access_count: number; last_access: number }
 
@@ -513,13 +555,13 @@ export class GraphMemory {
     confidence: number; access_count: number; created_at: number; last_access: number
   }): MemoryNode {
     return {
-      id:           r.id,
-      kind:         r.kind as NodeKind,
-      content:      r.content,
-      tags:         JSON.parse(r.tags) as string[],
-      confidence:   r.confidence,
-      accessCount:  r.access_count,
-      createdAt:    r.created_at,
+      id: r.id,
+      kind: r.kind as NodeKind,
+      content: r.content,
+      tags: JSON.parse(r.tags) as string[],
+      confidence: r.confidence,
+      accessCount: r.access_count,
+      createdAt: r.created_at,
       lastAccessAt: r.last_access,
     }
   }

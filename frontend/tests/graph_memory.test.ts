@@ -284,6 +284,14 @@ describe('GraphMemory - search (RRF)', () => {
     const node = gm.get(id)
     expect(node!.accessCount).toBe(1)
   })
+
+  test('finds nodes by id fragment when query is not in content', () => {
+    const id = gm.add({ kind: 'episodic', content: 'Edge traversal test memory.' })
+    const suffix = id.split(':')[1]!
+    const results = gm.search(suffix)
+
+    expect(results.some(r => r.node.id === id)).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
