@@ -1,12 +1,12 @@
-import 'dotenv/config'
-import { consola } from 'consola'
 import { YAML } from 'bun'
-import { type Config, turnContent, turnThink } from './template'
-import { HistoryStore } from './history'
+import { consola } from 'consola'
+import 'dotenv/config'
 import { TelegramDoor } from './door/telegram'
+import { HistoryStore } from './history'
+import { ModelRouter } from './llm/router'
 import { Orchestrator } from './orchestrator'
 import { createRoom } from './room'
-import { ModelRouter } from './llm/router'
+import { type Config, turnContent, turnThink } from './template'
 
 // --- Config ---
 
@@ -91,11 +91,11 @@ async function runCli(orchestrator: Orchestrator, historyStore: HistoryStore): P
         if (event.kind === 'turn') {
           const _think = turnThink(event.turn)
 
- if (_think) consola.debug('[think]', _think)
+          if (_think) consola.debug('[think]', _think)
 
           const _content = turnContent(event.turn)
 
- if (_content) consola.log(_content)
+          if (_content) consola.log(_content)
 
 
           for (const te of event.toolsExecuted) {
@@ -130,10 +130,11 @@ async function main(): Promise<void> {
 
   // One adapter, shared across all doors and rooms — built via ModelRouter
   const router = ModelRouter.fromLegacyEnv({
-    apiType:   process.env.API_TYPE       ?? config.api_type   ?? 'koboldcpp',
-    apiServer: process.env.BASE_URL       ?? config.api_server,
-    apiKey:    process.env.GEMINI_API_KEYS ?? process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY ?? '',
-    model:     process.env.MODEL          ?? config.default_model,
+    apiType: process.env.API_TYPE ?? config.api_type ?? 'koboldcpp',
+    apiServer: process.env.BASE_URL ?? config.api_server,
+    apiKey: process.env.GEMINI_API_KEYS ?? process.env.GEMINI_API_KEY ?? process.env.OPENAI_API_KEY ?? '',
+    model: process.env.MODEL ?? config.default_model,
+    templateProfile: process.env.TEMPLATE_PROFILE ?? (config as any).template_profile,
   })
   const adapter = router.getAdapter('default')
 

@@ -13,8 +13,8 @@
 
 import consola from 'consola'
 import type { LLMAdapter } from '../orchestrator'
-import type { ModelConfig, ProviderConfig, ModelProvider, CapabilityKey } from './protocol'
-import { KoboldProvider, OpenAIChatProvider, OpenAITextProvider, GeminiNativeProvider, GeminiInteractionsProvider } from './providers/builtin'
+import type { CapabilityKey, ModelConfig, ModelProvider, ProviderConfig } from './protocol'
+import { GeminiInteractionsProvider, GeminiNativeProvider, KoboldProvider, OpenAIChatProvider, OpenAITextProvider } from './providers/builtin'
 
 // ---------------------------------------------------------------------------
 // Config shape (subset of config.yaml)
@@ -53,9 +53,9 @@ type AgentSettings = {
 
 export class ModelRouter {
   private readonly providerConfigs = new Map<string, ProviderConfig>()
-  private readonly agentConfigs    = new Map<string, ModelConfig>()
-  private readonly providers       = new Map<string, ModelProvider>()
-  private readonly cache           = new Map<string, LLMAdapter>()
+  private readonly agentConfigs = new Map<string, ModelConfig>()
+  private readonly providers = new Map<string, ModelProvider>()
+  private readonly cache = new Map<string, LLMAdapter>()
   private readonly secrets: (name: string) => string | undefined
 
   constructor(secrets: (name: string) => string | undefined = (n) => process.env[n]) {
@@ -86,6 +86,7 @@ export class ModelRouter {
     apiServer: string
     apiKey: string
     model: string
+    templateProfile?: string
   }): ModelRouter {
     const router = new ModelRouter()
     const parts = opts.apiKey.split(',').map(s => s.trim()).filter(Boolean)
@@ -93,6 +94,7 @@ export class ModelRouter {
       id: 'default',
       type: opts.apiType,
       baseUrl: opts.apiServer,
+      ...(opts.templateProfile ? { template_profile: opts.templateProfile } : {}),
       ...(parts.length > 1 ? { apiKeyLiterals: parts } : { apiKeyLiteral: parts[0] ?? '' }),
     })
     router.registerAgentConfig('default', {

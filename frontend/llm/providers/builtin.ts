@@ -12,6 +12,30 @@ import { OpenAIChatAdapter, OpenAITextAdapter } from '../../openai'
 import { GeminiNativeAdapter, GeminiInteractionsAdapter } from '../../gemini'
 import { Profiles } from '../../template'
 
+type TemplateProfileName = keyof typeof Profiles
+
+function resolveTemplateProfile(config: ProviderConfig, fallback: TemplateProfileName): (typeof Profiles)[TemplateProfileName] {
+  const raw = typeof (config as any).template_profile === 'string'
+    ? ((config as any).template_profile as string).trim()
+    : ''
+
+  if (!raw) return Profiles[fallback]
+
+  const normalized = raw.toLowerCase()
+  const map: Record<string, TemplateProfileName> = {
+    mistral: 'mistral',
+    llama3: 'llama3',
+    qwen: 'qwen',
+    qwenxml: 'qwenXml',
+    'qwen-xml': 'qwenXml',
+    deepseek: 'deepseek',
+    chatml: 'chatml',
+  }
+  const key = map[normalized]
+
+  return key ? Profiles[key] : Profiles[fallback]
+}
+
 // ---------------------------------------------------------------------------
 // KoboldCPP provider
 // ---------------------------------------------------------------------------
@@ -22,7 +46,7 @@ export class KoboldProvider implements ModelProvider {
   build(config: ProviderConfig, _modelName: string, _apiKey: string | string[] | null): LLMAdapter {
     return new KoboldAdapter({
       apiServer: config.baseUrl ?? 'http://127.0.0.1:5001/api',
-      template: Profiles.mistral,
+      template: resolveTemplateProfile(config, 'mistral'),
     })
   }
 
@@ -94,10 +118,10 @@ export class GeminiNativeProvider implements ModelProvider {
     const isGemini3 = modelName.startsWith('gemini-3') || modelName.startsWith('gemini-2.5')
 
     return new GeminiNativeAdapter({
-      apiKey:        apiKey ?? '',
-      model:         modelName,
-      template:      Profiles.qwen,
-      thinking:      isGemini3,
+      apiKey: apiKey ?? '',
+      model: modelName,
+      template: Profiles.qwen,
+      thinking: isGemini3,
       thinkingLevel: 'low',
     })
   }
@@ -108,8 +132,8 @@ export class GeminiInteractionsProvider implements ModelProvider {
 
   build(config: ProviderConfig, modelName: string, apiKey: string | string[] | null): LLMAdapter {
     return new GeminiInteractionsAdapter({
-      apiKey:   apiKey ?? '',
-      model:    modelName,
+      apiKey: apiKey ?? '',
+      model: modelName,
       template: Profiles.qwen,
     })
   }

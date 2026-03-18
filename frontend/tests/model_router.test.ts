@@ -70,6 +70,19 @@ describe('ModelRouter.fromLegacyEnv', () => {
     const adapter = router.getAdapter()
     expect(adapter).toBeDefined()
   })
+
+  test('passes template profile through provider config', () => {
+    const router = ModelRouter.fromLegacyEnv({
+      apiType: 'koboldcpp',
+      apiServer: 'http://localhost:5001',
+      apiKey: '',
+      model: 'qwen',
+      templateProfile: 'qwenXml',
+    })
+
+    const adapter = router.getAdapter() as KoboldAdapter
+    expect(adapter.config.template).toBe(Profiles.qwenXml)
+  })
 })
 
 // ---------------------------------------------------------------------------
