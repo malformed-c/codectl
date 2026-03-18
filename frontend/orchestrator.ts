@@ -596,9 +596,10 @@ export class Orchestrator {
         consola.warn('[think-only] model produced reasoning with no content/tools - injecting correction')
 
         this.fsm.onModel(think, undefined, [])
+        // TODO Unhardcode
         this.fsm.onSystem(
           'You forgot to close your reasoning tag or produce a response. ' +
-          'Your reasoning tags are [THINK][/THINK]. ' +
+          'Your reasoning tags are <think></think>. ' +
           'Please complete your response now with either a tool call or a final message.'
         )
 
