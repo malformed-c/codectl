@@ -135,6 +135,20 @@ world
     expect(calls[0]!.arguments.command).toBe('echo hello\nworld')
     expect(calls[0]!.arguments.timeout).toBe(10)
   })
+
+  test('parses XML tool call fallback even with non-XML qwen profile', () => {
+    const raw = `<tool_call>
+<function=tool_library>
+</function>
+</tool_call>`
+
+    const r = parse(raw, qwen)
+    const calls = turnToolCalls(r)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.name).toBe('tool_library')
+    expect(calls[0]!.arguments).toEqual({})
+    expect(turnContent(r)).toBe('')
+  })
 })
 
 describe('parse - BOS/EOS stripping', () => {

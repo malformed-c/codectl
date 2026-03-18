@@ -698,14 +698,16 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
     const pair = resolveWrap(template.toolCall, template.modelTurn)
     let rawBlocks: string[] = []
 
+    const xmlToolBlockRegex = /<tool_call>\s*<function=[\s\S]*?<\/function>\s*<\/tool_call>/g
+
     if (isInline) {
       // Inline mode: parse tool-call syntax from assistant content directly
       // (e.g. Qwen XML <tool_call> blocks) without requiring outer wrappers.
-      const xmlMatches = [...text.matchAll(/<tool_call>\s*<function=[\s\S]*?<\/function>\s*<\/tool_call>/g)]
+      const xmlMatches = [...text.matchAll(xmlToolBlockRegex)]
       rawBlocks = xmlMatches.map(m => m[0].trim()).filter(Boolean)
 
       if (rawBlocks.length > 0) {
-        text = text.replace(/<tool_call>\s*<function=[\s\S]*?<\/function>\s*<\/tool_call>/g, '').trim()
+        text = text.replace(xmlToolBlockRegex, '').trim()
       }
 
     } else {
@@ -714,14 +716,28 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
       if (callFixed) malformed = true
       text = fixed
       rawBlocks = extractAll(text, pair)
+
+      // Compatibility fallback:
+      // if a profile expects wrapped tool calls but the model emitted inline XML
+      // blocks, still parse them as calls.
+      if (rawBlocks.length === 0) {
+        const xmlMatches = [...text.matchAll(xmlToolBlockRegex)]
+        rawBlocks = xmlMatches.map(m => m[0].trim()).filter(Boolean)
+
+        if (rawBlocks.length > 0) {
+          text = text.replace(xmlToolBlockRegex, '').trim()
+        }
+      }
     }
 
     if (rawBlocks.length > 0) {
       for (const raw of rawBlocks) {
         try {
-          const rawForParse = (!Array.isArray(template.toolCall) && template.toolCall.type === 'xml' && !isInline)
+          const isFullXmlBlock = /^<tool_call>[\s\S]*<\/tool_call>$/.test(raw.trim())
+          const rawForParse = (!Array.isArray(template.toolCall) && template.toolCall.type === 'xml' && !isInline && !isFullXmlBlock)
             ? `<tool_call>${raw}</tool_call>`
             : raw
+
           const calls = parseToolCalls(rawForParse, template.toolCall)
 
           for (const c of calls) {

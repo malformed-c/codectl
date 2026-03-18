@@ -150,7 +150,9 @@ function stripMarkdownToPlain(md: string): string {
     .replace(/\*(.+?)\*/gs, '$1')
     .replace(/___(.+?)___/gs, '$1')
     .replace(/__(.+?)__/gs, '$1')
-    .replace(/_(.+?)_/gs, '$1')
+    // Single-underscore emphasis. Restrict to whitespace/punctuation boundaries
+    // so tokens like <tool_call> are preserved in fallback output.
+    .replace(/(^|[\s([{"'`])_(\S(?:[\s\S]*?\S)?)_(?=[$\s)\]}"'`.,!?;:])/gm, '$1$2')
     .replace(/~~(.+?)~~/gs, '$1')
     // Headings
     .replace(/^#{1,6}\s+/gm, '')
