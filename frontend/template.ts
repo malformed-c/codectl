@@ -229,6 +229,7 @@ export const Profiles = {
     modelTurn: ['<|im_start|>assistant\n', '<|im_end|>\n'],
     toolTurn: ['<|im_start|>tool\n', '<|im_end|>\n'],
 
+    availableTools: ['<tools>\n', '\n</tools>/\n'],
     toolResult: ['<tool_response>\n', '\n</tool_response>'],
     toolCall: {
       wrap: ['<tool_call>', '</tool_call>'],
