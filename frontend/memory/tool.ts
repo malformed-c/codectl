@@ -14,8 +14,10 @@ export const GraphMemoryTool: ToolDefinition = {
 Actions:
   add     - Store a new memory node (kind: episodic|semantic|procedural|opinion)
   upsert  - Store a fact, superseding any existing node with the same kind+tags
-  link    - Create a typed edge between two nodes (temporal|causal|derived_from|entity)
+  link    - Create a typed edge between two nodes (temporal|causal|derived_from|entity|supersedes)
   search  - Full-text + graph search, returns top matches with scores
+  edges   - Query edges by id, kind, or endpoint node ids
+  traverse - Walk the graph from an anchor node and return reachable nodes by hop
   get     - Retrieve a single node by id
   list    - List recent nodes, optionally filtered by kind
   remove  - Soft-delete a node by id
@@ -36,7 +38,7 @@ Edge kinds:
     properties: {
       action: {
         type: 'string',
-        enum: ['add', 'upsert', 'link', 'search', 'get', 'list', 'remove'],
+        enum: ['add', 'upsert', 'link', 'search', 'edges', 'traverse', 'get', 'list', 'remove'],
         description: 'Action to perform.',
       },
       // add / upsert fields
@@ -62,12 +64,19 @@ Edge kinds:
       to_id:   { type: 'string', description: 'Target node id (required for link).' },
       edge_kind: {
         type: 'string',
-        enum: ['temporal', 'causal', 'derived_from', 'entity'],
+        enum: ['temporal', 'causal', 'derived_from', 'entity', 'supersedes'],
         description: 'Edge kind (required for link).',
       },
       // search fields
       query:     { type: 'string', description: 'Search query text (required for search).' },
       anchor_id: { type: 'string', description: 'Optional anchor node id for graph-augmented search.' },
+      node_id:   { type: 'string', description: 'Node id filter for edges action.' },
+      direction: {
+        type: 'string',
+        enum: ['outbound', 'inbound', 'both'],
+        description: 'Traversal direction for traverse/edges node filters (default: outbound for traverse, both for edges).',
+      },
+      max_hops:  { type: 'string', description: 'Max traversal depth for traverse (default: 2).' },
       limit:     { type: 'string', description: 'Max results to return (default: 8).' },
       // get / list fields
       id:        { type: 'string', description: 'Node id (required for get).' },
@@ -151,6 +160,49 @@ export function createGraphMemoryHandler(memory: GraphMemory): ToolHandler {
           tags:        r.node.tags,
           confidence:  r.node.confidence,
           score:       Math.round(r.score * 1000) / 1000,
+          path_length: r.pathLength,
+        })))
+      }
+
+      case 'edges': {
+        const id = args.id as string | undefined
+        const fromId = args.from_id as string | undefined
+        const toId = args.to_id as string | undefined
+        const nodeId = args.node_id as string | undefined
+        const edgeKind = args.edge_kind as EdgeKind | undefined
+        const direction = (args.direction as 'outbound' | 'inbound' | 'both' | undefined) ?? 'both'
+        const limit = args.limit ? parseInt(String(args.limit), 10) : 20
+
+        const edges = memory.edges({ id, fromId, toId, nodeId, kind: edgeKind, direction, limit })
+
+        return ok(edges.map(e => ({
+          id: e.id,
+          kind: e.kind,
+          from_id: e.fromId,
+          to_id: e.toId,
+          weight: e.weight,
+          created_at: e.createdAt,
+        })))
+      }
+
+      case 'traverse': {
+        const anchorId = (args.anchor_id as string | undefined) ?? (args.id as string | undefined)
+
+        if (!anchorId) return err('"anchor_id" is required for traverse')
+
+        const edgeKinds = args.edge_kind ? [args.edge_kind as EdgeKind] : undefined
+        const maxHops = args.max_hops ? parseInt(String(args.max_hops), 10) : 2
+        const direction = (args.direction as 'outbound' | 'inbound' | 'both' | undefined) ?? 'outbound'
+
+        const results = memory.traverse(anchorId, { maxHops, edgeKinds, direction })
+
+        return ok(results.map(r => ({
+          id: r.node.id,
+          kind: r.node.kind,
+          content: r.node.content,
+          tags: r.node.tags,
+          confidence: r.node.confidence,
+          score: Math.round(r.score * 1000) / 1000,
           path_length: r.pathLength,
         })))
       }

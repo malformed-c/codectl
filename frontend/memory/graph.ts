@@ -277,10 +277,11 @@ export class GraphMemory {
    */
   traverse(
     anchorId: string,
-    opts: { maxHops?: number; edgeKinds?: EdgeKind[] } = {},
+    opts: { maxHops?: number; edgeKinds?: EdgeKind[]; direction?: 'outbound' | 'inbound' | 'both' } = {},
   ): MemorySearchResult[] {
     const maxHops = opts.maxHops ?? 2
     const kinds = opts.edgeKinds ?? (['temporal', 'causal', 'derived_from', 'entity'] as EdgeKind[])
+    const direction = opts.direction ?? 'outbound'
     const visited = new Map<string, number>()
     const queue: Array<{ id: string; hop: number }> = [{ id: anchorId, hop: 0 }]
 
@@ -291,12 +292,8 @@ export class GraphMemory {
       visited.set(item.id, item.hop)
 
       if (item.hop < maxHops) {
-        const placeholders = kinds.map(() => '?').join(', ')
-        const neighbors = this.db.query<{ to_id: string }, any[]>(
-          `SELECT to_id FROM memory_edges WHERE from_id = ? AND kind IN (${placeholders})`,
-        ).all(item.id as any, ...(kinds as any[]))
-
-        for (const n of neighbors) queue.push({ id: n.to_id, hop: item.hop + 1 })
+        const neighbors = this._neighborIds(item.id, kinds, direction)
+        for (const neighborId of neighbors) queue.push({ id: neighborId, hop: item.hop + 1 })
       }
     }
 
@@ -324,6 +321,66 @@ export class GraphMemory {
       score: decayedConfidence(r.confidence, r.last_access, r.access_count, now),
       pathLength: visited.get(r.id),
     }))
+  }
+
+  /**
+   * Query edges directly by endpoint and/or kind.
+   * This exposes graph structure for clients that need relationship inspection.
+   */
+  edges(opts: {
+    id?: string
+    fromId?: string
+    toId?: string
+    nodeId?: string
+    kind?: EdgeKind
+    direction?: 'outbound' | 'inbound' | 'both'
+    limit?: number
+  } = {}): MemoryEdge[] {
+    const where: string[] = []
+    const params: unknown[] = []
+    const direction = opts.direction ?? 'both'
+    const limit = opts.limit ?? 50
+
+    if (opts.id) {
+      where.push('id = ?')
+      params.push(opts.id)
+    }
+    if (opts.fromId) {
+      where.push('from_id = ?')
+      params.push(opts.fromId)
+    }
+    if (opts.toId) {
+      where.push('to_id = ?')
+      params.push(opts.toId)
+    }
+    if (opts.kind) {
+      where.push('kind = ?')
+      params.push(opts.kind)
+    }
+    if (opts.nodeId) {
+      if (direction === 'outbound') {
+        where.push('from_id = ?')
+        params.push(opts.nodeId)
+      } else if (direction === 'inbound') {
+        where.push('to_id = ?')
+        params.push(opts.nodeId)
+      } else {
+        where.push('(from_id = ? OR to_id = ?)')
+        params.push(opts.nodeId, opts.nodeId)
+      }
+    }
+
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
+    type EdgeRow = { id: string; kind: string; from_id: string; to_id: string; weight: number; created_at: number }
+    const rows = this.db.query<EdgeRow, any[]>(
+      `SELECT id, kind, from_id, to_id, weight, created_at
+       FROM memory_edges
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    ).all(...(params as any[]), limit)
+
+    return rows.map(r => this._rowToEdge(r))
   }
 
   /**
@@ -407,7 +464,7 @@ export class GraphMemory {
     }
 
     const likeQuery = `%${trimmed}%`
-    const rows = this.db.query<Row, [string, string, number]>(
+    const rows = this.db.query<Row, [string, string, string, number]>(
       `SELECT id, kind, content, tags, confidence, access_count, created_at, last_access
        FROM memory_nodes
        WHERE deleted = 0
@@ -564,5 +621,45 @@ export class GraphMemory {
       createdAt: r.created_at,
       lastAccessAt: r.last_access,
     }
+  }
+
+  private _rowToEdge(r: {
+    id: string; kind: string; from_id: string; to_id: string; weight: number; created_at: number
+  }): MemoryEdge {
+    return {
+      id: r.id,
+      kind: r.kind as EdgeKind,
+      fromId: r.from_id,
+      toId: r.to_id,
+      weight: r.weight,
+      createdAt: r.created_at,
+    }
+  }
+
+  private _neighborIds(
+    nodeId: string,
+    edgeKinds: EdgeKind[],
+    direction: 'outbound' | 'inbound' | 'both',
+  ): string[] {
+    if (edgeKinds.length === 0) return []
+
+    const placeholders = edgeKinds.map(() => '?').join(', ')
+    const neighbors = new Set<string>()
+
+    if (direction === 'outbound' || direction === 'both') {
+      const outRows = this.db.query<{ to_id: string }, any[]>(
+        `SELECT to_id FROM memory_edges WHERE from_id = ? AND kind IN (${placeholders})`,
+      ).all(nodeId as any, ...(edgeKinds as any[]))
+      for (const row of outRows) neighbors.add(row.to_id)
+    }
+
+    if (direction === 'inbound' || direction === 'both') {
+      const inRows = this.db.query<{ from_id: string }, any[]>(
+        `SELECT from_id FROM memory_edges WHERE to_id = ? AND kind IN (${placeholders})`,
+      ).all(nodeId as any, ...(edgeKinds as any[]))
+      for (const row of inRows) neighbors.add(row.from_id)
+    }
+
+    return [...neighbors]
   }
 }

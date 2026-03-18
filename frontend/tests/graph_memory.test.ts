@@ -116,6 +116,29 @@ describe('GraphMemory - edges', () => {
     expect(gm.get(old)).toBeNull()    // old is gone
     expect(gm.get(fresh)).not.toBeNull()  // new is still there
   })
+
+  test('edges can query by fromId and kind', () => {
+    const a = gm.add({ kind: 'episodic', content: 'A' })
+    const b = gm.add({ kind: 'episodic', content: 'B' })
+    const c = gm.add({ kind: 'episodic', content: 'C' })
+    gm.link(a, b, 'temporal')
+    gm.link(a, c, 'causal')
+
+    const temporalEdges = gm.edges({ fromId: a, kind: 'temporal' })
+    expect(temporalEdges).toHaveLength(1)
+    expect(temporalEdges[0]!.toId).toBe(b)
+  })
+
+  test('edges can query by nodeId in either direction', () => {
+    const a = gm.add({ kind: 'semantic', content: 'A' })
+    const b = gm.add({ kind: 'semantic', content: 'B' })
+    const c = gm.add({ kind: 'semantic', content: 'C' })
+    gm.link(a, b, 'entity')
+    gm.link(c, a, 'entity')
+
+    const both = gm.edges({ nodeId: a, direction: 'both' })
+    expect(both).toHaveLength(2)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -233,6 +256,28 @@ describe('GraphMemory - traverse', () => {
     const results = gm.traverse(a)
     const bResult = results.find(r => r.node.id === b)
     expect(bResult?.pathLength).toBe(1)
+  })
+
+  test('supports inbound traversal', () => {
+    const a = gm.add({ kind: 'semantic', content: 'A' })
+    const b = gm.add({ kind: 'semantic', content: 'B' })
+    gm.link(a, b, 'entity')
+
+    const inboundFromB = gm.traverse(b, { direction: 'inbound' })
+    expect(inboundFromB.map(r => r.node.id)).toContain(a)
+  })
+
+  test('supports bidirectional traversal', () => {
+    const a = gm.add({ kind: 'semantic', content: 'A' })
+    const b = gm.add({ kind: 'semantic', content: 'B' })
+    const c = gm.add({ kind: 'semantic', content: 'C' })
+    gm.link(a, b, 'entity')
+    gm.link(c, a, 'entity')
+
+    const both = gm.traverse(a, { direction: 'both', maxHops: 1 })
+    const ids = both.map(r => r.node.id)
+    expect(ids).toContain(b)
+    expect(ids).toContain(c)
   })
 })
 
