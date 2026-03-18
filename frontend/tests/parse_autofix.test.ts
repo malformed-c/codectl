@@ -3,6 +3,7 @@ import { parse, Profiles, turnContent, turnThink, turnToolCalls } from '../templ
 
 const mistral = Profiles.mistral
 const qwen = Profiles.qwen
+const qwenXml = Profiles.qwenXml
 
 describe('parse - think block autofix', () => {
   test('normal pair parses cleanly - no malformed flag', () => {
@@ -106,6 +107,33 @@ describe('parse - think closes before TOOL_CALLS when missing close', () => {
     // Think content should NOT contain the tool call text
     expect(turnThink(r)).not.toContain('TOOL_CALLS')
     expect(turnThink(r)).not.toContain('tool_library')
+  })
+})
+
+describe('parse - qwen XML tool calls', () => {
+  test('parses inline xml tool calls with multiline parameters', () => {
+    const raw = `<think>plan</think>
+I will use a tool.
+<tool_call>
+<function=bash>
+<parameter=command>
+echo hello
+world
+</parameter>
+<parameter=timeout>
+10
+</parameter>
+</function>
+</tool_call>`
+
+    const r = parse(raw, qwenXml)
+    expect(turnThink(r)).toBe('plan')
+    expect(turnContent(r)).toBe('I will use a tool.')
+    const calls = turnToolCalls(r)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.name).toBe('bash')
+    expect(calls[0]!.arguments.command).toBe('echo hello\nworld')
+    expect(calls[0]!.arguments.timeout).toBe(10)
   })
 })
 

@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs'
 import { YAML } from 'bun'
 
 import consola from 'consola'
+import type { TextTemplate } from './template'
 
 // --- Types ---
 
@@ -37,13 +38,13 @@ export type ToolCall = {
 }
 
 export type ToolResult =
-  | { ok: true;  callId?: string; value: unknown }
+  | { ok: true; callId?: string; value: unknown }
   | { ok: false; callId?: string; error: string }
 
 /** Convenience constructors */
-export const ok  = (value: unknown, callId?: string): ToolResult => ({ ok: true,  value, callId })
+export const ok = (value: unknown, callId?: string): ToolResult => ({ ok: true, value, callId })
 
-export const err = (error: string,  callId?: string): ToolResult => ({ ok: false, error, callId })
+export const err = (error: string, callId?: string): ToolResult => ({ ok: false, error, callId })
 
 export type ToolFormat = 'json' | 'typescript' | 'python' | 'xml' | 'prose'
 
@@ -275,8 +276,15 @@ function renderProse(tools: ToolDefinition[]): string {
  * Parse a raw tool call string (extracted by template parser) into ToolCall[].
  * Handles both Mistral rich format and simple JSON array.
  */
-export function parseToolCalls(raw: string): ToolCall[] {
+export function parseToolCalls(raw: string, templateToolCall?: TextTemplate['toolCall']): ToolCall[] {
   const text = raw.trim()
+  const richTokens = (templateToolCall && !Array.isArray(templateToolCall) && templateToolCall.rich)
+    ? templateToolCall.rich
+    : undefined
+
+  const templateType = (templateToolCall && !Array.isArray(templateToolCall))
+    ? templateToolCall.type
+    : undefined
 
   const toCalls = (parsed: unknown): ToolCall[] => {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -330,15 +338,50 @@ export function parseToolCalls(raw: string): ToolCall[] {
     }
   }
 
-  // TODO Unhardcode
+  // XML format (<tool_call> ... </tool_call>)
+  if (templateType === 'xml' || text.includes('<tool_call>')) {
+    const calls: ToolCall[] = []
+    const normalized = text.replace(/\r\n?/g, '\n')
+    const blocks = [...normalized.matchAll(/<tool_call>\s*<function=([^>\n]+)>\s*([\s\S]*?)<\/function>\s*<\/tool_call>/g)]
+
+    for (const block of blocks) {
+      const name = (block[1] ?? '').trim()
+      const body = block[2] ?? ''
+      const args: Record<string, unknown> = {}
+      const params = [...body.matchAll(/<parameter=([^>\n]+)>\s*([\s\S]*?)<\/parameter>/g)]
+
+      for (const p of params) {
+        const key = (p[1] ?? '').trim()
+        const valueText = (p[2] ?? '').trim()
+
+        if (!key) continue
+
+        let value: unknown = valueText
+
+        try {
+          value = JSON.parse(valueText)
+
+        } catch { /* keep as string */ }
+        args[key] = value
+      }
+
+      if (name) calls.push({ name, arguments: args })
+    }
+
+    if (calls.length > 0) return calls
+
+    if (templateType === 'xml') throw new Error(`Unrecognized XML tool call format: ${text}`)
+  }
+
+  const argsToken = richTokens?.args ?? '[ARGS]'
+  const callIdToken = richTokens?.callId ?? '[CALL_ID]'
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
   // Rich format detection (Mistral-style).
-  // Tokens like [ARGS] and [CALL_ID] are currently hardcoded to the Mistral profile.
-  // To support other rich formats, these tokens should be passed in from the template
-  // (TextTemplate.toolCall.rich) rather than matched as string literals.
-  if (text.includes('[ARGS]')) {
+  if (text.includes(argsToken)) {
     const normalized = text.replace(/\r\n?/g, '\n')
     const starts: Array<{ start: number, name: string, callId?: string, argsStart: number }> = []
-    const marker = /(^|\n)\s*([^\n\[]+?)\s*(?:\[CALL_ID\](.*?)\s*)?\[ARGS\]/g
+    const marker = new RegExp(`(^|\\n)\\s*([^\\n\\[]+?)\\s*(?:${esc(callIdToken)}(.*?)\\s*)?${esc(argsToken)}`, 'g')
 
     for (const match of normalized.matchAll(marker)) {
       const full = match[0] ?? ''

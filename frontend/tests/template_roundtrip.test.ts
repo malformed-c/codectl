@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { makeFormatPass, joinPass } from '../pipeline'
-import { Profiles, parse, renderToolCalls, turnContent, turnThink, turnToolCalls } from '../template'
+import { Profiles, parse, render, renderToolCalls, turnContent, turnThink, turnToolCalls } from '../template'
 import type { Span } from '../span'
 import type { StoredToolCall } from '../types'
 
@@ -55,5 +55,27 @@ describe('mistral tool call round-trip stability', () => {
     // Compact JSON - no newlines/indentation in model prompt
     expect(rerendered).toBe('bash[ARGS]{"command":"echo hi","timeout":10}')
     expect(rerendered).not.toContain('\n  ')
+  })
+})
+
+describe('qwen xml tool call rendering', () => {
+  test('renders xml function + parameter blocks', () => {
+    const stored: StoredToolCall = { tool: 'bash', command: 'ls -la', timeout: 3 }
+    const rerendered = renderToolCalls([stored], Profiles.qwenXml)
+
+    expect(rerendered).toContain('<tool_call>')
+    expect(rerendered).toContain('<function=bash>')
+    expect(rerendered).toContain('<parameter=command>')
+    expect(rerendered).toContain('ls -la')
+    expect(rerendered).toContain('<parameter=timeout>')
+    expect(rerendered).toContain('3')
+  })
+
+  test('renders tool results with toolTurn wrapper + tool_response body', () => {
+    const prompt = render([
+      { role: 'tool_result', content: 'ok' },
+    ], Profiles.qwenXml)
+
+    expect(prompt).toContain('<|im_start|>tool\n<tool_response>\nok\n</tool_response><|im_end|>\n')
   })
 })

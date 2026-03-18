@@ -303,7 +303,7 @@ if (import.meta.main) {
 
   const kobold = new KoboldAdapter({
     apiServer: Bun.env.BASE_URL!,
-    template: Profiles.mistral,
+    template: Profiles.qwenXml,
     temperature: 0.7,
     numPredict: 200,
   })

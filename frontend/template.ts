@@ -15,6 +15,8 @@ export type FimTemplate = {
 
 export type ToolCallsTemplate = {
   wrap: TemplatePair            // [TOOL_CALLS] ... (outer)
+  type?: 'json' | 'rich' | 'xml'
+  parseMode?: 'wrapped' | 'inline'
 
   // Mistral
   rich?: {
@@ -39,6 +41,7 @@ export type TextTemplate = {
   system?: TemplatePair
   userTurn: TemplatePair
   modelTurn: TemplatePair
+  toolTurn?: TemplatePair
   toolResult?: TemplatePair | ToolResultsTemplate
   toolCall?: TemplatePair | ToolCallsTemplate
   think?: TemplatePair
@@ -86,8 +89,8 @@ export type FimContent = {
  * Tool results are kept in ToolRound (managed by the FSM), not here.
  */
 export type Step =
-  | { kind: 'thought';   text: string }
-  | { kind: 'text';      text: string }
+  | { kind: 'thought'; text: string }
+  | { kind: 'text'; text: string }
   | { kind: 'tool_call'; name: string; callId?: string; thoughtSignature?: string; arguments: Record<string, unknown> }
 
 export type ParsedTurn = {
@@ -119,16 +122,16 @@ export function turnToolCalls(t: ParsedTurn): Array<Step & { kind: 'tool_call' }
 
 /** Build a ParsedTurn from optional flat fields (convenience for tests / adapters). */
 export function makeTurn(opts: {
-  think?:     string
-  content?:   string
+  think?: string
+  content?: string
   toolCalls?: Array<{ name: string; callId?: string; thoughtSignature?: string; arguments: Record<string, unknown> }>
   malformed?: boolean
 }): ParsedTurn {
   const steps: Step[] = []
 
-  if (opts.think)   steps.push({ kind: 'thought', text: opts.think })
+  if (opts.think) steps.push({ kind: 'thought', text: opts.think })
 
-  if (opts.content) steps.push({ kind: 'text',    text: opts.content })
+  if (opts.content) steps.push({ kind: 'text', text: opts.content })
 
   for (const c of opts.toolCalls ?? []) steps.push({ kind: 'tool_call', ...c })
 
@@ -216,6 +219,30 @@ export const Profiles = {
     fim: { prefix: '<|fim_prefix|>', middle: '<|fim_middle|>', suffix: '<|fim_suffix|>' },
   } satisfies TextTemplate,
 
+  // Qwen XML tool-calling template (Qwen3-style)
+  qwenXml: {
+    bos: '',
+    eos: '<|im_end|>',
+
+    system: ['<|im_start|>system\n', '<|im_end|>\n'],
+    userTurn: ['<|im_start|>user\n', '<|im_end|>\n'],
+    modelTurn: ['<|im_start|>assistant\n', '<|im_end|>\n'],
+    toolTurn: ['<|im_start|>tool\n', '<|im_end|>\n'],
+
+    toolResult: ['<tool_response>\n', '\n</tool_response>'],
+    toolCall: {
+      wrap: ['<tool_call>', '</tool_call>'],
+      type: 'xml',
+    },
+
+    think: ['<think>', '</think>'],
+    fim: {
+      prefix: '<|fim_prefix|>',
+      middle: '<|fim_middle|>',
+      suffix: '<|fim_suffix|>',
+    },
+  } satisfies TextTemplate,
+
   // DeepSeek
   deepseek: {
     bos: '<｜begin▁of▁sentence｜>',
@@ -282,6 +309,20 @@ export function resolveWrap(
  */
 export function renderToolCalls(calls: StoredToolCall[], template: TextTemplate): string {
   const tc = template.toolCall
+
+  if (tc && !Array.isArray(tc) && tc.type === 'xml') {
+    return calls.map(({ tool, ...args }) => {
+      const params = Object.entries(args)
+        .filter(([k]) => k !== 'callId')
+        .map(([key, value]) => {
+          const encoded = typeof value === 'string' ? value : JSON.stringify(value)
+
+          return `<parameter=${key}>\n${encoded}\n</parameter>`
+        }).join('\n')
+
+      return `<tool_call>\n<function=${tool}>\n${params}\n</function>\n</tool_call>`
+    }).join('\n')
+  }
 
   if (tc && !Array.isArray(tc) && tc.rich) {
     // Mistral-style rich format
@@ -395,7 +436,15 @@ export function render(messages: Message[], template: TextTemplate): string {
           ? renderStoredToolResults(m.results, template)
           : m.content
 
-        return wrapContent(resolveWrap(template.toolResult, template.userTurn), inner)
+        const turnWrap = template.toolTurn ?? template.userTurn
+
+        // When an explicit toolTurn is configured and toolResult is a plain pair,
+        // treat toolResult as inner content tags and wrap with toolTurn.
+        if (template.toolTurn && template.toolResult && Array.isArray(template.toolResult)) {
+          return wrapContent(turnWrap, wrapContent(template.toolResult, inner))
+        }
+
+        return wrapContent(resolveWrap(template.toolResult, turnWrap), inner)
       })
       .with({ role: 'tool_call' }, (m) => {
         // Re-render structured calls to native format if present
@@ -403,7 +452,17 @@ export function render(messages: Message[], template: TextTemplate): string {
           ? renderToolCalls(m.calls, template)
           : m.content
 
-        return wrapContent(resolveWrap(template.toolCall, template.modelTurn), content)
+        const pair = resolveWrap(template.toolCall, template.modelTurn)
+        const toolCallTemplate = template.toolCall
+        const isXmlWrapped = !!toolCallTemplate
+          && !Array.isArray(toolCallTemplate)
+          && toolCallTemplate.type === 'xml'
+          && pair[0].includes('<tool_call')
+
+        // XML renderer already emits <tool_call>...</tool_call> blocks.
+        if (isXmlWrapped) return content
+
+        return wrapContent(pair, content)
       })
       .exhaustive()
 
@@ -453,7 +512,7 @@ function autofixPair(
 ): { text: string; fixed: boolean } {
   if (!close) return { text, fixed: false }
 
-  const hasOpen  = text.includes(open)
+  const hasOpen = text.includes(open)
   const hasClose = text.includes(close)
 
   if (hasOpen && hasClose) return { text, fixed: false }
@@ -635,19 +694,35 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
 
   // Extract tool calls - parse into structured tool_call steps
   if (template.toolCall) {
+    const isInline = !Array.isArray(template.toolCall) && template.toolCall.parseMode === 'inline'
     const pair = resolveWrap(template.toolCall, template.modelTurn)
+    let rawBlocks: string[] = []
 
-    const { text: fixed, fixed: callFixed } = autofixPair(text, pair)
+    if (isInline) {
+      // Inline mode: parse tool-call syntax from assistant content directly
+      // (e.g. Qwen XML <tool_call> blocks) without requiring outer wrappers.
+      const xmlMatches = [...text.matchAll(/<tool_call>\s*<function=[\s\S]*?<\/function>\s*<\/tool_call>/g)]
+      rawBlocks = xmlMatches.map(m => m[0].trim()).filter(Boolean)
 
-    if (callFixed) malformed = true
-    text = fixed
+      if (rawBlocks.length > 0) {
+        text = text.replace(/<tool_call>\s*<function=[\s\S]*?<\/function>\s*<\/tool_call>/g, '').trim()
+      }
 
-    const rawBlocks = extractAll(text, pair)
+    } else {
+      const { text: fixed, fixed: callFixed } = autofixPair(text, pair)
+
+      if (callFixed) malformed = true
+      text = fixed
+      rawBlocks = extractAll(text, pair)
+    }
 
     if (rawBlocks.length > 0) {
       for (const raw of rawBlocks) {
         try {
-          const calls = parseToolCalls(raw)
+          const rawForParse = (!Array.isArray(template.toolCall) && template.toolCall.type === 'xml' && !isInline)
+            ? `<tool_call>${raw}</tool_call>`
+            : raw
+          const calls = parseToolCalls(rawForParse, template.toolCall)
 
           for (const c of calls) {
             steps.push({
@@ -663,12 +738,15 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
           // Strip [ARGS] marker and attempt to parse the remainder as JSON args.
           const inferredName = raw.trim().match(/^([a-zA-Z_][a-zA-Z0-9_]*)/)?.[1] ?? 'malformed_call'
           let recoveredArgs: Record<string, unknown> = { _raw: raw }
+          const argsToken = !Array.isArray(template.toolCall)
+            ? (template.toolCall?.rich?.args ?? '[ARGS]')
+            : '[ARGS]'
 
           try {
-            const argsIdx = raw.indexOf('[ARGS]')
+            const argsIdx = raw.indexOf(argsToken)
 
             if (argsIdx !== -1) {
-              const argsText = raw.slice(argsIdx + 6).trim()
+              const argsText = raw.slice(argsIdx + argsToken.length).trim()
               const parsed = argsText ? JSON.parse(argsText) : {}
 
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -682,7 +760,8 @@ export function parse(raw: string, template: TextTemplate): ParsedTurn {
           malformed = true
         }
       }
-      text = stripTag(text, pair)
+
+      if (!isInline) text = stripTag(text, pair)
     }
   }
 

@@ -1079,16 +1079,7 @@ export class Orchestrator {
       "  agent - autonomous tool loop; call 'done' when task is complete.",
       'Ejected back to chat after 3 consecutive tool failures.',
       '',
-      '# HOW YOU SHOULD THINK AND ANSWER',
-      '',
-      'First draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.',
-      '',
-      'Your thinking process must follow the template below:',
-      '[THINK]Your thoughts or/and draft, like working through an exercise on scratch paper. You must start reasoning with open tag. Be as casual and as long as you want until you are confident to generate the response to the user.[/THINK]',
-      'Here, provide a self-contained response.',
-      'Tools are your hands - always acknowledge results.',
-      'Use token tool-call syntax: [TOOL_CALLS]...[CALL_ID]...[ARGS]',
-      'You can call multiple tools in one turn.'
+      'If you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>'
     ].join('\n')
   }
 }

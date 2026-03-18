@@ -235,10 +235,19 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
 
         const modelPart = model.map(s => s.text).join('')
         const toolCalls = toolCallSpans.flatMap(s => s.meta?.calls ?? [])
+        const toolPair = resolveWrap(template.toolCall, template.modelTurn)
+        const toolCallTemplate = template.toolCall
+        const isXmlWrapped = !!toolCallTemplate
+          && !Array.isArray(toolCallTemplate)
+          && toolCallTemplate.type === 'xml'
+          && toolPair[0].includes('<tool_call>')
+
+        const toolRendered = toolCalls.length
+          ? renderToolCalls(toolCalls, template)
+          : toolCallSpans.map(s => s.text).join('')
+
         const toolCallPart = toolCallSpans.length > 0
-          ? wrapContent(resolveWrap(template.toolCall, template.modelTurn), toolCalls.length
-            ? renderToolCalls(toolCalls, template)
-            : toolCallSpans.map(s => s.text).join(''))
+          ? (isXmlWrapped ? toolRendered : wrapContent(toolPair, toolRendered))
           : ''
 
         out.push({ ...first, text: wrapContent(template.modelTurn, thinkPart + modelPart + toolCallPart) })
@@ -251,7 +260,13 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
           : group.map(s => s.text).join('')
 
         const pair = resolveWrap(template.toolCall, template.modelTurn)
-        out.push({ ...first, text: wrapContent(pair, inner) })
+        const toolCallTemplate = template.toolCall
+        const isXmlWrapped = !!toolCallTemplate
+          && !Array.isArray(toolCallTemplate)
+          && toolCallTemplate.type === 'xml'
+          && pair[0].includes('<tool_call>')
+
+        out.push({ ...first, text: isXmlWrapped ? inner : wrapContent(pair, inner) })
 
       } else if (family === 'tool_result') {
         // Use meta.results for template-correct rendering (already truncated/skeletonized)
@@ -260,8 +275,15 @@ export function makeFormatPass(template: TextTemplate): RenderPass {
           ? renderStoredToolResults(results, template)
           : group.map(s => s.text).join('')
 
-        const pair = resolveWrap(template.toolResult, template.userTurn)
-        out.push({ ...first, text: wrapContent(pair, inner) })
+        const turnWrap = template.toolTurn ?? template.userTurn
+
+        if (template.toolTurn && template.toolResult && Array.isArray(template.toolResult)) {
+          out.push({ ...first, text: wrapContent(turnWrap, wrapContent(template.toolResult, inner)) })
+
+        } else {
+          const pair = resolveWrap(template.toolResult, turnWrap)
+          out.push({ ...first, text: wrapContent(pair, inner) })
+        }
 
       } else {
         // system / error
